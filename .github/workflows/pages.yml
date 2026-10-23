@@ -37,20 +37,20 @@ jobs:
 
       - name: Export prod (site root)
         run: |
-          mkdir -p site
-          godot --headless --path main --export-release "Web" site/index.html
+          mkdir -p "$GITHUB_WORKSPACE/site"
+          godot --headless --path main --export-release "Web" "$GITHUB_WORKSPACE/site/index.html"
 
       - name: Export sandbox (/development/)
         if: steps.checkout_dev.outcome == 'success'
         run: |
-          mkdir -p site/development
-          godot --headless --path development --export-release "Web" site/development/index.html
+          mkdir -p "$GITHUB_WORKSPACE/site/development"
+          godot --headless --path development --export-release "Web" "$GITHUB_WORKSPACE/site/development/index.html"
 
       - name: Sandbox placeholder when development branch is missing
         if: steps.checkout_dev.outcome != 'success'
         run: |
-          mkdir -p site/development
-          printf '%s\n' '<!doctype html><meta charset=utf-8><title>Sandbox</title><p>Push a <code>development</code> branch to publish the sandbox here.</p>' > site/development/index.html
+          mkdir -p "$GITHUB_WORKSPACE/site/development"
+          printf '%s\n' '<!doctype html><meta charset=utf-8><title>Sandbox</title><p>Push a <code>development</code> branch to publish the sandbox here.</p>' > "$GITHUB_WORKSPACE/site/development/index.html"
 
       - uses: actions/upload-pages-artifact@v3
         with:
