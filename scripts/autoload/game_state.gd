@@ -29,6 +29,8 @@ func on_reach_exit() -> void:
 	reached_exit.emit()
 
 func register_alert() -> void:
+	if game_over:
+		return
 	alerted_puppets = mini(alerted_puppets + 1, PUPPET_COUNT)
 	puppet_alerted.emit(alerted_puppets)
 
