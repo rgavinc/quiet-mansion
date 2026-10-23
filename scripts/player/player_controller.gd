@@ -15,11 +15,6 @@ func _ready() -> void:
 	light.name = "Flashlight"
 	light.set_script(load("res://scripts/player/flashlight.gd"))
 	add_child(light)
-	# Simple cone visual
-	var cone := Polygon2D.new()
-	cone.color = Color(1, 0.95, 0.6, 0.25)
-	cone.polygon = PackedVector2Array([Vector2(0, 0), Vector2(180, -50), Vector2(180, 50)])
-	light.add_child(cone)
 
 func _physics_process(_delta: float) -> void:
 	if GameState.game_over:

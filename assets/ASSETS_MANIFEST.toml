@@ -47,3 +47,9 @@ path = "assets/audio/sfx_puppet_alert.wav"
 slot = "sfx_puppet_alert"
 status = "ai"
 notes = "Puppet alerted"
+
+[[asset]]
+path = "assets/art/ui/light_blob.png"
+slot = "flashlight_blob"
+status = "ai"
+notes = "Soft falloff texture for mouse flashlight"
