@@ -1,0 +1,49 @@
+# Art + audio only. Watermark clears when every status is "human".
+
+[[asset]]
+path = "assets/art/characters/boy_side_idle.png"
+slot = "boy_side_idle"
+status = "ai"
+notes = "64x64 player side idle"
+
+[[asset]]
+path = "assets/art/characters/boy_mid_jump.png"
+slot = "boy_mid_jump"
+status = "ai"
+notes = "64x64 player mid-jump"
+
+[[asset]]
+path = "assets/art/characters/puppet_hand_calm.png"
+slot = "puppet_hand_calm"
+status = "ai"
+notes = "64x64 puppet hand calm"
+
+[[asset]]
+path = "assets/art/characters/puppet_hand_enraged.png"
+slot = "puppet_hand_enraged"
+status = "ai"
+notes = "64x64 puppet hand enraged (mouth/teeth)"
+
+[[asset]]
+path = "assets/art/props/exit_door.png"
+slot = "exit_door"
+status = "ai"
+notes = "Round 1 exit"
+
+[[asset]]
+path = "assets/art/tiles/floor_dark_32.png"
+slot = "floor_dark"
+status = "ai"
+notes = "32x32 mansion floor"
+
+[[asset]]
+path = "assets/audio/sfx_noise_crash.wav"
+slot = "sfx_noise_crash"
+status = "ai"
+notes = "Obstacle break / noise"
+
+[[asset]]
+path = "assets/audio/sfx_puppet_alert.wav"
+slot = "sfx_puppet_alert"
+status = "ai"
+notes = "Puppet alerted"

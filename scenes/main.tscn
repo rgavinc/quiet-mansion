@@ -1,0 +1,31 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/map/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/ui/ai_watermark.gd" id="2_wm"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Player" type="Node2D" parent="World"]
+
+[node name="Exit" type="Node2D" parent="World"]
+
+[node name="Puppets" type="Node2D" parent="World"]
+
+[node name="Obstacles" type="Node2D" parent="World"]
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="AIWatermark" type="CanvasLayer" parent="."]
+layer = 100
+script = ExtResource("2_wm")
+
+[node name="WatermarkLabel" type="Label" parent="AIWatermark"]
+unique_name_in_owner = true
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 280.0
+offset_bottom = 40.0
+text = "AI assets in use"
