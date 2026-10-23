@@ -1,7 +1,7 @@
 name: Deploy Godot Web to Pages
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,22 +14,48 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main (prod)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Checkout development (sandbox)
+        id: checkout_dev
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: development
+          path: development
+
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
           use-dotnet: false
           include-templates: true
-      - name: Export Web
+
+      - name: Export prod (site root)
         run: |
-          mkdir -p build/web
-          godot --headless --path . --export-release "Web" build/web/index.html || {
-            printf '%s\n' '<!doctype html><meta charset=utf-8><title>Game</title><p>Add a Godot Web export preset named <code>Web</code> — until then this stub is live.</p>' > build/web/index.html
-          }
+          mkdir -p site
+          godot --headless --path main --export-release "Web" site/index.html
+
+      - name: Export sandbox (/development/)
+        if: steps.checkout_dev.outcome == 'success'
+        run: |
+          mkdir -p site/development
+          godot --headless --path development --export-release "Web" site/development/index.html
+
+      - name: Sandbox placeholder when development branch is missing
+        if: steps.checkout_dev.outcome != 'success'
+        run: |
+          mkdir -p site/development
+          printf '%s\n' '<!doctype html><meta charset=utf-8><title>Sandbox</title><p>Push a <code>development</code> branch to publish the sandbox here.</p>' > site/development/index.html
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: build/web
+          path: site
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
