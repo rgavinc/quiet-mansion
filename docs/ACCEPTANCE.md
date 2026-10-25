@@ -1,54 +1,96 @@
-# Acceptance — Quiet Mansion round 1
+# Acceptance: Quiet Mansion (release gate)
 
-> **Owner:** QA. Release gate for round 1. Numbers mirror `docs/PRODUCT.md` + `GameState`.
-
-Nothing ships (Pages showcase included) until this bar is green. AI art/audio may ship under watermark; **going live without watermark** requires the manifest gate below.
-
----
-
-## Locked numbers / rules
-
-| Rule | Value |
-|------|------:|
-| Puppets in round 1 | **3** (`GameState.PUPPET_COUNT`) |
-| Win | Reach exit without dying |
-| Lose | Caught by a puppet (`on_caught`) |
-| Move | Keyboard |
-| Flashlight | Mouse-aim cone |
-| Manifest | **art + audio only** (`assets/ASSETS_MANIFEST.toml`) |
+> **Owner:** QA. Work lands on `development` first and is checked on the `/development/` Pages build. Nothing merges to `main`, and nobody asks Gavin to review, until **every** section below passes.
+>
+> "Done" means it is presentable, fun, and challenging. Passing tests alone is not enough.
 
 ---
 
-## Shippable checklist
+## 1. Structure
 
-### Gameplay
-- [ ] Round 1 layout has **exactly 3** puppet-hand monsters
-- [ ] Player moves with keys; flashlight aims with mouse
-- [ ] Reaching the exit wins; being caught loses
-- [ ] Noise can alert puppets (escalation path exists)
-- [ ] After win/lose, further catch/exit/noise no-ops
+| Rule | Bar |
+|------|-----|
+| View | 2D side-scroller with multiple floors connected by stairs (Home Alone SNES style) |
+| Stages | **5**, each harder than the last |
+| Level complete | Reaching the exit completes the level |
+| Enemy types | Up to **5**, each with harder stats than the one before |
+| Health | 3 hits and you're dead, then the Game Over screen |
+| Between levels | A shopkeeper sells random items |
+| Items | **20** to start, from the shop and from chests |
 
-### Provenance / watermark
-- [ ] Every art + audio path used in round 1 is in `assets/ASSETS_MANIFEST.toml`
-- [ ] Boot shows **“AI assets in use”** while any entry is `ai`
-- [ ] Watermark clears only at 100% `human` (fonts/VFX not in manifest)
-- [ ] `assets/replace_me/` labeled stills match slots (`boy_side_idle`, `boy_mid_jump`, `puppet_hand_calm`, `puppet_hand_enraged`, …)
+## 2. Every action has a risk (design gate)
 
-### Repo / tests
-- [ ] PRODUCT + this file are source of truth
-- [ ] Headless suite under `tests/` passes on Godot **4.7.2**
+QA rejects any action that has no downside. Each one must have a cost in the build:
 
----
+| Action | Reward | Risk that must exist |
+|--------|--------|----------------------|
+| Shine the flashlight on an enemy | Selects it and reveals it | After about 1s it startles and chases you |
+| Turn the light off (Space) | Hides you | You can't see hazards, only the last selected enemy stays dimly visible |
+| Touch or break a vase | It may drop gold | A large noise radius that reaches slightly off-screen and pulls every enemy inside it |
+| Knock something onto an enemy | Kills it | A miss startles it or makes noise and can pull more enemies |
+| Open a chest | An item | Noise or a trap risk, tuned per stage |
+| Pick up gold | Money for the shop | Its spot is placed near danger |
+| Hop over an obstacle | Quiet | A mistimed jump touches it and makes noise |
 
-## Automated bar
+## 3. Flashlight and selection
 
-1. `PUPPET_COUNT == 3`  
-2. `on_reach_exit` → game over + `reached_exit`  
-3. `on_caught` → game over + `died`  
-4. Game over blocks second win/lose / alert growth past settle  
-5. `register_alert` caps at 3  
-6. AssetProvenance sees AI on scaffold; `uses_ai_assets()` true  
+- [ ] Aiming at an enemy draws a ring around it and nudges the camera a little toward it
+- [ ] Hovering another enemy moves the selection, so only one is selected at a time
+- [ ] The selection ring stays, and the enemy stays faintly visible, after the light is turned off
+- [ ] Keeping the light on an enemy shows a startle buildup (a meter or visible body tells), then it chases at about 1s (the base value comes from `PlayerStats`)
+- [ ] The light has no effect on enemies that are off-screen
+- [ ] A chasing enemy that is off-screen shows an edge arrow, Smash-style, with a gauge that drains as you get farther away. When the gauge is empty the enemy gives up and walks home
 
-**Run:** `godot --headless --path . -s res://tests/run_tests.gd`
+## 4. Noise and enemies
 
-**Status:** Automated suite landed by QA. Play smoke + Lead review still required before QA signs round 1.
+- [ ] All enemies run their logic off-screen (hearing, chasing, returning home) but don't render there
+- [ ] Each object type has its own noise radius. The default is slightly larger than the screen
+- [ ] Several enemies can chase at once, and making more noise while being chased pulls more of them
+- [ ] An enemy that gives up always returns to its original spot and never gets stuck
+
+## 5. Data and architecture (must be easy to tune)
+
+- [ ] One stats source (`PlayerStats`) holds health, gold, startle time, noise multipliers, and so on. Every system reads from it and nothing hard-codes these numbers
+- [ ] `WorldObject` base class with defaults. Subclasses like vases and chests override only what differs (pickup, loot, radius)
+- [ ] `Item` base class with defaults plus a per-item `apply()`. All 20 items are data files that change stats only through `PlayerStats`
+- [ ] Enemy types 1 to 5 are data-driven, with stats that go up each tier
+
+## 6. Procedural generation (no crashes, no unfair layouts)
+
+Each generated level has the same amount of content for its stage (the same enemies, obstacles, and loot budget), placed randomly but always in a way that makes sense.
+
+Automated seed sweep, which must pass before every merge to `main`:
+
+- [ ] **1,000 seeds per stage (5,000 total)** generate with no error or crash
+- [ ] The exit can always be reached from the spawn point (pathfinding over floors and stairs)
+- [ ] There's a safe spawn: no enemy is inside the startle or hearing radius at the start
+- [ ] No object, enemy, or gold overlaps another or sits inside a wall, and no stair is blocked
+- [ ] Every stage's content counts match its budget exactly
+- [ ] There's at least one quiet route to the exit (the level can be finished without forced noise), so a run can always be beaten
+- [ ] Generation is deterministic: the same seed gives the same layout, so any bug report can be reproduced
+
+## 7. Playthroughs (fun and challenge gate)
+
+- [ ] **Automated bot runs:** a scripted runner plays at least 200 seeded runs per stage, mixing careless and careful play. No soft-locks, a careful bot reaches the exit, and a careless bot dies or gets chased. If careless play wins too easily, the stage is too easy
+- [ ] Each harder stage measurably cuts the careless-bot clear rate
+- [ ] **Manual play pass by QA:** at least 10 full runs on `/development/`, covering all 5 stages, with notes on tension, fairness, and anything dull or cheap. These notes go in `docs/QA_PLAYTEST.md`
+- [ ] No action feels risk-free, and no death feels unavoidable
+
+## 8. Look and feel
+
+- [ ] Characters are clearly animated (idle, walk or run, jump, stairs, hurt, death, and the puppet's calm, startle, and enraged states), aiming for a Dead Cells–style atmosphere
+- [ ] Break, startle, and noise VFX make each risk readable
+- [ ] The health and gold HUD is styled to fit the game, not plain default UI
+- [ ] The AI watermark shows while any art or audio entry in `assets/ASSETS_MANIFEST.toml` is still `ai`
+
+## 9. Sign-off
+
+| Step | Who |
+|------|-----|
+| Code review on `development` | Lead |
+| Seed sweep, bot runs, and headless suite green | QA |
+| Manual play pass recorded in `docs/QA_PLAYTEST.md` | QA |
+| Product pass against PRODUCT | Product Director |
+| Merge `development` into `main` and ask Gavin to review | Only after all of the above |
+
+**Status:** Bar rewritten for the side-scroller expansion. **Not ready for Gavin.**
