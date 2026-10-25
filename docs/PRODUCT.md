@@ -62,3 +62,34 @@ All new art and audio go in `assets/ASSETS_MANIFEST.toml` as `ai` with labeled s
 | **Product** | Owns this spec, answers scope questions, reviews round 1 against it before Gavin's review |
 
 **Order:** Lead lands the skeleton and class stubs first → Backend and Designer work in parallel → FE wires against both → QA gates. One floor of side-scrolling with a vase plus one puppet working end to end comes before the full round 1.
+
+## Run structure, generation, quality bar (Oct 25 addendum)
+
+### Stages and enemies
+- **5 stages** per run. Reaching the exit clears the stage, then the merchant shop, then the next stage.
+- Each stage is harder: more enemies, faster startle, wider patrols, fewer safe paths, and more valuable loot.
+- **Support up to 5 enemy types**, introduced progressively with harder stats (speed, hearing range, startle time, give-up distance, damage). Puppet-hand is type 1. Each type is an `Enemy` subclass that overrides only the stats and behaviors that differ.
+
+### Procedural generation
+- Each stage is generated from a **seed** using a fixed content budget per stage (enemy count and types, objects, gold, chests).
+- Hard constraints, checked after generation; if a check fails, reroll:
+  - The exit is reachable from spawn (path check over floors and stairs).
+  - No enemy spawns within a safe radius of the player spawn.
+  - Every chest and gold pickup is reachable.
+  - No overlapping props or blocked stairs, and nothing spawns inside geometry.
+- The seed is shown on the game-over and pause screens so bugs can be reproduced.
+
+### Risk in every action
+Every player action carries a cost or risk: light can startle, touching objects makes noise, a missed knock-over aggros the enemy, breaking a vase for gold is loud, and chests take time to open. Nothing is free.
+
+### QA quality bar (raised)
+- QA does **not** call anything done or ask Gavin to review until it is presentable, fun, and challenging. A passing test suite is not enough.
+- Required before any review ping:
+  - **Soak test:** at least 1,000 seeded generations per stage headless, with zero crashes and zero constraint failures.
+  - **Bot playthroughs:** scripted runs reach the exit on a sample of seeds, which proves every stage is completable.
+  - **Manual play:** at least 10 full human-style runs on the `/development/` build, with notes on fun, difficulty curve, and moments that felt unfair or boring, filed in `docs/PLAYTEST.md`.
+- Product signs off on fun and difficulty after QA, then Gavin reviews.
+
+### Ownership calls
+- **Foundation code** (`PlayerStats`, `Item`, `WorldObject`, `Enemy` state machine, `NoiseBus`, level generator plus validator): **Back End builds it, Lead reviews it.** Lead does not write a second copy.
+- Branching: all work lands on `development` (Pages `/development/`). It merges to `main` only after QA and Product sign off.
