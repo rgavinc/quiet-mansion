@@ -7,7 +7,8 @@
 | `scripts/autoload/game_state.gd` | Exit win, caught lose, noise bus, 3 puppets |
 | `scripts/player/player_controller.gd` | WASD + knock (Space/RMB) |
 | `scripts/player/flashlight.gd` | Mouse-aim cone |
-| `scripts/enemies/puppet_hand.gd` | Hear noise → enrage → chase / catch |
+| `scripts/enemies/enemy_base.gd` | `Enemy` base: state machine, senses, walk/float movement, stairs, hits |
+| `scripts/enemies/puppet_hand.gd` | Type 1 (`puppet_hand`): an `Enemy` that only sets its type id and art slots |
 | `scripts/world/obstacle.gd` | Break → `make_noise` |
 | `scripts/world/exit_zone.gd` | Reach → win |
 | `scripts/map/main.gd` | Round 1 layout wiring |
@@ -34,5 +35,44 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.
-- `Stair` (`scripts/world/stair.gd`) is an `Area2D` with local `bottom` and `top` points. Up or down while you're on it enters `CLIMB`, you move along the line at `climb_speed`, and you step off at either end. There's no jumping during pickup or climbing.
+- `Stair` (`scripts/world/stair.gd`) is an `Area2D` with local `bottom` and `top` points. Up or down anywhere inside its trigger enters `CLIMB` (see "Stairs" below), you move along the line at `climb_speed`, and you step off at either end. There's no jumping during pickup or climbing.
 - The boy, the puppet and the exit door get their animations only from manifest slots through `AnimLibrary` (`boy_idle/run/jump/pickup/carry/throw/climb_stairs/hurt`, `puppet_calm/startle/chase`, `exit_door`). No BE script loads an art path anymore.
+
+## Enemy state machine (`scripts/enemies/enemy_base.gd`, `class_name Enemy`)
+Every enemy type is an `Enemy` subclass (or a plain `Enemy` with an `EnemyDef`) that overrides only what differs. `puppet_hand.gd` is type 1 and only sets `type_id`, `movement` and its three art slots.
+
+| State | What it does | Leaves when |
+|------|------|------|
+| `CALM` | Idles / patrols `patrol_radius` around `home`. Light on it builds `startle` 0→1 over `PlayerStats` `light_startle_time` (1.0 s); light off resets it to 0. | startle hits 1 → `STARTLED`; a noise in range → `CHASE` |
+| `STARTLED` | Plays `puppet_startle` once and holds the last frame; waits `startle_reaction_time` (0.35 s). | → `CHASE` |
+| `CHASE` | Runs at `chase_speed` to the boy. Memory stays 1 while it sees him or while a noise / light lets it track him without sight (`noise_track_time` 3 s, `light_track_time` 1 s). | loses him → `SEARCH`; lands a hit → `RECOVER`; throw → `STUNNED` |
+| `SEARCH` | Goes to `last_known`; `memory` drains, faster the farther the boy is: rate = `(1 / memory_time) * clamp(distance / give_up_distance, 0.25, 4)`. | sees / hears him → `CHASE`; memory 0 → `RETURN` |
+| `RETURN` | Walks home (counts as calm: light can startle it, a throw kills it). | home → `CALM` |
+| `RECOVER` | After a landed hit: shoves the boy `shove_distance`, backs off at `backoff_speed` for `recover_time` (1.5 s) and can't hit. | → `CHASE` / `SEARCH` |
+| `STUNNED` | A throw hit a non-calm enemy: stands still `stun_time` (1.5 s), holding the startle frame. | → `CHASE` / `SEARCH` |
+
+- Noise (`NoiseBus.noise`, radius × `hearing_mult`) is worse than light: instant `CHASE` for every enemy in range, so several chase at once. A calm enemy hit by a throw or knock dies; any other one is stunned.
+- Hits: only the `Hitbox` `Area2D` (`hit_radius` 18) overlapping the boy, in `CHASE` / `SEARCH`. Bodies stay solid (layers world 1 / player 2 / enemy 4).
+- Off-screen enemies run the same `_physics_process`; nothing depends on rendering.
+- `is_chasing()` = from chase start until give-up or death (CHASE, SEARCH and the RECOVER / STUNNED pauses inside it). `enraged` (legacy, FE polls it) returns the same value.
+
+### Tunables (exports; an `EnemyDef` can set any of them)
+`type_id, movement, walk_speed 45, chase_speed 95, float_speed 45, climb_speed 80, hear_radius, hearing_mult 1, sight_range 560, memory_time 4, give_up_distance 900, noise_track_time 3, light_track_time 1, startle_reaction_time 0.35, recover_time 1.5, backoff_speed 60, stun_time 1.5, patrol_radius 0, shove_distance 48, hit_radius 18, anim_calm / anim_startle / anim_chase`.
+
+### EnemyDef plug-in
+Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copies every field in `DEF_FIELDS` the resource actually has, duck-typed, so an `EnemyDef` class (not written yet) just has to use these names. `movement = &"float"` (stage 4+) makes the enemy ignore gravity and drift straight through slabs and walls; its chase art is `<anim_chase>_float` (`puppet_chase_float`) when the manifest has that slot, else `anim_chase`.
+
+### FE signals (all from BE now)
+- `FESignals.report_startle(enemy, 0..1)` whenever startle changes (1 on `STARTLED`, 0 on chase).
+- `FESignals.report_chase(enemy, true)` on chase start; `false` on give-up (`RETURN`) and in `_exit_tree` (death / level unload), so FE never keeps a freed enemy.
+- `FESignals.report_chase_memory(enemy, memory)` every hunting frame (1 while tracking, draining in `SEARCH`).
+- `GameState.puppet_alerted(count)` fires whenever an enemy starts or stops chasing. `GameState.chasing_count()` / `enemy_count()` / `alerted_puppets` are live counts from group `enemies`. There's no `PUPPET_COUNT` cap anymore.
+
+### Floors and stairs (walk movement, side-scroll)
+- Gravity from `PlayerStats.gravity`; floor changes only by stairs, on and off screen.
+- With Lead's `LevelNav.current` set (PR #13), the enemy asks `nav.next_waypoint(me, target)` and climbs the stair it names. Without it (unit tests, the old map) it scans group `stairs` for the nearest stair toward the target's floor. `LevelNav` is looked up by path, so this compiles before and after #13. `nav_override` is a test hook.
+- `Stair` trigger = an `Area2D` rectangle derived only from `bottom` / `top`: x = the stair's run, y = from one rise above the top down to the lower slab (320 px for a 160 px rise). Any width or angle works (4 tiles now, 15 tiles per PRODUCT.md). Player and enemies use the same `Stair.trigger_rect()`. Entering anywhere in it walks you along the floor to the stair end first (no snap), then climbs.
+- Top-down (`side_scroll` off) enemies move freely in 2D with no gravity.
+
+### Test hooks and tests
+`sight_override`, `lit_override`, `floor_override` (-1 real, 0/1 forced) and `nav_override`. Tests: `tests/test_enemy_fsm.gd` (sync, `tick()`), `tests/scene_enemy.gd` (real physics: hit back-off, walker gravity + stairs, walker without stairs, float through floors). A check that hits a runtime script error counts as failed.
