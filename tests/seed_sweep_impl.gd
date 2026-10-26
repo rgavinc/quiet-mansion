@@ -136,6 +136,34 @@ func _run() -> void:
 	tree.quit(0 if ok else 1)
 
 
+## PRODUCT.md "Stair opening": every stair opening has its gallery rail wall on layer WORLD at
+## LevelValidator.stair_rail_walls (far-edge wall + near-edge guard, 64px tall), the boy and every walker mask WORLD (blocked),
+## floaters don't (drift through).
+static func rail_check(built: Dictionary) -> String:
+	var L: Dictionary = built.layout
+	var level: Node = built.level
+	var body := level.get_node_or_null("Rails") as StaticBody2D
+	if body == null or not (body.collision_layer & PlayerStats.LAYER_WORLD):
+		return "no Rails body on layer WORLD"
+	var rects := []
+	for c in body.get_children():
+		if c is CollisionShape2D and c.shape is RectangleShape2D:
+			rects.append(Rect2(c.position - c.shape.size / 2.0, c.shape.size))
+	for s in L.stairs:
+		var y := LevelValidator.surface_y(int(s.to_floor))
+		for r in LevelValidator.stair_rail_walls(s):
+			if not rects.any(func(q: Rect2): return is_equal_approx(q.position.x, r.x) and is_equal_approx(q.end.x, r.y) \
+					and is_equal_approx(q.end.y, y) and q.size.y >= LevelValidator.RAIL_H_PX):
+				return "stair at x=%d: missing rail wall %s at its opening" % [int(s.bottom.x), r]
+	if not (built.player.collision_mask & PlayerStats.LAYER_WORLD):
+		return "boy doesn't collide with the rail (mask)"
+	for e in built.enemies:
+		var walks: bool = StringName(e.get("movement")) != &"float"
+		if walks != bool(e.collision_mask & PlayerStats.LAYER_WORLD):
+			return "%s enemy %s rail collision (mask %d)" % [e.get("movement"), "ignores" if walks else "blocked by", e.collision_mask]
+	return ""
+
+
 ## QA: enemies in the booted scene are exactly the stage table's count, every one a real
 ## EnemyDef-driven `Enemy` (type and movement from the table), no stand-ins or leftovers.
 static func enemy_check(main: Node, L: Dictionary, stage: int) -> String:
@@ -171,6 +199,8 @@ func _boot(s: int, stage: int, frames: int) -> String:
 		var L: Dictionary = built.layout
 		var b: Rect2 = built.bounds
 		err = enemy_check(main, L, stage)
+		if err.is_empty():
+			err = rail_check(built)
 		var dir := "move_right" if L.exit.x > L.start.x else "move_left"
 		for f in (frames if err.is_empty() else 0):
 			if f == frames / 4:

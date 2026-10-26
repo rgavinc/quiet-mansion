@@ -24,7 +24,7 @@ func _run() -> void:
 			all_fail.append(f)
 			printerr("FAIL: ", f)
 	# Scene suites: real physics frames (await).
-	for path in ["res://tests/scene_catch.gd", "res://tests/scene_enemy.gd"]:
+	for path in ["res://tests/scene_catch.gd", "res://tests/scene_enemy.gd", "res://tests/scene_rail.gd"]:
 		var ss: RefCounted = load(path).new()
 		var r: Dictionary = await ss.run_async(self)
 		total_passed += int(r["passed"])

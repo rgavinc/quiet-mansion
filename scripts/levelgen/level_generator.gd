@@ -619,6 +619,22 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 			x0 = maxf(x0, h.y)
 		if x0 < right:
 			placeholder.append(_box(geo, Rect2(x0, y, right - x0, TILE), C_SLAB))
+	# gallery rail wall at the far edge of every stair opening (PRODUCT.md, QA-revised): world
+	# collision, so the boy and walkers can't walk or jump into the opening; floaters don't mask
+	# WORLD and drift through; climbers pass 96px under its foot. Plus a near-edge guard inside the
+	# opening 16px back from the top landing (LevelValidator.stair_rail_near).
+	var rails_body := StaticBody2D.new()
+	rails_body.name = "Rails"
+	rails_body.collision_layer = PlayerStats.LAYER_WORLD
+	rails_body.collision_mask = 0
+	level.add_child(rails_body)
+	var rails := []
+	for s in L.stairs:
+		var ty := float(LevelValidator.surface_y(int(s.to_floor)))
+		for r in LevelValidator.stair_rail_walls(s):
+			var rect := Rect2(r.x, ty - LevelValidator.RAIL_H_PX, r.y - r.x, LevelValidator.RAIL_H_PX)
+			placeholder.append(_box(rails_body, rect, C_STAIR))
+			rails.append(rect)
 	for wl in L.walls:
 		var surf := float(LevelValidator.surface_y(wl.floor))
 		var top := surf - (FLOOR_TILES - 1) * TILE
@@ -729,7 +745,7 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	level.add_to_group("level")
 	level.tree_exiting.connect(func(): if LevelNav.current == nav: LevelNav.current = null)
 	return {level = level, player = player, exit = ex, enemies = enemies, stairs = stairs,
-			bounds = LevelValidator.level_bounds(L), nav = nav, layout = L}
+			rails = rails, bounds = LevelValidator.level_bounds(L), nav = nav, layout = L}
 
 
 ## Give auto-named ("@Class@123") children deterministic names so a rebuild of the same seed

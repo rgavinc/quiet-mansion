@@ -29,6 +29,13 @@ const STAIR_PIECES := {
 	landing_top = [18, 2, 3, 3],
 	stair_rail_cap = [15, 3, 3, 2],
 }
+# gallery rail over the upper-slab opening (PRODUCT.md "Stair opening"): Designer PR #33 adds
+# `stair_gallery_rail` = [9, 2, 6, 3] (tiles x+9..x+14, band rows 6-8; `stair_rail_cap` carries it
+# over x+15..x+17). Read from ASSETS_MANIFEST.toml; without it, `stair_rail_cap` is repeated over
+# x+9..x+14 as a stand-in.
+const GALLERY_RAIL := "stair_gallery_rail"
+const GALLERY_RAIL_FALLBACK := "stair_rail_cap"
+const MANIFEST := "res://assets/ASSETS_MANIFEST.toml"
 const SLAB_ATLAS_ROW := 5
 const STAIR_WIDTH := 21
 const BAND_ROWS := 9                     # rows 0..8 above the slab
@@ -89,6 +96,23 @@ static func paint(level: Node2D, L: Dictionary) -> bool:
 					var ac := Vector2i(int(pc[0]) + i, int(pc[1]) + j)
 					var col := x + ac.x if rising_right else x + STAIR_WIDTH - 1 - ac.x
 					_put(src, stairs, Vector2i(col, ty + ac.y - SLAB_ATLAS_ROW), ac.y * COLS + ac.x, not rising_right)
+		# gallery rail across the opening (x+9..x+14 + the rail cap's x+15..x+17, mirrored rising
+		# left); its collision is the generator's Rails body
+		var rail := rail_piece()
+		var pc: Array = rail.piece
+		var cells := []   # [atlas cell, stair column]
+		if rail.name == GALLERY_RAIL:
+			for i in int(pc[2]):
+				for j in int(pc[3]):
+					cells.append([Vector2i(int(pc[0]) + i, int(pc[1]) + j), int(pc[0]) + i])
+		else:
+			for c in range(9, 15):
+				for j in int(pc[3]):
+					cells.append([Vector2i(int(pc[0]) + (c - 9) % int(pc[2]), int(pc[1]) + j), c])
+		for cell in cells:
+			var ac: Vector2i = cell[0]
+			var col: int = x + int(cell[1]) if rising_right else x + STAIR_WIDTH - 1 - int(cell[1])
+			_put(src, stairs, Vector2i(col, ty + ac.y - SLAB_ATLAS_ROW), ac.y * COLS + ac.x, not rising_right)
 		# slab ends where the cutout begins (x+8 rising right, x+12 rising left)
 		if rising_right:
 			_put(src, front, Vector2i(x + 8, ty), SLAB_END_RIGHT)
@@ -111,6 +135,26 @@ static func paint(level: Node2D, L: Dictionary) -> bool:
 
 
 ## Tile row of floor f's slab (its top edge is the floor surface).
+## {name, piece [col,row,w,h]}: Designer's `stair_gallery_rail` from the manifest's tiles_stage1
+## entry when present, else the `stair_rail_cap` fallback.
+static func rail_piece() -> Dictionary:
+	var f := FileAccess.open(MANIFEST, FileAccess.READ)
+	if f != null:
+		var in_slot := false
+		var rx := RegEx.create_from_string("^\\s*%s\\s*=\\s*\\[\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)" % GALLERY_RAIL)
+		while not f.eof_reached():
+			var line := f.get_line()
+			if line.begins_with("[[asset]]"):
+				in_slot = false
+			elif line.strip_edges() == 'slot = "%s"' % SLOT:
+				in_slot = true
+			elif in_slot:
+				var m := rx.search(line)
+				if m:
+					return {name = GALLERY_RAIL, piece = [int(m.strings[1]), int(m.strings[2]), int(m.strings[3]), int(m.strings[4])]}
+	return {name = GALLERY_RAIL_FALLBACK, piece = STAIR_PIECES[GALLERY_RAIL_FALLBACK]}
+
+
 static func _row(f: int) -> int:
 	return int(LevelValidator.surface_y(f)) / T
 

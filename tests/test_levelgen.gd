@@ -30,6 +30,7 @@ func run_all() -> Dictionary:
 		["rejects_layout_off_stage_table", test_reject_off_table],
 		["rejects_loot_on_stair_landings", test_reject_loot_on_landing],
 		["enemies_are_enemydefs_at_table_count", test_enemy_defs],
+		["stair_openings_have_gallery_rails", test_gallery_rails],
 		["fallbacks_match_stage_table_and_are_only_last_resort", test_fallback_table],
 		["rejects_enemy_near_start", test_reject_enemy_near],
 		["rejects_enemy_within_a_screen_any_floor", test_reject_enemy_other_floor],
@@ -687,6 +688,56 @@ func test_enemy_defs() -> String:
 	var d := StageTable.enemy_def("t5")
 	if d.movement != &"float" or d.min_stage != 5 or not ResourceLoader.exists(d.script_path):
 		return "t5 EnemyDef wrong"
+	return ""
+
+
+## PRODUCT.md "Stair opening" (QA-revised): every opening (both directions) has a world-collision
+## wall at its far edge (px 144 rising right / 192 rising left from the stair's left edge, on the
+## slab), >= 64px tall; the validator checks its placement; built rails match on every stage; the rail is painted from the atlas (stair_gallery_rail or the
+## stair_rail_cap fallback).
+func test_gallery_rails() -> String:
+	var check: Callable = load("res://tests/seed_sweep_impl.gd").rail_check
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var L := LevelGenerator.generate(3, st)
+		for s in L.stairs:
+			var h := LevelValidator.stair_hole(s)
+			var r := LevelValidator.stair_rail(s)
+			var x0 := LevelValidator.stair_x(s) * 16.0
+			var want := Vector2(x0 + 138.0, x0 + 144.0) if s.top.x > s.bottom.x else Vector2(x0 + 192.0, x0 + 198.0)
+			if r != want:
+				return "stage %d stair x=%d: rail wall %s != far-edge span %s" % [st, int(s.bottom.x), r, want]
+			if r.y > h.x + 0.01 and r.x < h.y - 0.01:
+				return "rail wall over the opening"
+			var n := LevelValidator.stair_rail_near(s)
+			var want_n := Vector2(x0 + 266.0, x0 + 272.0) if s.top.x > s.bottom.x else Vector2(x0 + 64.0, x0 + 70.0)
+			if n != want_n:
+				return "stage %d stair x=%d: near guard %s != %s" % [st, int(s.bottom.x), n, want_n]
+	if LevelValidator.RAIL_H_PX < 64.0:
+		return "rail collider below 64px (boy jumps ~52px)"
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var L := LevelGenerator.generate(3, st)
+		var w := Node2D.new()
+		root.add_child(w)
+		var b := LevelGenerator.build(L, w)
+		var err: String = check.call(b)
+		if err.is_empty() and (b.rails as Array).size() != 2 * L.stairs.size():
+			err = "%d rail walls for %d stairs (want 2 each)" % [(b.rails as Array).size(), L.stairs.size()]
+		if err.is_empty() and st == 1:
+			var stairs_layer := b.level.get_node_or_null("TilesStairs") as TileMapLayer
+			if stairs_layer != null:
+				var s0: Dictionary = L.stairs[0]
+				var hole := LevelValidator.stair_hole(s0)
+				var row := int(LevelValidator.surface_y(int(s0.to_floor)) / 16.0) - 1
+				for c in range(int(hole.x / 16.0), int(hole.y / 16.0)):
+					if stairs_layer.get_cell_source_id(Vector2i(c, row)) < 0:
+						err = "rail not painted at tile %d" % c
+						break
+		w.free()
+		if not err.is_empty():
+			return "stage %d: %s" % [st, err]
+	var rp := LevelSkin.rail_piece()
+	if not (rp.name in [LevelSkin.GALLERY_RAIL, LevelSkin.GALLERY_RAIL_FALLBACK]) or (rp.piece as Array).size() != 4:
+		return "rail atlas piece %s" % rp
 	return ""
 
 

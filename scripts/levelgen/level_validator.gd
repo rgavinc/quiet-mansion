@@ -44,6 +44,10 @@ const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
 const STAIR_LANDING_PX := 48.0      # 3-tile flat landing beyond each end of the diagonal
 const STAIR_HOLE_PX := 144.0        # upper slab cut open over 9 tiles (x+9..x+17 rising right)
+const RAIL_H_PX := 64.0             # gallery rail collider height above the upper surface: visible handrail is 28px
+                                    # (finial 40px), invisible extension to 64px > the boy's ~52px jump apex
+const NEAR_GUARD_PX := 16.0         # near-edge guard set-back from the top landing edge (> 14px radius)
+const RAIL_W_PX := 6.0              # rail wall thickness, on the slab at the opening's far edge
 const STAIR_FOOTPRINT_PX := STAIR_RUN_PX + 2.0 * STAIR_LANDING_PX   # 336px = 21 tiles
 const SCREEN := Vector2(1280, 720)  # project viewport; the camera is zoom 1
 const MIN_ENEMY_DIST := 1280.0      # one screen, any floor
@@ -141,6 +145,17 @@ static func validate(layout: Variant) -> PackedStringArray:
 		if _span_hits_solid(L, ff, sp.x, sp.y, false) or _span_hits_solid(L, tf, sp.x, sp.y, false):
 			errs.append("stair %d->%d at x=%d (footprint incl. landings) is blocked by a wall, doorway or furniture" % [ff, tf, int(b.x)])
 		stairs_seen.append(s)
+		# gallery rail wall: at the opening's far edge, on solid slab, inside the stair footprint
+		var rw := stair_rail(s)
+		var ho := stair_hole(s)
+		var far_edge: float = ho.x if t.x > b.x else ho.y   # where the upper floor drops off
+		var touches := is_equal_approx(rw.y, far_edge) if t.x > b.x else is_equal_approx(rw.x, far_edge)
+		if not touches or (rw.y > ho.x + 0.01 and rw.x < ho.y - 0.01) or rw.x < sp.x or rw.y > sp.y:
+			errs.append("stair %d->%d at x=%d: gallery rail wall %s not on the slab at the opening's far edge" % [ff, tf, int(b.x), rw])
+		var rn := stair_rail_near(s)
+		var near_edge: float = ho.y if t.x > b.x else ho.x
+		if rn.x < ho.x or rn.y > ho.y or minf(absf(rn.x - near_edge), absf(rn.y - near_edge)) < NEAR_GUARD_PX - 0.01:
+			errs.append("stair %d->%d at x=%d: near-edge guard %s not inside the opening %dpx back from the top landing" % [ff, tf, int(b.x), rn, int(NEAR_GUARD_PX)])
 		# upper slab cutout (x+9..x+17): nothing may stand over the hole
 		var hole := stair_hole(s)
 		for o in occupants(L):
@@ -455,6 +470,38 @@ static func stair_hole(s: Dictionary) -> Vector2:
 	var d := signf(s.top.x - s.bottom.x)
 	var tx: float = s.top.x
 	return Vector2(minf(tx, tx - d * STAIR_HOLE_PX), maxf(tx, tx - d * STAIR_HOLE_PX))
+
+
+## Gallery rail collider [a, b] px on to_floor (PRODUCT.md "Stair opening", QA-revised): a thin
+## vertical wall at the FAR edge of the opening, where the upper floor drops off, standing on the
+## solid slab: rising right just left of px 144 from the stair's leftmost tile edge (left edge of
+## x+9), rising left just right of px 192 (mirrored). From the upper surface up RAIL_H_PX (64px,
+## above the boy's ~52px jump). Layer WORLD: blocks the boy and walkers; floaters don't mask WORLD.
+## A climber at that x is ~64px above the lower floor (96px under the wall's foot), so climbing
+## never touches it. The visible `stair_gallery_rail` still spans the whole opening.
+static func stair_rail(s: Dictionary) -> Vector2:
+	var x0 := stair_x(s) * TILE
+	if s.top.x > s.bottom.x:
+		return Vector2(x0 + 144.0 - RAIL_W_PX, x0 + 144.0)
+	return Vector2(x0 + 192.0, x0 + 192.0 + RAIL_W_PX)
+
+
+## Near-edge guard [a, b] px on to_floor: the same 64px wall inside the opening, NEAR_GUARD_PX back
+## from the stair-top landing edge, so a body walking off the top landing toward the opening is
+## stopped on the slab corner instead of dropping a floor. NEAR_GUARD_PX (16) > the widest body
+## radius (14), so a body standing on the stair's top point never touches it; climbers pass it
+## kinematically (they never collide while climbing). Not in the QA spec (far edge only); added
+## because scene_rail proved the near edge was open.
+static func stair_rail_near(s: Dictionary) -> Vector2:
+	var h := stair_hole(s)
+	if s.top.x > s.bottom.x:
+		return Vector2(h.y - NEAR_GUARD_PX - RAIL_W_PX, h.y - NEAR_GUARD_PX)
+	return Vector2(h.x + NEAR_GUARD_PX, h.x + NEAR_GUARD_PX + RAIL_W_PX)
+
+
+## Every rail collider x span over a stair opening (far-edge wall, near-edge guard).
+static func stair_rail_walls(s: Dictionary) -> Array[Vector2]:
+	return [stair_rail(s), stair_rail_near(s)]
 
 
 ## The two landings [{floor, a, b}]: bottom one beyond `bottom` on from_floor, top one beyond `top` on to_floor.
