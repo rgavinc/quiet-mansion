@@ -136,8 +136,8 @@ frame_size = [64, 64]
 frames = 8
 fps = 10
 loop = true
-pivot = [32, 60]
-notes = "64x64 climbing stairs that rise to the right (step 6px run / 4px rise, ~34 deg). Pivot sits on the stair slope under the hip (y=60), not the frame bottom; mirror for descending-left"
+pivot = [32, 62]
+notes = "64x64 climbing stairs that rise to the right (40 steps of 6px run / 4px rise, ~34 deg, matching the 15-tile tiles_stage1 stair). Pivot [32, 62] sits on the Stair.bottom->top line (it runs through the tread centres), so the planted foot lands on the treads; mirror for stairs rising left"
 
 [[asset]]
 path = "assets/art/characters/boy_hurt.png"
@@ -305,6 +305,17 @@ pivot = [160, 90]
 notes = "320x180 still: the boy caught by puppet hands, dropped flashlight. Right half kept dark for GAME OVER text/buttons"
 
 [[asset]]
+path = "assets/art/ui/win_screen_art.png"
+slot = "win_screen_art"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [160, 90]
+notes = "320x180 still: the boy escapes out the mansion front door into dawn light with a sack of gold, puppets recoil in the shadows behind. Same layout as game_over_art: right half kept calm and dark for the seed + gold text and the New run button"
+
+[[asset]]
 path = "assets/art/ui/icons/item_icon_extra_heart.png"
 slot = "item_icon_extra_heart"
 status = "ai"
@@ -366,11 +377,18 @@ path = "assets/art/tiles/tiles_stage1.png"
 slot = "tiles_stage1"
 status = "ai"
 tile_size = [16, 16]
-columns = 8
-rows = 13
-tile_names = ["floor_top", "floor_top_alt", "floor_fill", "floor_fill_alt", "ceiling_trim", "ceiling_trim_hook", "slab_end_left", "slab_end_right", "wallpaper_damask", "wallpaper_stripe", "wallpaper_torn", "wallpaper_stained", "wallpaper_teal", "wainscot_rail", "wainscot_panel", "wainscot_skirting", "wall_column", "wall_column_top", "door_lintel", "door_post_left", "door_post_right", "door_head_side", "door_head_mid", "empty", "stair_r0_c0", "stair_r0_c1", "stair_r0_c2", "stair_r0_c3", "empty", "empty", "empty", "empty", "stair_r1_c0", "stair_r1_c1", "stair_r1_c2", "stair_r1_c3", "empty", "empty", "empty", "empty", "stair_r2_c0", "stair_r2_c1", "stair_r2_c2", "stair_r2_c3", "empty", "empty", "empty", "empty", "stair_r3_c0", "stair_r3_c1", "stair_r3_c2", "stair_r3_c3", "empty", "empty", "empty", "empty", "stair_r4_c0", "stair_r4_c1", "stair_r4_c2", "stair_r4_c3", "empty", "empty", "empty", "empty", "stair_r5_c0", "stair_r5_c1", "stair_r5_c2", "stair_r5_c3", "empty", "empty", "empty", "empty", "stair_r6_c0", "stair_r6_c1", "stair_r6_c2", "stair_r6_c3", "empty", "empty", "empty", "empty", "stair_r7_c0", "stair_r7_c1", "stair_r7_c2", "stair_r7_c3", "empty", "empty", "empty", "empty", "stair_r8_c0", "stair_r8_c1", "stair_r8_c2", "stair_r8_c3", "empty", "empty", "empty", "empty", "stair_r9_c0", "stair_r9_c1", "stair_r9_c2", "stair_r9_c3", "empty", "empty", "empty", "empty"]
-stair_stamp = [0, 3, 4, 10]
-notes = "Stage 1 tileset atlas, 16px tiles, 8 columns x 13 rows, index = row*8 + col (see tile_names and docs/DESIGN.md). Rows 0-2 single tiles; cols 0-3 of rows 3-12 are one 4x10-tile stair stamp (stair_stamp = [col, row, w, h]) rising one floor (160px) to the right: stamp top = upper floor surface/slab row, stamp bottom = lower floor surface. Flip_h for stairs rising left"
+columns = 21
+rows = 15
+tile_names = ["floor_top", "floor_top_alt", "floor_fill", "floor_fill_alt", "ceiling_trim", "ceiling_trim_hook", "slab_end_left", "slab_end_right", "wallpaper_damask", "wallpaper_stripe", "wallpaper_torn", "wallpaper_stained", "wallpaper_teal", "wainscot_rail", "wainscot_panel", "wainscot_skirting", "wall_column", "wall_column_top", "door_lintel", "door_post_left", "door_post_right", "door_head_side", "door_head_mid", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "landing_top_r0_c0", "landing_top_r0_c1", "landing_top_r0_c2", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "rail_cap_r0_c0", "rail_cap_r0_c1", "rail_cap_r0_c2", "landing_top_r1_c0", "landing_top_r1_c1", "landing_top_r1_c2", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty", "rail_cap_r1_c0", "rail_cap_r1_c1", "rail_cap_r1_c2", "landing_top_r2_c0", "landing_top_r2_c1", "landing_top_r2_c2", "empty", "empty", "empty", "stair_r0_c0", "stair_r0_c1", "stair_r0_c2", "stair_r0_c3", "stair_r0_c4", "stair_r0_c5", "stair_r0_c6", "stair_r0_c7", "stair_r0_c8", "stair_r0_c9", "stair_r0_c10", "stair_r0_c11", "stair_r0_c12", "stair_r0_c13", "stair_r0_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r1_c0", "stair_r1_c1", "stair_r1_c2", "stair_r1_c3", "stair_r1_c4", "stair_r1_c5", "stair_r1_c6", "stair_r1_c7", "stair_r1_c8", "stair_r1_c9", "stair_r1_c10", "stair_r1_c11", "stair_r1_c12", "stair_r1_c13", "stair_r1_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r2_c0", "stair_r2_c1", "stair_r2_c2", "stair_r2_c3", "stair_r2_c4", "stair_r2_c5", "stair_r2_c6", "stair_r2_c7", "stair_r2_c8", "stair_r2_c9", "stair_r2_c10", "stair_r2_c11", "stair_r2_c12", "stair_r2_c13", "stair_r2_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r3_c0", "stair_r3_c1", "stair_r3_c2", "stair_r3_c3", "stair_r3_c4", "stair_r3_c5", "stair_r3_c6", "stair_r3_c7", "stair_r3_c8", "stair_r3_c9", "stair_r3_c10", "stair_r3_c11", "stair_r3_c12", "stair_r3_c13", "stair_r3_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r4_c0", "stair_r4_c1", "stair_r4_c2", "stair_r4_c3", "stair_r4_c4", "stair_r4_c5", "stair_r4_c6", "stair_r4_c7", "stair_r4_c8", "stair_r4_c9", "stair_r4_c10", "stair_r4_c11", "stair_r4_c12", "stair_r4_c13", "stair_r4_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r5_c0", "stair_r5_c1", "stair_r5_c2", "stair_r5_c3", "stair_r5_c4", "stair_r5_c5", "stair_r5_c6", "stair_r5_c7", "stair_r5_c8", "stair_r5_c9", "stair_r5_c10", "stair_r5_c11", "stair_r5_c12", "stair_r5_c13", "stair_r5_c14", "empty", "empty", "empty", "empty", "empty", "empty", "stair_r6_c0", "stair_r6_c1", "stair_r6_c2", "stair_r6_c3", "stair_r6_c4", "stair_r6_c5", "stair_r6_c6", "stair_r6_c7", "stair_r6_c8", "stair_r6_c9", "stair_r6_c10", "stair_r6_c11", "stair_r6_c12", "stair_r6_c13", "stair_r6_c14", "empty", "empty", "empty", "landing_bottom_r0_c0", "landing_bottom_r0_c1", "landing_bottom_r0_c2", "stair_r7_c0", "stair_r7_c1", "stair_r7_c2", "stair_r7_c3", "stair_r7_c4", "stair_r7_c5", "stair_r7_c6", "stair_r7_c7", "stair_r7_c8", "stair_r7_c9", "stair_r7_c10", "stair_r7_c11", "stair_r7_c12", "stair_r7_c13", "stair_r7_c14", "empty", "empty", "empty", "landing_bottom_r1_c0", "landing_bottom_r1_c1", "landing_bottom_r1_c2", "stair_r8_c0", "stair_r8_c1", "stair_r8_c2", "stair_r8_c3", "stair_r8_c4", "stair_r8_c5", "stair_r8_c6", "stair_r8_c7", "stair_r8_c8", "stair_r8_c9", "stair_r8_c10", "stair_r8_c11", "stair_r8_c12", "stair_r8_c13", "stair_r8_c14", "empty", "empty", "empty", "landing_bottom_r2_c0", "landing_bottom_r2_c1", "landing_bottom_r2_c2", "stair_r9_c0", "stair_r9_c1", "stair_r9_c2", "stair_r9_c3", "stair_r9_c4", "stair_r9_c5", "stair_r9_c6", "stair_r9_c7", "stair_r9_c8", "stair_r9_c9", "stair_r9_c10", "stair_r9_c11", "stair_r9_c12", "stair_r9_c13", "stair_r9_c14", "empty", "empty", "empty"]
+stair_block = [0, 2, 21, 13]
+stair_stamp = [3, 5, 15, 10]
+landing_bottom = [0, 12, 3, 3]
+landing_top = [18, 2, 3, 3]
+stair_rail_cap = [15, 3, 3, 2]
+stair_width_tiles = 21
+stair_diagonal_tiles = 15
+stair_landing_tiles = 3
+notes = "Stage 1 tileset atlas, 16px tiles, 21 columns x 15 rows, index = row*21 + col (see tile_names and docs/DESIGN.md). Rows 0-1: single tiles 0-23. Rows 2-14: the stair block (stair_block = [col, row, w, h]) drawn in assembly order for a stair rising one floor (160px) to the right; pieces are [col, row, w, h]: landing_bottom 3x3 (flat, ends at the lower floor surface), stair_stamp 15x10 diagonal (240px run, 40 steps of 6px/4px, ~34 deg, matches boy_climb_stairs), stair_rail_cap 3x2 (banister above the stamp top-right), landing_top 3x3 (flat, ends at the upper floor surface). Full stair = 21 tiles (336px). Block row 3 (atlas row 5) is the upper slab row; Stair.bottom = (stamp left edge, lower surface), Stair.top = (stamp right edge, upper surface). Flip_h every tile and mirror columns for stairs rising left"
 
 [[asset]]
 path = "assets/art/props/exit_door_stage1.png"
