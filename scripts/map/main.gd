@@ -1,5 +1,9 @@
 extends Node2D
 ## Round 1 mansion layout — Backend owns puppets/noise; Front End owns flashlight/HUD polish.
+## HUD = scenes/ui/hud.tscn (hearts/gold/inventory/arrows, wired via FESignals) and
+## World/WorldOverlay = scenes/ui/world_overlay.tscn (ring/startle/pickup/throw line).
+
+const HINT := "Space jump · RMB flashlight on/off · hold LMB pick up · tap LMB throw/knock · scroll items"
 
 var _status: Label
 
@@ -11,14 +15,14 @@ func _ready() -> void:
 	_spawn_puppets()
 	_spawn_obstacles()
 	_build_hud()
-	GameState.reached_exit.connect(func(): _status.text = "YOU ESCAPED")
-	GameState.died.connect(func(): _status.text = "CAUGHT — you die")
-	GameState.noise_made.connect(func(_l, _at): if _status and not GameState.game_over: _status.text = "Noise! Nearby puppets may wake…")
-	GameState.puppet_alerted.connect(func(n): if _status and not GameState.game_over: _status.text = "Alerted puppets: %d / 3" % n)
+	GameState.reached_exit.connect(func(): _status.text = HINT + "\n" + "YOU ESCAPED")
+	GameState.died.connect(func(): _status.text = HINT + "\n" + "CAUGHT — you die")
+	GameState.noise_made.connect(func(_l, _at): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Noise! Nearby puppets may wake…")
+	GameState.puppet_alerted.connect(func(n): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Alerted puppets: %d / 3" % n)
 
 func _build_floor_hint() -> void:
 	# Tiled dark floor + modulate so the mouse flashlight reads
-	var tex: Texture2D = load("res://assets/art/tiles/floor_dark_32.png")
+	var tex: Texture2D = UiArt.texture("floor_dark")   # manifest slot, never a file path
 	if tex:
 		var floor := Sprite2D.new()
 		floor.name = "Floor"
@@ -99,17 +103,13 @@ func _spawn_obstacles() -> void:
 		ob.position = s
 
 func _build_hud() -> void:
+	# One themed hint/status line under the hearts; everything else is hud.tscn.
 	_status = Label.new()
-	_status.position = Vector2(12, 48)
-	_status.add_theme_font_size_override("font_size", 16)
-	_status.text = "WASD move · mouse aims light · Space/RMB knock nearby props (noisy!)"
+	_status.name = "Hint"
+	_status.position = Vector2(16, 64)
+	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if ResourceLoader.exists("res://assets/ui/hud_theme.tres"):
+		_status.theme = load("res://assets/ui/hud_theme.tres")
+	_status.add_theme_font_size_override("font_size", 14)
+	_status.text = HINT
 	$UI.add_child(_status)
-	var alerts := Label.new()
-	alerts.name = "AlertHud"
-	alerts.position = Vector2(12, 76)
-	alerts.add_theme_font_size_override("font_size", 18)
-	alerts.text = "Alerts 0 / %d" % GameState.PUPPET_COUNT
-	$UI.add_child(alerts)
-	GameState.puppet_alerted.connect(func(n): alerts.text = "Alerts %d / %d" % [n, GameState.PUPPET_COUNT])
-	if AssetProvenance.uses_ai_assets():
-		_status.text = "AI assets in use — WASD · mouse light · Space/RMB knock (noisy!)"

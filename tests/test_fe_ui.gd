@@ -25,7 +25,10 @@ func run_all() -> Dictionary:
 		["pickup_gauge_waits_hold_threshold", test_pickup_threshold],
 		["pickup_tap_never_flashes_gauge", test_pickup_tap],
 		["flashlight_is_toggle_ring_persists", test_flashlight_toggle],
-		["flashlight_mirrors_be_player_light", test_flashlight_sync],
+		["startle_meter_hides_when_light_off", test_startle_meter_light],
+		["main_scene_has_new_hud_overlay_watermark", test_main_scene],
+		["ui_art_resolves_manifest_slots", test_ui_art_slots],
+		["fe_scripts_no_hardcoded_art_paths", test_no_art_paths],
 		["hearts_gold_wired_to_player_stats", test_player_stats_wiring],
 	]
 	var passed := 0
@@ -340,25 +343,6 @@ func test_flashlight_toggle() -> String:
 	return err
 
 
-func test_flashlight_sync() -> String:
-	var b := _bus()
-	var p := Node2D.new()
-	var light := Node2D.new(); light.name = "Flashlight"
-	p.add_child(light)
-	_root().add_child(p)
-	var err := ""
-	light.visible = false          # BE player_controller toggled it off
-	b.sync_flashlight_from(p)
-	if b.flashlight_on:
-		err = "FESignals should mirror the BE light being off"
-	light.visible = true
-	b.sync_flashlight_from(p)
-	if err.is_empty() and not b.flashlight_on:
-		err = "FESignals should mirror the BE light back on"
-	_cleanup([p, b])
-	return err
-
-
 func test_player_stats_wiring() -> String:
 	var ps: Node = load("res://scripts/autoload/player_stats.gd").new()
 	_root().add_child(ps)
@@ -378,3 +362,70 @@ func test_player_stats_wiring() -> String:
 		err = "startle_time should come from PlayerStats"
 	_cleanup([hud, b, ps])
 	return err
+
+
+func test_startle_meter_light() -> String:
+	var b := _bus()
+	var e := Node2D.new(); _root().add_child(e)
+	var m: Node = load("res://scripts/ui/startle_meter.gd").new()
+	m.set("bus", b)
+	m.set("target", e)
+	_root().add_child(m)
+	b.startle_progress.connect(func(en, p): if en == e: m.set_progress(p))
+	b.report_lit(e, true)
+	b._process(0.4)
+	m._process(0.0)
+	var err := ""
+	if not m.visible or m.progress <= 0.0:
+		err = "meter should show while lit with the light on"
+	b.set_flashlight(false)   # what BE player_controller calls on RMB
+	if err.is_empty() and (m.visible or m.progress != 0.0):
+		err = "meter must hide and reset as soon as the light turns off"
+	m._process(0.0)
+	if err.is_empty() and m.visible:
+		err = "meter must stay hidden with the light off"
+	_cleanup([m, e, b])
+	return err
+
+
+func test_main_scene() -> String:
+	var ps: PackedScene = load("res://scenes/main.tscn")
+	if ps == null:
+		return "main.tscn failed to load"
+	var st := ps.get_state()
+	var names: PackedStringArray = []
+	for i in st.get_node_count():
+		names.append(str(st.get_node_path(i)))
+	for want in ["./HUD", "./World/WorldOverlay", "./AIWatermark", "./AIWatermark/WatermarkLabel"]:
+		if not want in names:
+			return "main.tscn missing %s (has %s)" % [want, names]
+	var src := FileAccess.get_file_as_string("res://scripts/map/main.gd")
+	if src.contains("knock nearby") or src.contains("Space/RMB") or src.contains("AlertHud"):
+		return "old text HUD / knock hint still in main.gd"
+	var want_hint := "Space jump · RMB flashlight on/off · hold LMB pick up · tap LMB throw/knock · scroll items"
+	if not src.contains(want_hint):
+		return "new hint text missing from main.gd"
+	return ""
+
+
+func test_ui_art_slots() -> String:
+	UiArt.clear_cache()
+	for slot in ["floor_dark", "flashlight_blob"]:
+		if UiArt.texture(slot) == null:
+			return "slot %s should resolve through the manifest" % slot
+	if UiArt.texture("no_such_slot_xyz") != null:
+		return "unknown slot must return null (placeholder path)"
+	return ""
+
+
+func test_no_art_paths() -> String:
+	var files := ["res://scripts/map/main.gd", "res://scripts/player/flashlight.gd"]
+	var d := DirAccess.open("res://scripts/ui")
+	for f in d.get_files():
+		if f.ends_with(".gd"):
+			files.append("res://scripts/ui/" + f)
+	for f in files:
+		var src := FileAccess.get_file_as_string(f)
+		if src.contains("res://assets/art/") or src.contains("res://assets/replace_me/"):
+			return "%s hard-codes an art path; use a manifest slot" % f
+	return ""

@@ -22,7 +22,7 @@ signal health_changed(current: int, max_hp: int)
 signal gold_changed(amount: int, delta: int)
 
 # --- Flashlight / selection / startle -------------------------------------
-## TODO(BE-wire): flashlight toggle signal from BE player/flashlight.
+## REAL: emitted by set_flashlight(), which BE's player_controller calls on RMB toggle.
 signal flashlight_toggled(on: bool)
 ## `enemy` is null when nothing is selected. Only one at a time.
 ## TODO(BE-wire): BE flashlight hover → selection (or FE owns selection logic).
@@ -90,7 +90,7 @@ func _ready() -> void:
 ## PlayerStats is listed BEFORE FESignals in [autoload], so it already exists.
 ## TODO(BE-wire) still: Inventory.changed → set_items, Inventory.selected_changed
 ## → select_item, player.pickup_* → report_pickup_*, Enemy startle/chase signals,
-## and a flashlight_toggled signal (polled from the player's Flashlight for now).
+## REAL: BE player_controller calls set_flashlight(on) on RMB toggle (PR #4).
 func _wire_backend() -> void:
 	if not is_inside_tree() or get_path() != ^"/root/FESignals":
 		return   # only the autoload auto-wires; test instances call wire_player_stats()
@@ -323,8 +323,6 @@ func enemy_type_id(enemy: Node) -> String:
 
 
 func _process(delta: float) -> void:
-	if not placeholder_input_enabled:
-		sync_flashlight_from(get_tree().get_first_node_in_group("player") if is_inside_tree() else null)
 	# Placeholder startle integration (remove once BE emits startle progress).
 	if _lit.is_empty():
 		return
@@ -346,16 +344,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		cycle_item(-1)
 	elif event.is_action_pressed("flashlight_toggle"):
 		toggle_flashlight()
-
-
-## BE's player_controller toggles its `Flashlight` child's visibility on RMB
-## and has no signal yet, so mirror that state. TODO(BE-wire): flashlight signal.
-func sync_flashlight_from(player: Node) -> void:
-	if player == null:
-		return
-	var light := player.get_node_or_null(^"Flashlight") as CanvasItem
-	if light and light.visible != flashlight_on:
-		set_flashlight(light.visible)
 
 
 ## Clears all state (tests / scene reloads).

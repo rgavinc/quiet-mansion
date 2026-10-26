@@ -8,7 +8,7 @@ func _ready() -> void:
 	beam.position = Vector2(48, 0)
 	beam.energy = 1.5
 	beam.color = Color(1.0, 0.95, 0.75, 1)
-	var tex := load("res://assets/art/ui/light_blob.png")
+	var tex := UiArt.texture("flashlight_blob")   # manifest slot, never a file path
 	if tex:
 		beam.texture = tex
 		beam.texture_scale = 2.8

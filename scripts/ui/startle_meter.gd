@@ -18,7 +18,16 @@ func _ready() -> void:
 	z_index = 50
 	if bus == null:
 		bus = UiArt.bus()
+	if bus:
+		bus.flashlight_toggled.connect(_on_flashlight)
 	visible = false
+
+
+## Light off (RMB toggle, via FESignals.set_flashlight) drops the meter at once.
+func _on_flashlight(on: bool) -> void:
+	if not on:
+		progress = 0.0
+		visible = false
 
 
 func _process(_delta: float) -> void:
