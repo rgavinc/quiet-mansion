@@ -74,7 +74,10 @@ func break_apart() -> void:
 		return
 	broken = true
 	NoiseBus.emit_noise(global_position, noise_radius * PlayerStats.get_stat(&"noise_mult"), noise_loudness, self)
-	_drop_gold(global_position, gold_inside)
+	var g := gold_inside
+	if Item.is_vase(self):
+		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
+	_drop_gold(global_position, g)
 	queue_free()
 
 

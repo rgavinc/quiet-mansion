@@ -36,7 +36,10 @@ const MOVE_FLOAT := &"float"
 @export var give_up_distance: float = 900.0
 @export var noise_track_time: float = 3.0    # s a noise lets it track the boy without sight
 @export var light_track_time: float = 1.0    # same, after a light startle
-@export var startle_reaction_time: float = 0.35
+## Startle -> chase delay. <= 0 (default) = the startle/scream animation's length, read from the
+## manifest (frames / fps of `anim_startle` via AnimLibrary), so the chase starts when the scream
+## ends (PRODUCT.md: ~0.5 s). > 0 = fixed seconds (per-type override in an EnemyDef).
+@export var startle_reaction_time: float = 0.0
 @export var recover_time: float = 1.5        # after landing a hit: back off, no hits
 @export var backoff_speed: float = 60.0
 @export var stun_time: float = 1.5
@@ -48,6 +51,10 @@ const MOVE_FLOAT := &"float"
 @export var anim_calm: String = ""
 @export var anim_startle: String = ""
 @export var anim_chase: String = ""
+
+const STARTLE_FALLBACK_TIME := 0.5   # startle slot missing / no frames / no fps
+## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
+const LEDGE_PROBE_DEPTH := 24.0
 
 const DEF_FIELDS := [&"type_id", &"movement", &"walk_speed", &"chase_speed", &"float_speed",
 	&"climb_speed", &"hear_radius", &"hearing_mult", &"sight_range", &"memory_time",
@@ -95,6 +102,9 @@ var _reported_chase: bool = false
 var _reported_startle: float = -1.0
 var _home_set: bool = false
 var _spr: AnimatedSprite2D
+var _stun_calm: bool = false        # Flash Bulb stun: back to CALM afterwards, never chase
+## True when the last _move_to stopped at a floor edge (ledge backstop). Read-only for tests.
+var ledge_stopped: bool = false
 
 
 func _ready() -> void:
@@ -223,7 +233,10 @@ func _on_bus_noise(at: Vector2, radius: float, _loudness: float, _source: Node) 
 	if GameState.game_over or not is_inside_tree():
 		return
 	if NoiseBus.can_hear(global_position, at, radius, hearing_mult):
-		hear_noise()
+		if _source != null and is_instance_valid(_source) and _source.has_method(&"is_lure"):
+			hear_lure(at)
+		else:
+			hear_noise()
 
 
 ## Legacy GameState.make_noise path (not connected; callers may invoke it directly).
@@ -239,6 +252,32 @@ func hear_noise() -> void:
 		_track_left = maxf(_track_left, noise_track_time)
 		return
 	_enter_chase(noise_track_time)
+
+
+## A lure (Music Box) plays at `at`: hunt toward IT, not the boy (SEARCH with last_known =
+## the lure; each pulse refills memory). Sight of the boy still wins in _tick_hunt.
+func hear_lure(at: Vector2) -> void:
+	if state in [State.RECOVER, State.STUNNED]:
+		return
+	_enter_chase(0.0)
+	_track_left = 0.0
+	last_known = at
+	state = State.SEARCH
+	memory = 1.0
+	FESignals.report_chase_memory(self, memory)
+
+
+## Flash Bulb: the startle completed but is stunned instead of chasing; afterwards calm.
+func stun_from_startle(t: float) -> void:
+	_set_state(State.STUNNED)
+	_state_left = t
+	_stun_calm = true
+
+
+## Off screen relative to the boy (1280x720 view centred on him).
+func is_off_screen() -> bool:
+	var p := _player()
+	return p != null and PlayerStats.is_off_screen(global_position, p.global_position)
 
 
 ## Old name kept (tests, knock miss): instant chase as if it heard a noise.
@@ -275,8 +314,27 @@ func _enter_chase(track: float) -> void:
 
 func _enter_startled() -> void:
 	_set_state(State.STARTLED)
-	_state_left = startle_reaction_time
+	_state_left = startle_delay()
 	_set_startle(1.0)
+
+
+## Seconds from STARTLED to CHASE: startle_reaction_time if > 0, else the startle animation's
+## manifest length (frames / fps), else STARTLE_FALLBACK_TIME.
+func startle_delay() -> float:
+	if startle_reaction_time > 0.0:
+		return startle_reaction_time
+	return startle_anim_length(anim_startle)
+
+
+static func startle_anim_length(slot: String) -> float:
+	if slot.is_empty() or not AnimLibrary.has_slot(slot):
+		return STARTLE_FALLBACK_TIME
+	var m := AnimLibrary.meta(slot)
+	var n := int(m.get("frames", 0))
+	var fps := float(m.get("fps", 0.0))
+	if n <= 0 or fps <= 0.0:
+		return STARTLE_FALLBACK_TIME
+	return n / fps
 
 
 func _enter_return() -> void:
@@ -315,7 +373,7 @@ func on_hit_by_throw(_item: Dictionary) -> void:
 		queue_free()
 		return
 	_set_state(State.STUNNED)
-	_state_left = stun_time
+	_state_left = maxf(_state_left if _stun_calm else 0.0, stun_time * float(_item.get("stun_mult", 1.0)))   # Heavy Vases
 
 
 ## Knock while calm can kill; while enraged or a miss → it chases.
@@ -362,7 +420,8 @@ func tick(delta: float) -> void:
 		State.STARTLED:
 			_stop_x(delta)
 			_state_left -= delta
-			if _state_left <= 0.0:
+			# float slack: 30 x (1/60) must end a 0.5 s scream on frame 30; item hooks (Flash Bulb)
+			if _state_left <= 1e-4 and not PlayerStats.startle_handled(self):
 				_enter_chase(light_track_time)
 		State.CHASE, State.SEARCH:
 			_tick_hunt(delta, p, sees)
@@ -378,7 +437,14 @@ func tick(delta: float) -> void:
 			_stop_x(delta)
 			_state_left -= delta
 			if _state_left <= 0.0:
-				_resume_hunt()
+				if _stun_calm:
+					_stun_calm = false
+					if _track_left > 0.0:
+						_enter_chase(_track_left)   # heard the boy meanwhile
+					else:
+						_enter_calm()
+				else:
+					_resume_hunt()
 
 
 func _tick_startle(delta: float, p: Node2D) -> void:
@@ -405,7 +471,8 @@ func _tick_hunt(delta: float, p: Node2D, sees: bool) -> void:
 		return
 	state = State.SEARCH
 	var far := clampf(global_position.distance_to(p.global_position) / maxf(give_up_distance, 1.0), 0.25, 4.0)
-	memory = maxf(memory - delta * far / maxf(memory_time, 0.01), 0.0)
+	var drain := PlayerStats.memory_drain_mult(self, is_off_screen())   # item hooks (Cracked Mirror)
+	memory = maxf(memory - delta * far * drain / maxf(memory_time, 0.01), 0.0)
 	FESignals.report_chase_memory(self, memory)
 	if memory <= 0.0:
 		_enter_return()
@@ -427,6 +494,8 @@ func _tick_patrol(delta: float) -> void:
 	if absf(global_position.x - tgt.x) < 4.0:
 		_patrol_dir = -_patrol_dir
 	_move_to(Vector2(tgt.x, global_position.y if is_side_scroll() else home.y), walk_speed, delta)
+	if ledge_stopped:
+		_patrol_dir = -_patrol_dir   # floor edge / opening ahead: turn back
 
 
 func _back_off(delta: float, p: Node2D) -> void:
@@ -435,6 +504,8 @@ func _back_off(delta: float, p: Node2D) -> void:
 		away = Vector2.RIGHT
 	if is_side_scroll() and not is_floating():
 		velocity.x = signf(away.x) * backoff_speed
+		if _ledge_ahead(signf(velocity.x), backoff_speed * delta):
+			velocity.x = 0.0   # backing off never drops it off a ledge either
 		_apply_gravity(delta)
 	else:
 		velocity = away.normalized() * backoff_speed
@@ -493,6 +564,7 @@ func _apply_gravity(delta: float) -> void:
 
 ## Moves toward `target`: free 2D (top-down / float) or walk + stairs (side-scroll).
 func _move_to(target: Vector2, speed: float, delta: float) -> void:
+	ledge_stopped = false
 	if is_floating():
 		var to := target - global_position
 		velocity = to.normalized() * minf(float_speed, speed) if to.length() > 2.0 else Vector2.ZERO
@@ -506,6 +578,7 @@ func _move_to(target: Vector2, speed: float, delta: float) -> void:
 		return
 	var goal_x := target.x
 	var feet := _feet()
+	var heading_to_stair := false
 	var nav := level_nav()
 	if nav != null:
 		# Lead's floor graph (LEVELGEN.md "LevelNav"): plain data, same on and off screen.
@@ -514,6 +587,7 @@ func _move_to(target: Vector2, speed: float, delta: float) -> void:
 			goal_x = global_position.x   # unreachable from here: wait on this floor
 		else:
 			goal_x = (wp.point as Vector2).x
+			heading_to_stair = wp.has("stair_to")
 			if wp.has("stair_to") and _grounded():
 				var st: Dictionary = wp.get("stair", {})
 				var rect := Stair.trigger_rect(st.get("bottom", wp.point), st.get("top", wp.stair_to))
@@ -530,12 +604,40 @@ func _move_to(target: Vector2, speed: float, delta: float) -> void:
 				var entry := s.global_bottom() if up else s.global_top()
 				var exit := s.global_top() if up else s.global_bottom()
 				goal_x = entry.x
+				heading_to_stair = true
 				if _grounded() and (absf(global_position.x - entry.x) <= 6.0 or s.contains(feet)):
 					_start_climb(feet, entry, exit, s)
 					return
 	var dx := goal_x - global_position.x
 	velocity.x = signf(dx) * speed if absf(dx) > 2.0 else 0.0
+	if velocity.x != 0.0 and not (heading_to_stair and absf(dx) <= _foot() + 12.0) and _ledge_ahead(signf(velocity.x), absf(velocity.x) * delta):
+		velocity.x = 0.0   # backstop: walkers never step off a ledge, in any state (stairs only)
+		ledge_stopped = true
 	_apply_gravity(delta)
+
+
+## Ledge backstop (Lead's #13 rail is the real fix; this keeps walkers honest anywhere):
+## a grounded side-scroll walker probes straight down just ahead of its feet against
+## LAYER_WORLD; no floor within LEDGE_PROBE_DEPTH means a floor edge / opening. Real physics
+## only (floor_override test hook off, actually on the floor); floaters never probe.
+func _ledge_ahead(dir: float, step: float) -> bool:
+	if is_floating() or floor_override >= 0 or not is_inside_tree() or not is_on_floor():
+		return false
+	var space := get_world_2d().direct_space_state
+	if space == null:
+		return false
+	var feet := _feet()
+	var x := feet.x + dir * (_foot_half_width() + 2.0 + step)
+	var q := PhysicsRayQueryParameters2D.create(Vector2(x, feet.y - 4.0), Vector2(x, feet.y + LEDGE_PROBE_DEPTH),
+		PlayerStats.LAYER_WORLD, [get_rid()])
+	return space.intersect_ray(q).is_empty()
+
+
+func _foot_half_width() -> float:
+	for c in get_children():
+		if c is CollisionShape2D and c.shape is RectangleShape2D:
+			return (c.shape as RectangleShape2D).size.x * 0.5
+	return _foot()
 
 
 ## Stair from floor `mine` one step toward `target_floor`, nearest entry first.

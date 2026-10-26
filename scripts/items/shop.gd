@@ -7,8 +7,13 @@ extends RefCounted
 
 ## ItemDb.STOCK_SIZE distinct items for the shop after `stage`, weighted by rarity
 ## (rarer items unlock on later stages). Same (stage, seed) → same stock.
+## Offer prices are ItemDb.shop_price (row price x the PROVISIONAL ItemDb.PRICE_SCALE).
 static func roll_stock(stage: int, seed: int) -> Array[Item]:
-	return ItemDb.roll(ItemDb.rng_for(maxi(stage, 1), seed, "shop"), maxi(stage, 1), ItemDb.STOCK_SIZE)
+	var st := maxi(stage, 1)
+	var out := ItemDb.roll(ItemDb.rng_for(st, seed, "shop"), st, ItemDb.STOCK_SIZE)
+	for it in out:
+		it.price = ItemDb.shop_price(it.id, st)
+	return out
 
 
 ## Buys `item`: spends its price through PlayerStats.try_spend, applies it and adds it

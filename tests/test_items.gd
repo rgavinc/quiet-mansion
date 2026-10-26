@@ -31,6 +31,7 @@ func run_all() -> Dictionary:
 		["chest_loot_deterministic", test_chest_deterministic],
 		["chest_opens_through_hold_channel", test_chest_channel],
 		["fe_shop_adapter_finds_shop", test_fe_adapter],
+		["desc_percentages_match_measured_effect", test_desc_percent],
 	]
 	var passed := 0
 	for item in checks:
@@ -91,15 +92,27 @@ func test_db_valid() -> String:
 			return id + ": empty name/description/icon_slot"
 		if it.price <= 0: return id + ": price <= 0"
 		if not ItemDb.RARITY.has(it.rarity): return id + ": bad rarity " + it.rarity
-		if it.mods.is_empty(): return id + ": no modifiers"
+		# Behaviour items may carry their whole effect (and cost) in the hooks.
+		if it.mods.is_empty() and not it.has_behavior(): return id + ": no modifiers"
+		if r.has("script") and not it.has_behavior(): return id + ": script has no behaviour"
 		for m in it.mods:
 			if not PlayerStats.BASE.has(m.stat): return "%s: unknown stat %s" % [id, m.stat]
 	# The icons Designer already drew are used by the matching items.
 	for pair in [["extra_heart", "item_icon_extra_heart"], ["minimap", "item_icon_minimap"],
-			["bright_bulb", "item_icon_bright_bulb"], ["soft_shoes", "item_icon_soft_shoes"],
-			["lucky_coin", "item_icon_lucky_coin"]]:
+			["bright_bulb", "item_icon_bright_bulb"], ["soft_shoes", "item_icon_soft_shoes"]]:
 		if ItemDb.make(pair[0]).icon_slot != pair[1]: return pair[0] + " icon slot"
 		if not AnimLibrary.has_slot(pair[1]): return "manifest missing " + pair[1]
+	# PD's binding mix: exactly 6 common / 7 uncommon / 5 rare / 2 legendary.
+	var mix := {}
+	for r in ItemDb.ITEMS:
+		mix[r.rarity] = int(mix.get(r.rarity, 0)) + 1
+	for k in {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}.merged(mix):
+		var want: int = {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}.get(k, 0)
+		if int(mix.get(k, 0)) != want: return "rarity mix %s, want 6/7/5/2" % [mix]
+	if ItemDb.MIX != {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}: return "ItemDb.MIX changed"
+	# PD's removals stay removed (their icons are manifest spares).
+	for gone in ["dim_filter", "lucky_coin", "strong_arm", "wide_lens", "spring_socks", "golden_heart"]:
+		if not ItemDb.row(gone).is_empty(): return "removed item back: " + gone
 	return ""
 
 
@@ -117,6 +130,12 @@ func test_tradeoffs() -> String:
 		ItemDb.make(id).apply(s)
 		var better := false
 		var worse := false
+		# Behaviour items: the hook is the upside; a downside_behavior row's cost is in the
+		# hook too (tests/test_item_behaviors.gd checks each one through the real code).
+		var it_row := ItemDb.row(id)
+		if it_row.has("script"):
+			better = true
+			worse = bool(it_row.get("downside_behavior", false))
 		for k in good_up:
 			var dv: float = s.get_stat(k) - float(before[k])
 			if absf(dv) < 0.0001: continue
@@ -132,12 +151,12 @@ func test_apply_changes() -> String:
 	ItemDb.make("soft_shoes").apply(s)
 	var n: float = s.get_stat(&"noise_mult")
 	var sp: float = s.get_stat(&"move_speed")
-	ItemDb.make("lucky_coin").apply(s)
+	ItemDb.make("gold_magnet").apply(s)
 	var g: float = s.get_stat(&"gold_find_mult")
 	s.free()
 	if not is_equal_approx(n, 0.75): return "soft_shoes noise_mult want 0.75 got %s" % n
 	if not is_equal_approx(sp, 140.0 * 0.92): return "soft_shoes move_speed got %s" % sp
-	return "" if is_equal_approx(g, 1.4) else "lucky_coin gold_find_mult want 1.4 got %s" % g
+	return "" if is_equal_approx(g, 1.6) else "gold_magnet gold_find_mult want 1.6 got %s" % g
 
 
 func test_round_trip() -> String:
@@ -146,7 +165,7 @@ func test_round_trip() -> String:
 		var before := _snapshot(s)
 		var it := ItemDb.make(id)
 		it.apply(s)
-		if _diff(before, _snapshot(s)).is_empty():
+		if _diff(before, _snapshot(s)).is_empty() and not (it.has_behavior() and it.mods.is_empty()):
 			s.free(); return id + ": apply changed nothing"
 		it.apply(s)   # second apply is a no-op
 		it.remove(s)
@@ -154,7 +173,7 @@ func test_round_trip() -> String:
 		if after[&"_health"] > s.max_health() or after[&"_health"] < 1:
 			s.free(); return "%s: health %d out of 1..max" % [id, after[&"_health"]]
 		# Hearts lost to a lower max aren't handed back (test_max_health covers health).
-		after[&"_health"] = before[&"_health"] if id == "ghost_slippers" else after[&"_health"]
+		after[&"_health"] = before[&"_health"] if id in ["ghost_slippers", "rabbits_foot"] else after[&"_health"]
 		var d := _diff(before, after)
 		s.free()
 		if not d.is_empty(): return "%s not restored: %s" % [id, d]
@@ -291,10 +310,11 @@ func test_max_health() -> String:
 	if s.max_health() != 4 or s.health != 3: var m: String = "extra heart want 3/4 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
 	heart.remove(s)
 	if s.max_health() != 3 or s.health != 3: var m: String = "remove want 3/3 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
-	var gold := ItemDb.make("golden_heart")
-	gold.apply(s)
-	if s.max_health() != 5 or s.health != 5: var m: String = "golden heart want 5/5 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
-	gold.remove(s)
+	var h1 := ItemDb.make("extra_heart")
+	var h2 := ItemDb.make("extra_heart")
+	h1.apply(s); h2.apply(s)
+	if s.max_health() != 5 or s.health != 5: var m: String = "two extra hearts want 5/5 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
+	h1.remove(s); h2.remove(s)
 	s.take_hit(1, true); s._invuln_left = 0.0; s.take_hit(1, true)   # 1/3
 	var slip := ItemDb.make("ghost_slippers")   # -1 max heart
 	slip.apply(s)
@@ -368,3 +388,47 @@ func test_fe_adapter() -> String:
 	var ok := PlayerStats.gold == 100 - int(o.price) and PlayerStats.owned_items.size() == 1
 	if FESignals.buy_offer(o): return "FE bought the same offer twice"
 	return "" if ok else "FE buy didn't spend/own (gold %d)" % PlayerStats.gold
+
+
+## PRODUCT.md "Item text": no hand-written percentages, and every "N%" in a description
+## equals the effect MEASURED through PlayerStats with the item granted (stat ratio, or the
+## behaviour hook's multiplier). Shadow Cloak's light line must read 67% (1 / 0.6).
+func test_desc_percent() -> String:
+	var hand := RegEx.create_from_string("\\d+\\s*%")
+	var tok := RegEx.create_from_string("\\{(mul|inv|add|param):(\\w+)\\}")
+	var pct := RegEx.create_from_string("(\\d+)%")
+	var vase := {script_path = "res://scripts/world/vase.gd"}
+	for r in ItemDb.ITEMS:
+		var raw := str(r.desc)
+		if hand.search(raw): return "%s: hand-written %% in desc" % r.id
+		var want: Array = []
+		for m in tok.search_all(raw):
+			var kind := m.get_string(1)
+			var key := m.get_string(2)
+			PlayerStats.reset()
+			var v := NAN
+			if kind == "param":
+				var it := ItemDb.make(str(r.id))
+				PlayerStats.grant_item(it)
+				match key:
+					"noise_mult": v = PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase) - 1.0
+					"offscreen_drain_mult": v = PlayerStats.memory_drain_mult(null, true) - 1.0
+					"carry_speed_mult": v = PlayerStats.carry_speed_mult([vase]) - 1.0
+					_: return "%s: no measurement for param %s" % [r.id, key]
+			else:
+				var before := PlayerStats.get_stat(StringName(key))
+				PlayerStats.grant_item(ItemDb.make(str(r.id)))
+				var after := PlayerStats.get_stat(StringName(key))
+				match kind:
+					"mul": v = after / before - 1.0
+					"inv": v = before / after - 1.0   # time-based: how much longer / sooner
+					"add": v = after - before
+			want.append(int(round(absf(v) * 100.0)))
+		var got: Array = []
+		var text := ItemDb.make(str(r.id)).description
+		if text.contains("{"): return "%s: unfilled token in '%s'" % [r.id, text]
+		for m in pct.search_all(text):
+			got.append(int(m.get_string(1)))
+		if got != want: return "%s: text %s%% vs measured %s%% ('%s')" % [r.id, got, want, text]
+	var cloak := ItemDb.make("shadow_cloak").description
+	return "" if cloak.contains("67%") else "shadow cloak text: " + cloak

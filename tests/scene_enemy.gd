@@ -5,6 +5,8 @@ extends RefCounted
 ##  - side-scroll walker falls under gravity, stays on its slab, and climbs a Stair to
 ##    reach a boy on the next floor (QA #20); without a stair it can't reach him
 ##  - float type drifts straight through a slab to the next floor
+##  - startle -> chase waits for the scream animation (manifest frames / fps), real frames
+##  - ledge backstop: a walker never walks off a floor edge into a gap; a floater crosses it
 
 var _holder: Node2D
 
@@ -16,6 +18,8 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["walker_gravity_and_stairs_to_next_floor", _walker_stairs],
 		["walker_without_stairs_stays_on_floor", _walker_no_stairs],
 		["float_crosses_floors_without_stairs", _floater],
+		["startle_chase_when_scream_anim_ends", _startle_real],
+		["walker_turns_at_gap_floater_crosses", _ledge_gap],
 	]
 	for c in checks:
 		PlayerStats.reset(); GameState.reset(); FESignals.reset()
@@ -158,3 +162,71 @@ func _floater(tree: SceneTree) -> Variant:
 		if PlayerStats.health < 3 or e.global_position.distance_to(p.global_position) < 34.0:
 			return "" if e.global_position.y < 270.0 else "never rose through the slab (y %.0f)" % e.global_position.y
 	return "float stuck (from y %.0f to %s)" % [start_y, e.global_position]
+
+
+## Real frames: lit for light_startle_time -> STARTLED -> CHASE exactly when the scream
+## animation (frames / fps from the manifest) has played through, holding its last frame.
+func _startle_real(tree: SceneTree) -> Variant:
+	_boy(Vector2(100, 100))
+	var e := _puppet(Vector2(300, 100))
+	e.sight_override = 1
+	await tree.physics_frame
+	e.lit_override = 1
+	var f := 0
+	while e.state != e.State.STARTLED and f < 180:
+		await tree.physics_frame
+		f += 1
+	if e.state != e.State.STARTLED: return "never startled"
+	var want: float = e.startle_delay()
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	var startled := 0
+	var last_frame := -1
+	while e.state == e.State.STARTLED and startled < 120:
+		last_frame = spr.frame
+		await tree.physics_frame
+		startled += 1
+	if e.state != e.State.CHASE: return "STARTLED -> state %d" % e.state
+	var t := startled / float(Engine.physics_ticks_per_second)
+	if absf(t - want) > 2.5 / Engine.physics_ticks_per_second: return "chase %.3fs after startle, scream anim %.3fs" % [t, want]
+	var n := spr.sprite_frames.get_frame_count(e.anim_startle) if spr.sprite_frames.has_animation(e.anim_startle) else 0
+	if n > 0 and last_frame < n - 2: return "chased at scream frame %d of %d" % [last_frame, n]
+	return ""
+
+
+## Ground slab with a 100px gap (x 300..400, a floor opening). The walker patrols toward it,
+## then chases a boy on the far side: it never falls in. A floater patrolling the same line
+## drifts across it.
+func _ledge_gap(tree: SceneTree) -> Variant:
+	_slab(-400, 300, 400)
+	_slab(400, 1200, 400)
+	var e := _puppet(Vector2(200, 386))
+	e.side_scroll = true
+	e.sight_override = 0
+	e.patrol_radius = 200.0   # home 200 -> patrol target x 400, across the gap
+	var fl := _puppet(Vector2(200, 386))
+	fl.movement = &"float"
+	fl._apply_mask()
+	fl.side_scroll = true
+	fl.sight_override = 0
+	fl.patrol_radius = 300.0   # target x 500: all the way over the gap to the far slab
+	var max_x := -INF
+	var turned := false
+	var fl_crossed := false
+	for i in 600:
+		await tree.physics_frame
+		if e.global_position.y > 386.0 + 3.0: return "walker fell into the gap at frame %d (%s)" % [i, e.global_position]
+		max_x = maxf(max_x, e.global_position.x)
+		if max_x > 280.0 and e.global_position.x < max_x - 30.0: turned = true
+		if fl.global_position.x > 410.0: fl_crossed = true
+	if max_x >= 300.0: return "walker stood over the gap (x %.0f)" % max_x
+	if not turned: return "patrolling walker did not turn back at the edge (max x %.0f, at %.0f)" % [max_x, e.global_position.x]
+	if not fl_crossed: return "floater did not cross the gap (x %.0f)" % fl.global_position.x
+	# CHASE never steps off either: the boy is right across the gap, same floor height.
+	var p := _boy(Vector2(520, 386), true)
+	e.sight_override = 1
+	e.hear_noise()
+	for i in 300:
+		await tree.physics_frame
+		if e.global_position.y > 386.0 + 3.0: return "chasing walker fell into the gap (%s)" % e.global_position
+	if e.global_position.x >= 300.0: return "chasing walker over the gap (x %.0f)" % e.global_position.x
+	return "" if p.global_position.x > 400.0 else "boy moved?"
