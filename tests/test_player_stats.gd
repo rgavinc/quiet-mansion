@@ -13,6 +13,7 @@ func run_all() -> Dictionary:
 	var checks := [
 		["three_hits_dies", test_three_hits_dies],
 		["no_damage_after_run_over", test_no_hit_after_run_over],
+		["run_over_flag_win_death_reset", test_run_over_flag],
 		["modifier_add_mul", test_modifier_add_mul],
 		["remove_by_source", test_remove_by_source],
 		["max_health_item", test_max_health_item],
@@ -166,3 +167,19 @@ func test_no_hit_after_run_over() -> String:
 	if landed or hp != 3: return "hit landed after run over (hp %d)" % hp
 	if died[0]: return "died emitted after run over"
 	return ""
+
+
+func test_run_over_flag() -> String:
+	GameState.reset(); PlayerStats.reset()
+	GameState.on_reach_exit()
+	if GameState.run_over: return "plain stage exit set run_over"
+	GameState.reset()
+	GameState.end_run_won()
+	if not GameState.run_over: return "win did not set run_over"
+	if PlayerStats.take_hit(1, true): return "hit landed after win"
+	GameState.reset()
+	if GameState.run_over: return "reset did not clear run_over"
+	PlayerStats.take_hit(3, true)
+	var ok := GameState.run_over
+	GameState.reset(); PlayerStats.reset()
+	return "" if ok else "death did not set run_over"
