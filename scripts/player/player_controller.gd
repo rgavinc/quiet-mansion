@@ -35,7 +35,7 @@ const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry
 func _ready() -> void:
 	add_to_group("player")
 	collision_layer = PlayerStats.LAYER_PLAYER
-	collision_mask = PlayerStats.LAYER_WORLD
+	collision_mask = PlayerStats.LAYER_WORLD | PlayerStats.LAYER_ENEMY
 	_anim = AnimatedSprite2D.new()
 	_anim.name = "Anim"
 	_anim.sprite_frames = AnimLibrary.frames_for(ANIM_SLOTS)

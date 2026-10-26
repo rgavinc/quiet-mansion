@@ -22,12 +22,17 @@ func _chase_takes_heart(tree: SceneTree) -> String:
 	holder.add_child(e); e.global_position = Vector2(220, 100)
 	e._alert()
 	var frames := 0
-	while PlayerStats.health == 3 and frames < 180:  # 3 s at 60 Hz
+	var closest := 1e9
+	while frames < 300:  # first hit within 3 s, then keep chasing to check bodies stay solid
 		await tree.physics_frame
 		frames += 1
+		closest = minf(closest, e.global_position.distance_to(p.global_position))
+		if frames == 180 and PlayerStats.health == 3: break
 	var hp := PlayerStats.health
 	var gap := e.global_position.distance_to(p.global_position)
 	holder.queue_free()
 	await tree.process_frame
 	PlayerStats.reset(); GameState.reset()
-	return "" if hp == 2 else "no hit in 3s (hp %d, gap %.1fpx)" % [hp, gap]
+	if hp == 3: return "no hit in 3s (gap %.1fpx)" % gap
+	if closest < 20.0: return "puppet overlapped the boy (closest %.2fpx)" % closest
+	return ""
