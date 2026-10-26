@@ -55,6 +55,7 @@ const MOVE_FLOAT := &"float"
 const STARTLE_FALLBACK_TIME := 0.5   # startle slot missing / no frames / no fps
 ## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
 const LEDGE_PROBE_DEPTH := 24.0
+const LEDGE_PROBE_LIFT := 4.0     # ray starts this far above the feet
 
 const DEF_FIELDS := [&"type_id", &"movement", &"walk_speed", &"chase_speed", &"float_speed",
 	&"climb_speed", &"hear_radius", &"hearing_mult", &"sight_range", &"memory_time",
@@ -536,7 +537,7 @@ func on_landed_hit(p: Node2D) -> void:
 # --- movement + floors ---------------------------------------------------------------
 func _arrived(target: Vector2) -> bool:
 	if is_side_scroll() and not is_floating():
-		return absf(global_position.x - target.x) < 6.0 and floor_of(global_position) == floor_of(target)
+		return absf(global_position.x - target.x) < 6.0 and floor_of(_feet()) == floor_of(target)
 	return global_position.distance_to(target) < 6.0
 
 
@@ -582,20 +583,20 @@ func _move_to(target: Vector2, speed: float, delta: float) -> void:
 	var nav := level_nav()
 	if nav != null:
 		# Lead's floor graph (LEVELGEN.md "LevelNav"): plain data, same on and off screen.
-		var wp: Dictionary = nav.next_waypoint(global_position, target)
+		var wp: Dictionary = nav.next_waypoint(feet, target)
 		if wp.is_empty():
-			goal_x = global_position.x   # unreachable from here: wait on this floor
+			goal_x = feet.x   # unreachable from here: wait on this floor
 		else:
 			goal_x = (wp.point as Vector2).x
 			heading_to_stair = wp.has("stair_to")
 			if wp.has("stair_to") and _grounded():
 				var st: Dictionary = wp.get("stair", {})
 				var rect := Stair.trigger_rect(st.get("bottom", wp.point), st.get("top", wp.stair_to))
-				if absf(global_position.x - goal_x) <= 6.0 or rect.has_point(feet):
+				if absf(feet.x - goal_x) <= 6.0 or rect.has_point(feet):
 					_start_climb(feet, wp.point, wp.stair_to, null)
 					return
 	else:
-		var mine := floor_of(global_position)
+		var mine := floor_of(feet)
 		var theirs := floor_of(target)
 		if mine != theirs and mine != -999 and theirs != -999:
 			var s := stair_toward(mine, theirs)
@@ -605,12 +606,12 @@ func _move_to(target: Vector2, speed: float, delta: float) -> void:
 				var exit := s.global_top() if up else s.global_bottom()
 				goal_x = entry.x
 				heading_to_stair = true
-				if _grounded() and (absf(global_position.x - entry.x) <= 6.0 or s.contains(feet)):
+				if _grounded() and (absf(feet.x - entry.x) <= 6.0 or s.contains(feet)):
 					_start_climb(feet, entry, exit, s)
 					return
-	var dx := goal_x - global_position.x
+	var dx := goal_x - feet.x
 	velocity.x = signf(dx) * speed if absf(dx) > 2.0 else 0.0
-	if velocity.x != 0.0 and not (heading_to_stair and absf(dx) <= _foot() + 12.0) and _ledge_ahead(signf(velocity.x), absf(velocity.x) * delta):
+	if velocity.x != 0.0 and not (heading_to_stair and absf(dx) <= _foot_half_width() + 12.0) and _ledge_ahead(signf(velocity.x), absf(velocity.x) * delta):
 		velocity.x = 0.0   # backstop: walkers never step off a ledge, in any state (stairs only)
 		ledge_stopped = true
 	_apply_gravity(delta)
@@ -628,16 +629,17 @@ func _ledge_ahead(dir: float, step: float) -> bool:
 		return false
 	var feet := _feet()
 	var x := feet.x + dir * (_foot_half_width() + 2.0 + step)
-	var q := PhysicsRayQueryParameters2D.create(Vector2(x, feet.y - 4.0), Vector2(x, feet.y + LEDGE_PROBE_DEPTH),
+	# From a few px above the collider's bottom (never inside the slab) to 24 px below it.
+	var q := PhysicsRayQueryParameters2D.create(Vector2(x, feet.y - LEDGE_PROBE_LIFT), Vector2(x, feet.y + LEDGE_PROBE_DEPTH),
 		PlayerStats.LAYER_WORLD, [get_rid()])
 	return space.intersect_ray(q).is_empty()
 
 
 func _foot_half_width() -> float:
-	for c in get_children():
-		if c is CollisionShape2D and c.shape is RectangleShape2D:
-			return (c.shape as RectangleShape2D).size.x * 0.5
-	return _foot()
+	var cs := _body_shape()
+	if cs == null:
+		return 0.0
+	return shape_half_extents(cs.shape).x * absf(cs.global_transform.get_scale().x if cs.is_inside_tree() else cs.scale.x)
 
 
 ## Stair from floor `mine` one step toward `target_floor`, nearest entry first.
@@ -683,17 +685,47 @@ func floor_of(p: Vector2) -> int:
 	return best
 
 
-func _foot() -> float:
+## The movement collider: first CollisionShape2D child with a shape (not the Hitbox's).
+func _body_shape() -> CollisionShape2D:
 	for c in get_children():
-		if c is CollisionShape2D and c.shape is CircleShape2D:
-			return (c.shape as CircleShape2D).radius
-		if c is CollisionShape2D and c.shape is RectangleShape2D:
-			return (c.shape as RectangleShape2D).size.y * 0.5
-	return 0.0
+		if c is CollisionShape2D and (c as CollisionShape2D).shape != null and not (c as CollisionShape2D).disabled:
+			return c
+	return null
 
 
+## Local half extents (x, y) of a circle / capsule / rectangle shape; ZERO otherwise.
+static func shape_half_extents(sh: Shape2D) -> Vector2:
+	if sh is CircleShape2D:
+		var r := (sh as CircleShape2D).radius
+		return Vector2(r, r)
+	if sh is CapsuleShape2D:
+		var cap := sh as CapsuleShape2D
+		return Vector2(cap.radius, maxf(cap.height * 0.5, cap.radius))   # height includes the caps
+	if sh is RectangleShape2D:
+		return (sh as RectangleShape2D).size * 0.5
+	return Vector2.ZERO
+
+
+## Feet = bottom-centre of the real movement collider, in global space: works for a shape
+## centred on the origin (old map, tests) and for one offset so the origin is the feet
+## (Lead's generator: circle at (0,-r)). No collider -> the origin.
 func _feet() -> Vector2:
-	return global_position + Vector2(0, _foot())
+	var cs := _body_shape()
+	if cs == null:
+		return global_position
+	var he := shape_half_extents(cs.shape)
+	if not cs.is_inside_tree():
+		return global_position + cs.position + Vector2(0, he.y)
+	return cs.global_transform * Vector2(0, he.y)
+
+
+## Origin -> feet, global. Kept as `_foot()` (its y) for older callers/tests.
+func _feet_offset() -> Vector2:
+	return _feet() - global_position
+
+
+func _foot() -> float:
+	return _feet_offset().y
 
 
 ## Committed stair hop, entered anywhere in the 320px trigger: step along the floor to the
@@ -721,7 +753,7 @@ func _tick_climb(delta: float) -> void:
 		else:
 			pos = pos.move_toward(goal, step)
 			step = 0.0
-	global_position = pos - Vector2(0, _foot())
+	global_position = pos - _feet_offset()
 	velocity = Vector2.ZERO
 	if _climb_i >= _climb_pts.size():
 		_climb_on = false   # stepped off onto the next floor
