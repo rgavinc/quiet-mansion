@@ -158,7 +158,7 @@ func wire_game_state(gs: Node) -> void:
 ## GameState.reached_exit → shop on stages 1..MAX_STAGES-1, win screen on the last.
 ## Repeat triggers for the same level (or after the win) are ignored.
 func on_reached_exit() -> void:
-	if _exit_handled or _run_won or is_run_over():
+	if _exit_handled or _run_won or is_run_over() or _be_run_over():
 		return
 	_exit_handled = true
 	var s := get_stage()
@@ -195,26 +195,38 @@ func run_end_kind() -> StringName:
 func claim_run_end(kind: StringName) -> bool:
 	if _run_end == &"":
 		_run_end = kind
+		if kind == &"won":
+			_be_end_run_won()   # the stage-5 win screen is opening
 		return true
 	return _run_end == kind
 
 
-## BE's own run-over flag on the wired GameState, if it has one (existence check, so
-## this works before and after BE PR #21). PR #21 uses `GameState.game_over` (no
-## separate `run_over`): set on
-## reached_exit (every stage, incl. the win) and on_caught, cleared by reset() when
-## the next stage / new run loads. PlayerStats emits `died` BEFORE it calls
-## on_caught(), so a set flag at death time means the exit/win came first.
+## BE's run-over flags on the wired GameState, by existence check, so this works
+## before and after BE PR #22:
+##   run_over  — set on death or end_run_won(), NOT by a normal stage exit; reset()
+##               clears it. Set = the run already ended.
+##   game_over — set on every reached_exit and on_caught. Only meaningful at DEATH
+##               time: PlayerStats emits `died` BEFORE on_caught(), so a set flag
+##               then means an exit / win came first.
+func _gs_flag(f: StringName) -> bool:
+	return _gs != null and is_instance_valid(_gs) and f in _gs and bool(_gs.get(f))
+
+
 func _be_run_over() -> bool:
-	if _gs == null or not is_instance_valid(_gs):
-		return false
-	return &"game_over" in _gs and bool(_gs.get(&"game_over"))
+	return _gs_flag(&"run_over")
+
+
+## Tells BE the run is won (PR #22: sets run_over, so take_hit is a no-op on the
+## win screen). has_method → no-op before #22 merges.
+func _be_end_run_won() -> void:
+	if _gs != null and is_instance_valid(_gs) and _gs.has_method(&"end_run_won"):
+		_gs.end_run_won()
 
 
 ## PlayerStats.died → player_died, unless the run already ended (win screen open, a
 ## second death) or BE says the run is over (exit/win reached first).
 func on_player_died() -> void:
-	if is_run_over() or _be_run_over():
+	if is_run_over() or _be_run_over() or _gs_flag(&"game_over"):
 		return
 	if claim_run_end(&"died"):
 		player_died.emit()
@@ -766,7 +778,8 @@ func _swap_scene(level_seed: int, at_stage: int, fresh: bool = false) -> void:
 		return   # hard cap: no stage outside 1..MAX_STAGES ever loads
 	var tree := get_tree()
 	tree.paused = false
-	var gs := get_node_or_null(^"/root/GameState")
+	# The wired GameState (the autoload in game); clears game_over and BE run_over.
+	var gs: Node = _gs if _gs != null and is_instance_valid(_gs) else get_node_or_null(^"/root/GameState")
 	if gs and gs.has_method(&"reset"):
 		gs.reset()
 	var cur := tree.current_scene

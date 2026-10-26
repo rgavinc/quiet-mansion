@@ -53,6 +53,7 @@ func run_all() -> Dictionary:
 		["end_latch_died_then_exit_only_game_over", test_latch_died_then_exit],
 		["end_latch_same_frame_both_orders", test_latch_same_frame],
 		["end_latch_cleared_by_new_run_and_retry", test_latch_cleared],
+		["win_calls_gamestate_end_run_won_and_respects_run_over", test_win_end_run_won],
 	]
 	var passed := 0
 	for item in checks:
@@ -1332,4 +1333,78 @@ func test_latch_cleared() -> String:
 		_kill(ps)
 		err = _only_open(r, "go")
 	_close_all(r)
+	return err
+
+
+## A PR #22-shaped GameState (run_over + end_run_won) without touching the BE file.
+func _fake_gs22() -> Node:
+	var src := GDScript.new()
+	src.source_code = """extends Node
+signal reached_exit
+var game_over := false
+var run_over := false
+var won_calls := 0
+func on_reach_exit() -> void:
+	if game_over:
+		return
+	game_over = true
+	reached_exit.emit()
+func end_run_won() -> void:
+	won_calls += 1
+	game_over = true
+	run_over = true
+func reset() -> void:
+	game_over = false
+	run_over = false
+"""
+	src.reload()
+	var gs: Node = src.new()
+	_root().add_child(gs)
+	return gs
+
+
+func test_win_end_run_won() -> String:
+	var err := ""
+	# 1) Stage 5 win → the win screen opens AND tells BE (end_run_won, once).
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	b.swap_deferred = false
+	var gs := _fake_gs22()
+	b.wire_game_state(gs)
+	var lvl: Node = load(FAKE_LEVEL).instantiate()
+	lvl.set("stage", 5)
+	_root().add_child(lvl)
+	_tree().current_scene = lvl
+	var win := _mount("res://scripts/ui/win_screen.gd", b)
+	var go := _mount("res://scripts/ui/game_over.gd", b)
+	gs.on_reach_exit()
+	if not win.is_open():
+		err = "win screen should open"
+	if err.is_empty() and (gs.won_calls != 1 or not gs.run_over):
+		err = "win must call GameState.end_run_won() once (calls %d)" % gs.won_calls
+	if err.is_empty():
+		win.show_for_run()           # re-show: no second call
+		b.on_player_died()
+		if gs.won_calls != 1 or go.is_open():
+			err = "re-show / late death must not re-notify or open game over"
+	# 2) Stage 1–4 exits never call it (a normal exit is not a run end).
+	if err.is_empty():
+		win.new_run_button.pressed.emit()
+		gs.on_reach_exit()           # stage 1 of the new run
+		if gs.won_calls != 1 or win.is_open() or gs.run_over:
+			err = "a stage 1 exit must not end the run (calls %d)" % gs.won_calls
+	# 3) BE run_over (e.g. a BE-side death) with the FE latch free → exit + death ignored.
+	if err.is_empty():
+		b.reset()
+		gs.reset()
+		gs.run_over = true
+		b.on_reached_exit()
+		b.on_player_died()
+		if win.is_open() or go.is_open() or b.is_run_over():
+			err = "FE must respect GameState.run_over"
+	for n in [win, go]:
+		if n.is_open():
+			n.close()
+	_end_run([go, win, b, ps, gs])
 	return err
