@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bh5y46chhpcg7"
-path="res://.godot/imported/boy_side_idle.png-9a70aa0129392cf719bf44585639ba03.ctex"
+uid="uid://cdffhpn3ot4va"
+path="res://.godot/imported/floor_dark_template.png-cc082440a5923f074a8243eed0f520c2.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/replace_me/boy_side_idle.png"
-dest_files=["res://.godot/imported/boy_side_idle.png-9a70aa0129392cf719bf44585639ba03.ctex"]
+source_file="res://assets/replace_me/floor_dark_template.png"
+dest_files=["res://.godot/imported/floor_dark_template.png-cc082440a5923f074a8243eed0f520c2.ctex"]
 
 [params]
 
