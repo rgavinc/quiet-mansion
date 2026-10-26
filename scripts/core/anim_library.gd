@@ -74,6 +74,16 @@ static func _hand_points_from_notes(notes: String) -> Array:
 	return pts
 
 
+## All slot names that declare `frames` (animated strips).
+static func animated_slots() -> Array:
+	if not _loaded: reload()
+	var out: Array = []
+	for k in _entries:
+		if _entries[k].has("frames"):
+			out.append(k)
+	return out
+
+
 static func has_slot(slot: String) -> bool:
 	if not _loaded: reload()
 	return _entries.has(slot)

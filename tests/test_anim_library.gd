@@ -22,10 +22,8 @@ func run_all() -> Dictionary:
 func test_all_strips_build() -> String:
 	AnimLibrary.reload()
 	var n := 0
-	for slot in AnimLibrary._entries:
-		var m: Dictionary = AnimLibrary._entries[slot]
-		if not m.has("frames"):
-			continue
+	for slot in AnimLibrary.animated_slots():
+		var m: Dictionary = AnimLibrary.meta(slot)
 		n += 1
 		var sf := SpriteFrames.new()
 		if not AnimLibrary.add_to(sf, slot):
