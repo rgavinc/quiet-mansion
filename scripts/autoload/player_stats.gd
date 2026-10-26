@@ -27,6 +27,15 @@ const BASE := {
 	&"gold_find_mult": 1.0,
 }
 
+## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
+const MIN := {
+	&"max_health": 1.0,
+	&"pickup_time": 0.1,
+	&"tap_threshold": 0.05,
+	&"light_startle_time": 0.2,
+	&"inventory_slots": 1.0,
+}
+
 var health: int = 3
 var gold: int = 0
 ## modifiers: Array of {stat, add, mul, source}
@@ -46,7 +55,7 @@ func get_stat(stat: StringName) -> float:
 		if m.stat == stat:
 			add += m.add
 			mul *= m.mul
-	return (float(BASE[stat]) + add) * mul
+	return maxf((float(BASE[stat]) + add) * mul, float(MIN.get(stat, 0.0)))
 
 
 func max_health() -> int:
@@ -57,7 +66,7 @@ func add_modifier(stat: StringName, add: float = 0.0, mul: float = 1.0, source: 
 	assert(BASE.has(stat), "Unknown stat: %s" % stat)
 	_mods.append({stat = stat, add = add, mul = mul, source = source})
 	if stat == &"max_health":
-		health = mini(health + int(add), max_health())
+		health = clampi(health + int(add), 1, max_health())
 		health_changed.emit(health, max_health())
 	stat_changed.emit(stat, get_stat(stat))
 

@@ -19,6 +19,7 @@ func run_all() -> Dictionary:
 		["invuln_blocks_double_hit", test_invuln],
 		["rejects_bad_values", test_bad_values],
 		["invuln_expires_by_game_time", test_invuln_expires],
+		["stat_floors", test_stat_floors],
 		["input_bindings", test_bindings],
 		["input_actions", test_input_actions],
 	]
@@ -102,7 +103,7 @@ func test_bad_values() -> String:
 	var spent: bool = s.try_spend(-5)
 	var ok: bool = s.health == 3 and s.gold == 0 and not spent
 	s.free()
-	return "" if ok else "bad values changed state: hp %d gold %d" % [s.health if is_instance_valid(s) else -1, 0]
+	return "" if ok else "bad values changed state"
 
 
 func _bound(action: String, pred: Callable) -> bool:
@@ -120,7 +121,14 @@ func test_bindings() -> String:
 	if not _bound("interact", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT):
 		return "interact not on LMB"
 	if not _bound("inv_next", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_WHEEL_DOWN):
-		return "inv_next not on wheel"
+		return "inv_next not on wheel down"
+	if not _bound("inv_prev", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_WHEEL_UP):
+		return "inv_prev not on wheel up"
+	for pair in [["move_left", KEY_A], ["move_right", KEY_D], ["move_up", KEY_W], ["move_down", KEY_S],
+			["move_left", KEY_LEFT], ["move_right", KEY_RIGHT]]:
+		var code: int = pair[1]
+		if not _bound(pair[0], func(e): return e is InputEventKey and e.physical_keycode == code):
+			return "%s not on %s" % [pair[0], OS.get_keycode_string(code)]
 	return ""
 
 
@@ -133,3 +141,12 @@ func test_invuln_expires() -> String:
 	var ok: bool = s.take_hit()
 	s.free()
 	return "" if ok else "invuln never expired"
+
+
+func test_stat_floors() -> String:
+	var s := _make()
+	s.add_modifier(&"max_health", -5.0, 1.0, "curse")
+	s.add_modifier(&"pickup_time", -2.0, 1.0, "curse")
+	var ok: bool = s.max_health() >= 1 and s.health >= 1 and s.get_stat(&"pickup_time") > 0.0
+	s.free()
+	return "" if ok else "stats went below floors"

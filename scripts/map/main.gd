@@ -96,9 +96,9 @@ func _spawn_obstacles() -> void:
 		Vector2(1000, 200),
 		Vector2(1000, 520),
 	]
-	for s in spots:
-		var ob := Node2D.new()
-		ob.set_script(load("res://scripts/world/obstacle.gd"))
+	for i in spots.size():
+		var s: Vector2 = spots[i]
+		var ob: Node2D = load("res://scripts/world/vase.gd" if i % 2 == 0 else "res://scripts/world/obstacle.gd").new()
 		$World/Obstacles.add_child(ob)
 		ob.position = s
 
