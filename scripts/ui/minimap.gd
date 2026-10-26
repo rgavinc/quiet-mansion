@@ -36,20 +36,59 @@ var _acc := 0.0
 var _map_rect := Rect2()
 
 
-func _ready() -> void:
-	if skin == null:
-		skin = HudSkin.load_default()
+func _enter_tree() -> void:
 	if bus == null:
 		bus = UiArt.bus()
 	if stats == null:
 		stats = get_node_or_null(^"/root/PlayerStats")
+	_wire(true)
+	if is_node_ready():
+		refresh()
+
+
+## Signals go to methods and only while in the tree (no lambdas): a HUD that left the tree on
+## a stage change (QA B1) is disconnected and never reads a null tree.
+func _exit_tree() -> void:
+	_wire(false)
+
+
+func _wire(on: bool) -> void:
+	var pairs := []
+	if stats and is_instance_valid(stats):
+		pairs.append([stats, &"items_changed", _on_items_changed])
+		pairs.append([stats, &"stat_changed", _on_stat_changed])
+	if bus and is_instance_valid(bus):
+		pairs.append([bus, &"chase_changed", _on_chase_changed])
+	for p in pairs:
+		var o: Object = p[0]
+		if not o.has_signal(p[1]):
+			continue
+		var connected := o.is_connected(p[1], p[2])
+		if on and not connected:
+			o.connect(p[1], p[2])
+		elif not on and connected:
+			o.disconnect(p[1], p[2])
+
+
+func _ready() -> void:
+	if skin == null:
+		skin = HudSkin.load_default()
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = MAX_SIZE
-	if stats:
-		if stats.has_signal(&"items_changed"):
-			stats.items_changed.connect(func(_i): refresh())
-		if stats.has_signal(&"stat_changed"):
-			stats.stat_changed.connect(func(s, _v): if s == &"minimap": refresh())
+	refresh()
+
+
+func _on_items_changed(_items: Array) -> void:
+	refresh()
+
+
+func _on_stat_changed(stat: StringName, _value: float) -> void:
+	if stat == &"minimap":
+		refresh()
+
+
+## Chase start/end: redraw now so a red dot appears/vanishes at once, not on the next tick.
+func _on_chase_changed(_enemy: Node2D, _chasing: bool) -> void:
 	refresh()
 
 
@@ -67,11 +106,14 @@ func _process(delta: float) -> void:
 
 ## Re-reads visibility and the level, then redraws (called at REFRESH_HZ).
 func refresh() -> void:
+	if not is_inside_tree():
+		return
 	visible = enabled()
 	if not visible:
 		snapshot = {}
 		return
 	snapshot = read_level()
+	_layout()
 	queue_redraw()
 
 
@@ -167,25 +209,49 @@ static func _find_tilemap(n: Node) -> Node:
 	return null
 
 
-## World point -> minimap-local point.
+## World point -> minimap-local point, clamped inside the map frame (so a dot past the level
+## bounds sits on the edge instead of drawing outside the frame).
 func to_map(p: Vector2) -> Vector2:
 	var b: Rect2 = snapshot.get("bounds", Rect2())
 	if not b.has_area():
 		return _map_rect.position
-	return _map_rect.position + (p - b.position) / b.size * _map_rect.size
+	var q := _map_rect.position + (p - b.position) / b.size * _map_rect.size
+	return q.clamp(_map_rect.position, _map_rect.end)
+
+
+## Centre for a dot of radius r: kept r px inside the frame.
+func dot_at(p: Vector2, r: float) -> Vector2:
+	var q := to_map(p)
+	var inner := _map_rect.grow(-r)
+	if not inner.has_area():
+		return _map_rect.get_center()
+	return q.clamp(inner.position, inner.end)
+
+
+## Map rect used by the last draw (minimap-local), for tests.
+func map_rect() -> Rect2:
+	return _map_rect
+
+
+## Fits the level bounds into the control: sets _map_rect. False if there is nothing to fit.
+func _layout() -> bool:
+	var b: Rect2 = snapshot.get("bounds", Rect2())
+	if not b.has_area():
+		return false
+	var sz0 := size.max(MAX_SIZE)
+	var avail := sz0 - Vector2(PAD, PAD) * 2.0
+	var k := minf(avail.x / b.size.x, avail.y / b.size.y)
+	var sz := b.size * k
+	sz.y = clampf(sz.y, minf(MIN_H, avail.y), avail.y)   # non-uniform for wide side-scroller levels
+	_map_rect = Rect2(Vector2(sz0.x - PAD - sz.x, PAD), sz)   # hug the right edge
+	return true
 
 
 func _draw() -> void:
 	if snapshot.is_empty():
 		return
-	var b: Rect2 = snapshot.bounds
-	if not b.has_area():
+	if not _layout():
 		return
-	var avail := size - Vector2(PAD, PAD) * 2.0
-	var k := minf(avail.x / b.size.x, avail.y / b.size.y)
-	var sz := b.size * k
-	sz.y = clampf(sz.y, minf(MIN_H, avail.y), avail.y)   # non-uniform for wide side-scroller levels
-	_map_rect = Rect2(Vector2(size.x - PAD - sz.x, PAD), sz)   # hug the right edge
 	draw_rect(_map_rect.grow(PAD), C_BACK)
 	draw_rect(_map_rect.grow(PAD), C_RIM, false, 2.0)
 	var i := 0
@@ -197,13 +263,14 @@ func _draw() -> void:
 	for s in snapshot.stairs:
 		draw_line(to_map(s[0]), to_map(s[1]), C_STAIR, 2.0)
 	if snapshot.exit != null:
-		var e := to_map(snapshot.exit)
-		draw_rect(Rect2(e - Vector2(4, 6), Vector2(8, 10)), Color(0, 0, 0, 0.8))
-		draw_rect(Rect2(e - Vector2(3, 5), Vector2(6, 8)), C_EXIT)
+		var e := dot_at(snapshot.exit, 6.0)
+		draw_rect(Rect2(e - Vector2(4, 6), Vector2(8, 11)), Color(0, 0, 0, 0.8))
+		draw_rect(Rect2(e - Vector2(3, 5), Vector2(6, 9)), C_EXIT)
 	for c in snapshot.chasers:
-		draw_circle(to_map(c), 4.0, Color(0, 0, 0, 0.8))
-		draw_circle(to_map(c), 3.0, C_CHASER)
+		var q := dot_at(c, 4.0)
+		draw_circle(q, 4.0, Color(0, 0, 0, 0.8))
+		draw_circle(q, 3.0, C_CHASER)
 	if snapshot.player != null:
-		var p := to_map(snapshot.player)
+		var p := dot_at(snapshot.player, 4.5)
 		draw_circle(p, 4.5, Color(0, 0, 0, 0.85))
 		draw_circle(p, 3.5, C_PLAYER)

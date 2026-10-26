@@ -15,6 +15,8 @@ const Minimap := preload("res://scripts/ui/minimap.gd")
 const LureHint := preload("res://scripts/ui/lure_hint.gd")
 
 var skin: HudSkin
+## PlayerStats for the item widgets (tests); null = each widget uses /root/PlayerStats.
+var stats: Node
 var health_gold: Control
 var inventory: Control
 var arrows: Control
@@ -23,6 +25,9 @@ var banner: Control
 var owned_items: Control
 var minimap: Control
 var lure_hint: Control
+var hud_root: Control
+## End screens (UiScreen: game over, win, shop) seen in the tree; the HUD hides while any is open.
+var _screens: Array = []
 
 
 func _ready() -> void:
@@ -35,10 +40,13 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/ui/hud_theme.tres"):
 		root.theme = load("res://assets/ui/hud_theme.tres")
 	add_child(root)
+	hud_root = root
 
 	arrows = OffscreenArrows.new()
 	arrows.name = "OffscreenArrows"
 	arrows.skin = skin
+	if stats:
+		arrows.stats = stats
 	root.add_child(arrows)
 	arrows.set_anchors_preset(Control.PRESET_FULL_RECT)
 
@@ -65,6 +73,8 @@ func _ready() -> void:
 	owned_items = OwnedItemsStrip.new()
 	owned_items.name = "OwnedItems"
 	owned_items.skin = skin
+	if stats:
+		owned_items.stats = stats
 	root.add_child(owned_items)
 	owned_items.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE)
 	owned_items.position = Vector2(14, 112)   # under hearts/gold and the level's 2-line Hint (16, 64)
@@ -81,6 +91,8 @@ func _ready() -> void:
 	minimap = Minimap.new()
 	minimap.name = "Minimap"
 	minimap.skin = skin
+	if stats:
+		minimap.stats = stats
 	root.add_child(minimap)
 	minimap.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE)
 	minimap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -95,9 +107,43 @@ func _ready() -> void:
 	_ignore_mouse(root)
 	child_entered_tree.connect(_ignore_mouse)
 	get_tree().node_added.connect(_on_node_added)
+	_find_screens(get_tree().root)
+
+
+## Hide every HUD widget while an end screen (game over / win / shop) is up.
+func end_screen_open() -> bool:
+	for sc in _screens:
+		if is_instance_valid(sc) and sc.is_inside_tree() and sc.is_open():
+			return true
+	return false
+
+
+func _update_end_screens() -> void:
+	_screens = _screens.filter(func(sc): return is_instance_valid(sc))
+	if hud_root:
+		hud_root.visible = not end_screen_open()
+
+
+func _track_screen(sc: UiScreen) -> void:
+	if _screens.has(sc):
+		return
+	_screens.append(sc)
+	for sig in [&"opened", &"closed", &"tree_exited"]:
+		if not sc.is_connected(sig, _update_end_screens):
+			sc.connect(sig, _update_end_screens)
+	_update_end_screens()
+
+
+func _find_screens(n: Node) -> void:
+	if n is UiScreen:
+		_track_screen(n)
+	for c in n.get_children():
+		_find_screens(c)
 
 
 func _on_node_added(n: Node) -> void:
+	if n is UiScreen:
+		_track_screen(n)
 	if n is Control and is_ancestor_of(n):
 		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
 

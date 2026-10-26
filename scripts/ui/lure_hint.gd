@@ -9,9 +9,33 @@ var skin: HudSkin
 var bus: Node
 
 
-func _ready() -> void:
+func _enter_tree() -> void:
 	if bus == null:
 		bus = UiArt.bus()
+	_wire(true)
+	if is_node_ready():
+		refresh()
+
+
+## Methods (no lambdas), connected only while in the tree.
+func _exit_tree() -> void:
+	_wire(false)
+
+
+func _wire(on: bool) -> void:
+	if bus == null or not is_instance_valid(bus):
+		return
+	for sig in [&"inventory_changed", &"inventory_selected"]:
+		if not bus.has_signal(sig):
+			continue
+		var connected: bool = bus.is_connected(sig, _on_inventory)
+		if on and not connected:
+			bus.connect(sig, _on_inventory)
+		elif not on and connected:
+			bus.disconnect(sig, _on_inventory)
+
+
+func _ready() -> void:
 	text = TEXT
 	horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -19,11 +43,10 @@ func _ready() -> void:
 	add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
 	add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.06))
 	add_theme_constant_override("outline_size", 4)
-	if bus:
-		if bus.has_signal(&"inventory_changed"):
-			bus.inventory_changed.connect(func(_i): refresh())
-		if bus.has_signal(&"inventory_selected"):
-			bus.inventory_selected.connect(func(_i): refresh())
+	refresh()
+
+
+func _on_inventory(_arg: Variant) -> void:
 	refresh()
 
 
@@ -36,4 +59,6 @@ static func holds_lure(b: Node) -> bool:
 
 
 func refresh() -> void:
+	if not is_inside_tree():
+		return
 	visible = holds_lure(bus)
