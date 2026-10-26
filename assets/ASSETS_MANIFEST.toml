@@ -272,6 +272,17 @@ pivot = [16, 31]
 notes = "32x32 vase breaks and spills gold: 0 cracked vase glowing, 1 flash, 2-3 shards + coins burst, 4-5 coins bounce and land on the floor. Spawn real gold_coin pickups after the last frame"
 
 [[asset]]
+path = "assets/art/props/music_box_world.png"
+slot = "music_box_world"
+status = "ai"
+frame_size = [32, 32]
+frames = 6
+fps = 8
+loop = true
+pivot = [16, 31]
+notes = "32x32 world sprite for the music_box lure (also its thrown/landed state): wind-up box with the lid open, a tiny ballerina turning, a key turning on the side, music notes drifting up and fading, and a pulsing sound arc. It is loud, so it is built to grab attention. Bottom-centre pivot sits on the floor"
+
+[[asset]]
 path = "assets/art/characters/merchant_idle.png"
 slot = "merchant_idle"
 status = "ai"
@@ -368,7 +379,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon: lucky coin (more gold)"
+notes = "32x32 shop item icon: lucky coin (more gold). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_quick_hands.png"
@@ -390,7 +401,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Dim Filter (smoky violet lens filter with a crescent moon: softer, shorter beam)"
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Dim Filter (smoky violet lens filter with a crescent moon: softer, shorter beam). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_wide_lens.png"
@@ -401,7 +412,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Wide Lens (flashlight head with a big lens and a wide fanned beam)"
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Wide Lens (flashlight head with a big lens and a wide fanned beam). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_sneakers.png"
@@ -423,7 +434,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Spring Socks (striped sock on a coil spring: higher jump)"
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Spring Socks (striped sock on a coil spring: higher jump). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_banister_gloves.png"
@@ -456,7 +467,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Strong Arm (flexed arm in the boy's teal sleeve with a throw arc: faster throws)"
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Strong Arm (flexed arm in the boy's teal sleeve with a throw arc: faster throws). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_thick_sweater.png"
@@ -522,7 +533,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [16, 16]
-notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Golden Heart (gold heart with +2 badge and sparkles: +2 max hearts, less gold)"
+notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Golden Heart (gold heart with +2 badge and sparkles: +2 max hearts, less gold). spare: not in current pool"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_shadow_cloak.png"
@@ -534,6 +545,72 @@ fps = 1
 loop = false
 pivot = [16, 16]
 notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Shadow Cloak (dark hooded cloak with glowing eyes in the hood: quieter and harder to notice, shorter light)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_rabbits_foot.png"
+slot = "item_icon_rabbits_foot"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, rare rarity (rarity rim #5aa8ff): Rabbit's Foot (white rabbit's foot on a gold key ring with a small red heart: the first lethal hit each stage leaves 1 heart)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_music_box.png"
+slot = "item_icon_music_box"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Music Box (open wind-up box with a tiny ballerina and drifting notes: a throwable lure that plays a tune)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_heavy_vases.png"
+slot = "item_icon_heavy_vases"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Heavy Vases (two chunky porcelain vases with dust at the base and orbiting stun stars: longer vase stun, carrying slows)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_flash_bulb.png"
+slot = "item_icon_flash_bulb"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, rare rarity (rarity rim #5aa8ff): Flash Bulb (silver flash reflector with a blue-dot bulb, glowing, and a green 1-use pip: a startle stuns instead of enraging, once per stage)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_cracked_mirror.png"
+slot = "item_icon_cracked_mirror"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Cracked Mirror (silver hand mirror with a starburst crack and a faint hidden-arrow hint: off-screen chasers give up faster, arrows hidden until close)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_greedy_sack.png"
+slot = "item_icon_greedy_sack"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Greedy Sack (bulging burlap sack with gold coins spilling out and sound arcs: every vase holds gold, breaking is louder)"
 
 # --- Stage 1 environment (tileset atlas per docs/LEVELGEN.md: 16px tiles, 160px floors), exit door, parallax, decor props.
 

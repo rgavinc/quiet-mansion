@@ -39,6 +39,7 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | gold_coin | art/props/gold_coin.png | 16² | 6f @12fps loop, pivot [8, 8]: spin loop, centre pivot |
 | gold_pickup_sparkle | art/props/gold_pickup_sparkle.png | 32² | 6f @14fps, pivot [16, 16]: pickup burst, centre pivot |
 | vase_gold_burst | art/props/vase_gold_burst.png | 32² | 6f @14fps, pivot [16, 31]: vase breaks, coins spill and land |
+| music_box_world | art/props/music_box_world.png | 32² | 6f @8fps loop, pivot [16, 31]: music box lure in the world (also thrown/landed): lid open, ballerina turning, notes drifting up, sound pulse |
 | merchant_idle | art/characters/merchant_idle.png | 64² | 6f @8fps loop, pivot [32, 63]: mask merchant, lantern, beckon |
 | shop_backdrop | art/ui/shop_backdrop.png | 320x180 | still, pivot [160, 90]: shop interior still |
 | game_over_art | art/ui/game_over_art.png | 320x180 | still, pivot [160, 90]: boy caught by hands still; right half free for text |
@@ -47,22 +48,28 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | item_icon_minimap | art/ui/icons/item_icon_minimap.png | 32² | still, pivot [16, 16]: minimap |
 | item_icon_bright_bulb | art/ui/icons/item_icon_bright_bulb.png | 32² | still, pivot [16, 16]: light startles faster |
 | item_icon_soft_shoes | art/ui/icons/item_icon_soft_shoes.png | 32² | still, pivot [16, 16]: quieter steps |
-| item_icon_lucky_coin | art/ui/icons/item_icon_lucky_coin.png | 32² | still, pivot [16, 16]: more gold |
+| item_icon_lucky_coin | art/ui/icons/item_icon_lucky_coin.png | 32² | still, pivot [16, 16]: more gold. spare: not in current pool |
 | item_icon_quick_hands | art/ui/icons/item_icon_quick_hands.png | 32² | still, pivot [16, 16], common rim: white glove + speed lines |
-| item_icon_dim_filter | art/ui/icons/item_icon_dim_filter.png | 32² | still, pivot [16, 16], common rim: smoky lens filter + moon |
-| item_icon_wide_lens | art/ui/icons/item_icon_wide_lens.png | 32² | still, pivot [16, 16], common rim: lens with wide fanned beam |
+| item_icon_dim_filter | art/ui/icons/item_icon_dim_filter.png | 32² | still, pivot [16, 16], common rim: smoky lens filter + moon. spare: not in current pool |
+| item_icon_wide_lens | art/ui/icons/item_icon_wide_lens.png | 32² | still, pivot [16, 16], common rim: lens with wide fanned beam. spare: not in current pool |
 | item_icon_sneakers | art/ui/icons/item_icon_sneakers.png | 32² | still, pivot [16, 16], common rim: red sneaker + speed lines |
-| item_icon_spring_socks | art/ui/icons/item_icon_spring_socks.png | 32² | still, pivot [16, 16], common rim: striped sock on a spring |
+| item_icon_spring_socks | art/ui/icons/item_icon_spring_socks.png | 32² | still, pivot [16, 16], common rim: striped sock on a spring. spare: not in current pool |
 | item_icon_banister_gloves | art/ui/icons/item_icon_banister_gloves.png | 32² | still, pivot [16, 16], common rim: glove gripping a banister |
 | item_icon_big_pockets | art/ui/icons/item_icon_big_pockets.png | 32² | still, pivot [16, 16], uncommon rim: denim pocket + coin/key, + badge |
-| item_icon_strong_arm | art/ui/icons/item_icon_strong_arm.png | 32² | still, pivot [16, 16], uncommon rim: flexed arm + throw arc |
+| item_icon_strong_arm | art/ui/icons/item_icon_strong_arm.png | 32² | still, pivot [16, 16], uncommon rim: flexed arm + throw arc. spare: not in current pool |
 | item_icon_thick_sweater | art/ui/icons/item_icon_thick_sweater.png | 32² | still, pivot [16, 16], uncommon rim: cable-knit sweater + shield |
 | item_icon_gold_magnet | art/ui/icons/item_icon_gold_magnet.png | 32² | still, pivot [16, 16], uncommon rim: horseshoe magnet + coins |
 | item_icon_night_eyes | art/ui/icons/item_icon_night_eyes.png | 32² | still, pivot [16, 16], rare rim: green night goggles |
 | item_icon_ghost_slippers | art/ui/icons/item_icon_ghost_slippers.png | 32² | still, pivot [16, 16], rare rim: ghostly slipper + wisp, −heart |
 | item_icon_grandfather_watch | art/ui/icons/item_icon_grandfather_watch.png | 32² | still, pivot [16, 16], rare rim: gold pocket watch |
-| item_icon_golden_heart | art/ui/icons/item_icon_golden_heart.png | 32² | still, pivot [16, 16], legendary rim: gold heart + “+2” badge |
+| item_icon_golden_heart | art/ui/icons/item_icon_golden_heart.png | 32² | still, pivot [16, 16], legendary rim: gold heart + “+2” badge. spare: not in current pool |
 | item_icon_shadow_cloak | art/ui/icons/item_icon_shadow_cloak.png | 32² | still, pivot [16, 16], legendary rim: hooded cloak, eyes in the dark |
+| item_icon_rabbits_foot | art/ui/icons/item_icon_rabbits_foot.png | 32² | still, pivot [16, 16], rare rim: rabbit's foot on a key ring + heart |
+| item_icon_music_box | art/ui/icons/item_icon_music_box.png | 32² | still, pivot [16, 16], uncommon rim: open music box, ballerina, notes |
+| item_icon_heavy_vases | art/ui/icons/item_icon_heavy_vases.png | 32² | still, pivot [16, 16], common rim: two chunky vases + stun stars |
+| item_icon_flash_bulb | art/ui/icons/item_icon_flash_bulb.png | 32² | still, pivot [16, 16], rare rim: flash reflector + bulb, 1-use pip |
+| item_icon_cracked_mirror | art/ui/icons/item_icon_cracked_mirror.png | 32² | still, pivot [16, 16], uncommon rim: cracked hand mirror |
+| item_icon_greedy_sack | art/ui/icons/item_icon_greedy_sack.png | 32² | still, pivot [16, 16], legendary rim: coin sack spilling gold |
 | exit_door_stage1 | art/props/exit_door_stage1.png | 48x64 | 4f @6fps loop, pivot [24, 63]: stage-1 stone-arch exit, green lamp, glow loop |
 | bg_stage1_far | art/backgrounds/bg_stage1_far.png | 320x180 | still, pivot [0, 0]: storm sky + moonlit windows, tiles in x, scroll 0.15 |
 | bg_stage1_mid | art/backgrounds/bg_stage1_mid.png | 320x180 | still, pivot [0, 0]: dim gallery portraits/columns, window gaps transparent, tiles in x, scroll 0.45 |
@@ -74,7 +81,7 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | prop_chest_closed | art/props/prop_chest_closed.png | 32² | still, pivot [16, 31] |
 | prop_chest_open | art/props/prop_chest_open.png | 32² | still, pivot [16, 31]: same footprint, gold inside |
 
-**Item icon rarity rims** (all `item_icon_<id>` slots are named by the item id in `scripts/items/item_db.gd`): the 15 icons above from `quick_hands` down carry a subtle rim. The silhouette outline is mixed 50% toward the rarity colour, plus a faint 1 px outer halo (alpha 70) in that colour: **common `#b9b2c4`** (pewter), **uncommon `#5fd08a`** (green), **rare `#5aa8ff`** (blue), **legendary `#ffb640`** (amber). Keep a 1 px transparent margin so the halo fits in 32×32. The first five icons (`extra_heart`, `minimap`, `bright_bulb`, `soft_shoes`, `lucky_coin`) predate the rims and have none yet. Their slot names already match the item ids. Contact sheet: `/workspace/qm-style-target/item_icons_4x.png` (not in the repo).
+**Item icon rarity rims** (all `item_icon_<id>` slots are named by the item id in `scripts/items/item_db.gd`): the icons above from `quick_hands` down carry a subtle rim. That covers the 15 from round 8 and the 6 behaviour items `rabbits_foot`…`greedy_sack`. The silhouette outline is mixed 50% toward the rarity colour, plus a faint 1 px outer halo (alpha 70) in that colour: **common `#b9b2c4`** (pewter), **uncommon `#5fd08a`** (green), **rare `#5aa8ff`** (blue), **legendary `#ffb640`** (amber). Keep a 1 px transparent margin so the halo fits in 32×32. The first five icons (`extra_heart`, `minimap`, `bright_bulb`, `soft_shoes`, `lucky_coin`) predate the rims and have none yet. Their slot names already match the item ids. Rows marked **spare: not in current pool** (`dim_filter`, `lucky_coin`, `strong_arm`, `wide_lens`, `spring_socks`, `golden_heart`) were replaced in the pool by the behaviour items. Their art and manifest entries are kept for later use. Contact sheet: `/workspace/qm-style-target/item_icons_4x.png` (not in the repo).
 
 ## Stage 1 environment — built to `docs/LEVELGEN.md`
 Numbers used (from LEVELGEN on `development`): **tile = 16 px**; a floor band is **10 tiles = 160 px** (floors 160 px apart, floor N surface at `level_origin_y − N·160`), bottom row of the band = floor slab (collision); top floor gets a 1-tile ceiling. Rooms 20–40 tiles wide, kits multiple of 4 wide × exactly 10 tall. **Doorways 3 tiles high in band rows 6–8** (0-based from the top). **Stair (lead decision, round 6; supersedes LEVELGEN's 4-tile stair): diagonal 15 tiles (240 px) rising exactly 160 px (one floor, ≈34°), plus a flat 3-tile (48 px) landing at each end = 21 tiles (336 px) total**; trigger covers both bands (320 px tall). Jump apex ≈ 52 px clears 2-tile props; furniture taller than 2 tiles blocks.
@@ -111,7 +118,7 @@ Full stair = **3 + 15 + 3 = 21 tiles (336 px)**. Stair node points: `bottom` = (
 `flashlight_blob` (`art/ui/light_blob.png`, 128², centre pivot [64, 64]) now has a template: `assets/replace_me/flashlight_blob_template.png` (centre cross, 1/8–1/2 radius rings). Keep it white with radial alpha; code tints it.
 
 ## How to replace an animation
-Animated slots (`boy_idle`, `boy_run`, `boy_jump`, `boy_pickup`, `boy_carry`, `boy_throw`, `boy_climb_stairs`, `boy_hurt`, `puppet_calm`, `puppet_startle`, `puppet_chase`, `puppet_chase_float`, `vase_*`) are **one horizontal PNG strip** per slot: frames left→right, no padding, transparent background. Frame data lives only in `assets/ASSETS_MANIFEST.toml` (`frame_size`, `frames`, `fps`, `loop`, `pivot`, plus `hand_points` for `boy_pickup`/`boy_carry`/`boy_throw`: one `[x, y]` per frame, frame-local pixels, where held/thrown objects attach).
+Animated slots (`boy_idle`, `boy_run`, `boy_jump`, `boy_pickup`, `boy_carry`, `boy_throw`, `boy_climb_stairs`, `boy_hurt`, `puppet_calm`, `puppet_startle`, `puppet_chase`, `puppet_chase_float`, `vase_*`, `music_box_world`) are **one horizontal PNG strip** per slot: frames left→right, no padding, transparent background. Frame data lives only in `assets/ASSETS_MANIFEST.toml` (`frame_size`, `frames`, `fps`, `loop`, `pivot`, plus `hand_points` for `boy_pickup`/`boy_carry`/`boy_throw`: one `[x, y]` per frame, frame-local pixels, where held/thrown objects attach).
 1. Open `assets/replace_me/<slot>_template.png` in your editor (same pixel size as the strip) and draw on a new layer over it. Guides: magenta box = one frame; cyan row = feet line (pivot y); dotted cyan column + white dot = pivot (bottom-centre); orange/red cross = that frame's `hand_points` entry (pickup/carry/throw); green dots on `boy_climb_stairs` = stair slope through the pivot (the Stair.bottom→top line). The faint figure underneath is the current AI frame.
 2. Keep the same frame size and frame count — or change `frames` (and `fps`/`loop` if needed) in the manifest to match what you drew. Keep feet on the feet line so the pivot still works. For slots with `hand_points`, keep exactly one point per frame: if the hand moves in your drawing, update that frame's `[x, y]`.
 3. Hide the template layer and export over the `path` listed in the manifest (no frame info in filenames).
