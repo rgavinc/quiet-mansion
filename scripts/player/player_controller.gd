@@ -20,6 +20,7 @@ var _interact_down: bool = false
 var _interact_held: float = 0.0
 var _hp_seen: int = -1
 var stair: Stair = null
+var _stair_approach: bool = false   # entered off the line: step along the floor to the stair end first
 var _stair_t: float = 0.0
 var _jump_queued: bool = false
 var _throw_anim_left: float = 0.0
@@ -55,6 +56,21 @@ func _ready() -> void:
 func light_on() -> bool:
 	var l := get_node_or_null(^"Flashlight")
 	return l != null and l.visible
+
+
+## Last flashlight aim (mouse direction); tests may set it.
+var aim_dir: Vector2 = Vector2.RIGHT
+
+## True if world point `p` is inside the lit cone. Enemies use this for their startle
+## build-up (they add their own line-of-sight check, so walls block the beam).
+func lights(p: Vector2) -> bool:
+	if not light_on():
+		return false
+	var to := p - global_position
+	if to.length() > PlayerStats.get_stat(&"light_range"):
+		return false
+	var half := deg_to_rad(PlayerStats.get_stat(&"light_angle_deg") * 0.5)
+	return to.length() < 0.01 or absf(aim_dir.angle_to(to)) <= half
 
 
 func _physics_process(delta: float) -> void:
@@ -116,11 +132,12 @@ func jump() -> void:
 func _try_enter_stair(up_down: float) -> void:
 	for s in get_tree().get_nodes_in_group("stairs"):
 		if s is Stair and s.is_near(global_position):
-			var t: float = s.t_at(global_position)
+			var t: float = s.entry_t(global_position)   # anywhere in the 320px trigger
 			# up (negative y) only if not already at top, down only if not at bottom
 			if (up_down < 0.0 and t < 0.98) or (up_down > 0.0 and t > 0.02):
 				stair = s
 				_stair_t = t
+				_stair_approach = not s.on_line(global_position)   # wide trigger: no snap
 				state = State.CLIMB
 				velocity = Vector2.ZERO
 				return
@@ -132,6 +149,24 @@ func _tick_climb(delta: float, dir: Vector2) -> void:
 		return
 	var length := stair.global_bottom().distance_to(stair.global_top())
 	var along := -dir.y if absf(dir.y) > 0.1 else dir.x * signf(stair.global_top().x - stair.global_bottom().x)
+	if _stair_approach:
+		# Walk to the stair end on this floor (any stair width), then climb from there.
+		var into := 1.0 if _stair_t <= 0.5 else -1.0   # +along climbs up from the bottom
+		if along * into < 0.0:
+			_stair_approach = false   # pressed away: let go of the stair
+			state = State.NORMAL
+			stair = null
+			return
+		if along == 0.0:
+			return
+		var goal := stair.point_at(_stair_t)
+		var step := PlayerStats.get_stat(&"climb_speed") * delta
+		if goal.x != global_position.x:
+			facing = 1 if goal.x > global_position.x else -1
+		global_position = global_position.move_toward(goal, step)
+		if global_position.distance_to(goal) < 0.5:
+			_stair_approach = false
+		return
 	_stair_t = clampf(_stair_t + along * PlayerStats.get_stat(&"climb_speed") * delta / maxf(length, 1.0), 0.0, 1.0)
 	global_position = stair.point_at(_stair_t)
 	var dx := stair.global_top().x - stair.global_bottom().x
@@ -345,6 +380,8 @@ func _update_hover_select() -> void:
 		return
 	var mouse := get_global_mouse_position()
 	var aim := (mouse - global_position)
+	if aim.length() > 0.01:
+		aim_dir = aim
 	var rng := PlayerStats.get_stat(&"light_range")
 	var half := deg_to_rad(PlayerStats.get_stat(&"light_angle_deg") * 0.5)
 	for e in get_tree().get_nodes_in_group("puppets"):
