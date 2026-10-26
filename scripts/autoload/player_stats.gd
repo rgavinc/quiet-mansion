@@ -30,6 +30,12 @@ const BASE := {
 }
 
 ## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
+## Physics layers (bits). Player and enemies never block each other, so a catch is a
+## distance check on overlapping bodies instead of two colliders stalling 26px apart.
+const LAYER_WORLD := 1
+const LAYER_PLAYER := 2
+const LAYER_ENEMY := 4
+
 const MIN := {
 	&"max_health": 1.0,
 	&"pickup_time": 0.1,

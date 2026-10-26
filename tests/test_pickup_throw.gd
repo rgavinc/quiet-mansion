@@ -23,6 +23,9 @@ func run_all() -> Dictionary:
 		["tap_never_targets_puppet", test_tap_not_puppet],
 		["knock_noise_once", test_knock_noise_once],
 		["knocked_prop_hits_enemy_where_it_lands", test_knock_lands_on_enemy],
+		["player_and_puppet_never_block_each_other", test_layers],
+		["puppet_catch_costs_heart_in_scene", test_catch_in_scene],
+		["full_pickup_is_pickup_time_from_press", test_pickup_total_time],
 	]
 	var passed := 0
 	for item in checks:
@@ -219,3 +222,36 @@ func test_knock_lands_on_enemy() -> String:
 	_add(e, Vector2(148, 100))
 	p.interact_pressed(); p.interact_released()
 	return "" if e.is_queued_for_deletion() else "falling prop did not hit calm puppet"
+
+
+func test_layers() -> String:
+	var p := _player()
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	_add(e, Vector2(400, 400))
+	if p.collision_mask & e.collision_layer: return "player collides with puppet"
+	if e.collision_mask & p.collision_layer: return "puppet collides with player"
+	return ""
+
+
+## Real colliders (main.gd sizes: player r12, puppet r14), real move_and_slide.
+func test_catch_in_scene() -> String:
+	var p := _player(Vector2(100, 100))
+	var pc := CollisionShape2D.new(); var c1 := CircleShape2D.new(); c1.radius = 12; pc.shape = c1; p.add_child(pc)
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	var ec := CollisionShape2D.new(); var c2 := CircleShape2D.new(); c2.radius = 14; ec.shape = c2; e.add_child(ec)
+	_add(e, Vector2(160, 100))
+	e._alert()
+	for i in 120:
+		e._physics_process(1.0 / 60.0)
+		if PlayerStats.health < 3: break
+	return "" if PlayerStats.health == 2 else "puppet never caught (hp %d, gap %.1f)" % [PlayerStats.health, e.global_position.distance_to(p.global_position)]
+
+
+func test_pickup_total_time() -> String:
+	var p := _player()
+	_vase(Vector2(120, 100))
+	p.interact_pressed()
+	var t := 0.0
+	while p.inventory.items.is_empty() and t < 3.0:
+		p.tick(1.0 / 60.0, Vector2.ZERO); t += 1.0 / 60.0
+	return "" if absf(t - PlayerStats.get_stat(&"pickup_time")) < 0.05 else "full pickup took %.2fs" % t
