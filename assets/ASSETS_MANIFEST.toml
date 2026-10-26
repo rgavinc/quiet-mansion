@@ -313,7 +313,7 @@ frames = 1
 fps = 1
 loop = false
 pivot = [160, 90]
-notes = "320x180 still: the boy escapes out the mansion front door into dawn light with a sack of gold, puppets recoil in the shadows behind. Same layout as game_over_art: right half kept calm and dark for the seed + gold text and the New run button"
+notes = "320x180 still: the boy escapes out the mansion front door into dawn light with a sack of gold, puppets recoil in the shadows behind the open door leaf (all figures in the left half, x < 160). Same layout as game_over_art: right half (x >= 160) is dark ambience only for the seed + gold text and the New run button"
 
 [[asset]]
 path = "assets/art/ui/icons/item_icon_extra_heart.png"

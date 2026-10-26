@@ -3,7 +3,7 @@
 Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as bright focus. ~64×64 characters, ~32×32 tiles.
 
 ## Replace loop
-1. Open `assets/replace_me/` — labeled stills (`boy_side_idle`, `boy_mid_jump`, `puppet_hand_calm`, `puppet_hand_enraged`, …).
+1. Open `assets/replace_me/` — every slot has `<slot>_template.png` (e.g. `boy_side_idle_template.png`, `boy_mid_jump_template.png`, `puppet_hand_calm_template.png`, `puppet_hand_enraged_template.png`, `exit_door_template.png`, `floor_dark_template.png`, …).
 2. Overwrite the matching `assets/art/...` path from `ASSETS_MANIFEST.toml`.
 3. Flip `status` to `"human"`. Watermark stays until art+audio are all human.
 
@@ -42,7 +42,7 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | merchant_idle | art/characters/merchant_idle.png | 64² | 6f @8fps loop, pivot [32, 63]: mask merchant, lantern, beckon |
 | shop_backdrop | art/ui/shop_backdrop.png | 320x180 | still, pivot [160, 90]: shop interior still |
 | game_over_art | art/ui/game_over_art.png | 320x180 | still, pivot [160, 90]: boy caught by hands still; right half free for text |
-| win_screen_art | art/ui/win_screen_art.png | 320x180 | still, pivot [160, 90]: boy escapes out the front door into dawn with gold, puppets recoil in the shadows; same layout as game_over_art, right half calm/dark for seed + gold text and the New run button |
+| win_screen_art | art/ui/win_screen_art.png | 320x180 | still, pivot [160, 90]: boy escapes out the front door into dawn with gold, puppets recoil behind the door leaf; all figures in the left half (x < 160), right half dark ambience only for seed + gold text and the New run button (same layout as game_over_art) |
 | item_icon_extra_heart | art/ui/icons/item_icon_extra_heart.png | 32² | still, pivot [16, 16]: +1 heart |
 | item_icon_minimap | art/ui/icons/item_icon_minimap.png | 32² | still, pivot [16, 16]: minimap |
 | item_icon_bright_bulb | art/ui/icons/item_icon_bright_bulb.png | 32² | still, pivot [16, 16]: light startles faster |

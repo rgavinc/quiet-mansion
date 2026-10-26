@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d2ox25o0dfioi"
-path="res://.godot/imported/puppet_hand_enraged.png-c8d9cac92758ebaaa91a93a989652b40.ctex"
+uid="uid://603pjr6ph1c7"
+path="res://.godot/imported/boy_mid_jump_template.png-9673f9d0cf95364958ecfbaba95db837.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/replace_me/puppet_hand_enraged.png"
-dest_files=["res://.godot/imported/puppet_hand_enraged.png-c8d9cac92758ebaaa91a93a989652b40.ctex"]
+source_file="res://assets/replace_me/boy_mid_jump_template.png"
+dest_files=["res://.godot/imported/boy_mid_jump_template.png-9673f9d0cf95364958ecfbaba95db837.ctex"]
 
 [params]
 
