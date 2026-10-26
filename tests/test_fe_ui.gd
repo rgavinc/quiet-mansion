@@ -61,6 +61,17 @@ func run_all() -> Dictionary:
 		["end_latch_same_frame_both_orders", test_latch_same_frame],
 		["end_latch_cleared_by_new_run_and_retry", test_latch_cleared],
 		["win_calls_gamestate_end_run_won_and_respects_run_over", test_win_end_run_won],
+		["owned_items_strip_follows_items_changed", test_owned_strip_updates],
+		["owned_items_strip_shows_charges", test_owned_strip_charges],
+		["arrow_hidden_beyond_reveal_distance_shown_inside", test_arrow_reveal_distance],
+		["minimap_visible_only_with_has_minimap", test_minimap_visibility],
+		["lure_hint_only_while_music_box_held", test_lure_hint],
+		["hud_mounts_items_strip_minimap_and_hint", test_hud_items_widgets],
+		["items_widgets_disconnect_on_exit_no_tree_errors", test_items_widgets_exit_tree],
+		["owned_items_strip_stacks_duplicates", test_owned_strip_stacks],
+		["owned_items_strip_30_items_wraps_inside_1020", test_owned_strip_wraps],
+		["minimap_dots_clamped_and_chase_end_immediate", test_minimap_clamp_and_chase_end],
+		["hud_hidden_while_end_screen_open", test_hud_hidden_end_screen],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -70,6 +81,8 @@ func run_all() -> Dictionary:
 		])
 	if _item_db() != null:   # BE PR #27 present
 		checks.append(["shop_initials_unique_for_itemdb", test_initials_itemdb])
+	if _global_script("LevelNav") != null:   # Lead's PR #13 (generated level) present
+		checks.append(["minimap_reads_generated_level_floors", test_minimap_level_nav])
 	for item in checks:
 		var err: String = item[1].call()
 		if err.is_empty():
@@ -1829,4 +1842,478 @@ func test_coin_face() -> String:
 		if cols < img.get_width() * 0.6:
 			err = "coin face only %d/%d px wide (sliver)" % [cols, img.get_width()]
 	holder.free()
+	return err
+
+
+# --- Items HUD: owned strip, reveal arrows, minimap, lure hint -------------------------
+func _global_script(cls: String) -> Script:
+	for c in ProjectSettings.get_global_class_list():
+		if str(c.get("class", "")) == cls:
+			return load(str(c.get("path", ""))) as Script
+	return null
+
+
+func _fresh_stats() -> Node:
+	var ps: Node = load("res://scripts/autoload/player_stats.gd").new()
+	_root().add_child(ps)
+	return ps
+
+
+func _mount_with_stats(path: String, ps: Node, bus: Node = null) -> Node:
+	var n: Node = load(path).new()
+	n.set("stats", ps)
+	if bus != null:
+		n.set("bus", bus)
+	_root().add_child(n)
+	return n
+
+
+func test_owned_strip_updates() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var err := ""
+	if not strip.entries.is_empty() or strip.visible:
+		err = "no items -> empty, hidden strip"
+	var db := _item_db()
+	var sack: Object = db.make("greedy_sack")
+	var odd: Object = db.make("minimap")
+	odd.icon_slot = "no_such_icon_slot"   # forces the letter-tile fallback
+	ps.grant_item(sack)
+	if err.is_empty() and (strip.entries.size() != 1 or strip.entries[0].id != "greedy_sack"):
+		err = "grant -> items_changed -> 1 entry, got %s" % [strip.entries]
+	ps.grant_item(odd)
+	if err.is_empty() and strip.entries.map(func(e): return e.id) != ["greedy_sack", "minimap"]:
+		err = "second grant should append, got %s" % [strip.entries]
+	if err.is_empty() and not strip.visible:
+		err = "strip should show once something is owned"
+	if err.is_empty():
+		var t0 := strip.tiles[0].get_node_or_null(^"Tile/Icon") as TextureRect
+		if t0 == null or t0.texture == null:
+			err = "icon_slot with manifest art -> Icon texture"
+	if err.is_empty():
+		var lab := strip.tiles[1].get_node_or_null(^"Tile/Initials") as Label
+		var want: String = load("res://scripts/ui/shop.gd").initials("Minimap")
+		if lab == null or lab.text != want:
+			err = "missing icon -> shop letter tile '%s', got %s" % [want, lab.text if lab else "none"]
+		elif lab.get_theme_color(&"font_color") != HudSkin.load_default().rarity_colors["uncommon"]:
+			err = "letter tile should use the rarity palette colour"
+		else:
+			var sb := (strip.tiles[1].get_node(^"Tile") as PanelContainer).get_theme_stylebox(&"panel") as StyleBoxFlat
+			if sb == null or sb.border_color != HudSkin.load_default().rarity_colors["uncommon"]:
+				err = "tile rim should be the rarity colour"
+	ps.reset()
+	if err.is_empty() and (not strip.entries.is_empty() or strip.visible):
+		err = "reset -> items_changed([]) -> empty, hidden"
+	_cleanup([strip, ps])
+	return err
+
+
+func _pips(strip: Node, i: int) -> Control:
+	return strip.tiles[i].get_node_or_null(^"Charges/Pips") as Control
+
+
+func test_owned_strip_charges() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	var bulb: Object = db.make("flash_bulb")
+	var foot: Object = db.make("rabbits_foot")
+	var plain: Object = db.make("sneakers")
+	for it in [bulb, foot, plain]:
+		ps.grant_item(it)
+	var err := ""
+	if strip.entries.size() != 3:
+		err = "want 3 entries, got %d" % strip.entries.size()
+	for i in 2:
+		var p := _pips(strip, i) if err.is_empty() else null
+		if err.is_empty() and (p == null or p.total != 1 or p.left != 1):
+			err = "%s: one full pip (1/1) at start" % strip.entries[i].id
+	if err.is_empty() and strip.tiles[2].get_node_or_null(^"Charges") != null:
+		err = "max_charges 0 -> no pip row"
+	bulb.use_charge()   # Flash Bulb fired: Item re-emits items_changed
+	if err.is_empty() and (strip.entries[0].charges != 0 or _pips(strip, 0).left != 0):
+		err = "use_charge -> pip empties, got %s" % [strip.entries[0]]
+	if err.is_empty() and _pips(strip, 1).left != 1:
+		err = "other items' charges unaffected"
+	foot.set_charges(0)   # heart save spent
+	if err.is_empty() and _pips(strip, 1).left != 0:
+		err = "set_charges(0) -> Rabbit's Foot pip empties"
+	ps.begin_stage(null)   # refill
+	if err.is_empty() and (_pips(strip, 0).left != 1 or _pips(strip, 1).left != 1):
+		err = "begin_stage refills -> pips full again"
+	# a multi-charge item shows the count too
+	foot.max_charges = 3
+	foot.set_charges(2)
+	if err.is_empty():
+		var n := strip.tiles[1].get_node_or_null(^"Charges/Count") as Label
+		if n == null or n.text != "2/3" or _pips(strip, 1).total != 3:
+			err = "max 3 -> 3 pips + '2/3' count"
+	_cleanup([strip, ps])
+	return err
+
+
+class _RevealStats extends Node:
+	var dist := INF
+	func arrow_reveal_distance() -> float:
+		return dist
+
+
+func test_arrow_reveal_distance() -> String:
+	var b := _bus()
+	var arrows := _mount("res://scripts/ui/offscreen_arrows.gd", b)
+	var fake := _RevealStats.new(); _root().add_child(fake)
+	arrows.stats = fake
+	var cam := Camera2D.new(); _root().add_child(cam); cam.make_current()
+	var boy := Node2D.new(); boy.add_to_group("player"); _root().add_child(boy)
+	boy.global_position = cam.get_screen_center_position()
+	var near := _Chaser.new(); _root().add_child(near)
+	near.global_position = boy.global_position + Vector2(1000, 0)   # off-screen, inside 1280
+	var far := _Chaser.new(); _root().add_child(far)
+	far.global_position = boy.global_position + Vector2(-3000, 0)   # off-screen, beyond 1280
+	b.report_chase(near, true); b.report_chase(far, true)
+	var ids := func() -> Array: return arrows.arrows.map(func(x): return x["enemy"])
+	var err := ""
+	arrows._process(0.1)
+	if ids.call().size() != 2:
+		err = "INF reveal (no Cracked Mirror) -> both arrows, got %d" % ids.call().size()
+	fake.dist = 1280.0
+	arrows._process(0.1)
+	if err.is_empty() and ids.call() != [near]:
+		err = "reveal 1280 -> only the chaser within 1280, got %s" % [ids.call()]
+	far.global_position = boy.global_position + Vector2(-1200, 0)   # closes in
+	arrows._process(0.1)
+	if err.is_empty() and ids.call().size() != 2:
+		err = "chaser moving inside reveal distance -> arrow appears"
+	var bare := Node.new(); _root().add_child(bare)
+	arrows.stats = bare   # no arrow_reveal_distance(): has_method guard -> INF
+	far.global_position = boy.global_position + Vector2(-3000, 0)
+	arrows._process(0.1)
+	if err.is_empty() and ids.call().size() != 2:
+		err = "stats without arrow_reveal_distance -> all arrows"
+	b.report_chase(near, false); b.report_chase(far, false)
+	_cleanup([arrows, fake, bare, cam, boy, near, far, b])
+	return err
+
+
+func test_minimap_visibility() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	var boy := Node2D.new(); boy.add_to_group("player"); _root().add_child(boy)
+	boy.global_position = Vector2(200, 300)
+	var ex := Node2D.new(); ex.add_to_group("exit"); _root().add_child(ex)
+	ex.global_position = Vector2(1100, 100)
+	var ch := _Chaser.new(); _root().add_child(ch); ch.global_position = Vector2(900, 500)
+	var err := ""
+	mm._process(1.0)
+	if mm.visible or not mm.snapshot.is_empty():
+		err = "no Minimap item -> hidden, no work"
+	var item: Object = _item_db().make("minimap")
+	ps.grant_item(item)   # stat minimap = 1 -> items_changed
+	if err.is_empty() and not mm.visible:
+		err = "has_minimap() true -> visible immediately"
+	b.report_chase(ch, true)
+	mm._process(1.0)   # 10 Hz tick
+	if err.is_empty():
+		var s: Dictionary = mm.snapshot
+		if s.get("player") != boy.global_position or s.get("exit") != ex.global_position:
+			err = "snapshot should carry player + exit, got %s" % [s]
+		elif s.chasers != [ch.global_position]:
+			err = "reported chaser -> red dot, got %s" % [s.chasers]
+		elif s.bands.is_empty() or not (s.bounds as Rect2).has_point(boy.global_position):
+			err = "bounds/bands should cover the level, got %s" % [s]
+	b.report_chase(ch, false)
+	mm._process(1.0)
+	if err.is_empty() and not mm.snapshot.chasers.is_empty():
+		err = "chase ended -> no red dot"
+	ps.reset()
+	if err.is_empty() and mm.visible:
+		err = "item gone -> hidden"
+	_cleanup([mm, boy, ex, ch, b, ps])
+	return err
+
+
+func test_minimap_level_nav() -> String:
+	var Nav := _global_script("LevelNav")
+	var Gen := _global_script("LevelGenerator")
+	if Gen == null:
+		return "LevelGenerator missing alongside LevelNav"
+	var L: Dictionary = Gen.fallback_layout(1)
+	var prev = Nav.get("current")
+	Nav.set("current", Nav.from_layout(L))
+	var ps := _fresh_stats()
+	ps.grant_item(_item_db().make("minimap"))
+	var b := _bus()
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	mm._process(1.0)
+	var s: Dictionary = mm.snapshot
+	var err := ""
+	if s.get("source") != "level_nav":
+		err = "generated level -> LevelNav source, got %s" % s.get("source")
+	elif s.bands.size() != int(L.floors):
+		err = "one band per floor: want %d, got %d" % [int(L.floors), s.bands.size()]
+	elif s.stairs.size() != (L.stairs as Array).size():
+		err = "stairs should be drawn"
+	Nav.set("current", prev)
+	_cleanup([mm, b, ps])
+	return err
+
+
+func test_lure_hint() -> String:
+	var b := _bus()
+	var hint := _mount("res://scripts/ui/lure_hint.gd", b)
+	var err := ""
+	if hint.text != "tap: throw lure":
+		err = "exact text 'tap: throw lure', got '%s'" % hint.text
+	if err.is_empty() and hint.visible:
+		err = "empty hands -> hidden"
+	var vase := {id = "vase_1", slot = "vase", name = "Vase", throwable = true}
+	var lure := {id = "music_box_lure_1", slot = "music_box_world", name = "Music Box", throwable = true, lure = true}
+	b.set_items([vase, lure])
+	b.select_item(0)
+	if err.is_empty() and hint.visible:
+		err = "holding a vase -> hidden"
+	b.select_item(1)
+	if err.is_empty() and not hint.visible:
+		err = "Music Box selected -> visible"
+	b.set_items([vase])   # thrown
+	if err.is_empty() and hint.visible:
+		err = "lure thrown -> hidden"
+	_cleanup([hint, b])
+	return err
+
+
+func test_hud_items_widgets() -> String:
+	var hud: Node = load("res://scripts/ui/hud.gd").new()
+	_root().add_child(hud)
+	var err := ""
+	for n in ["OwnedItems", "Minimap", "LureHint"]:
+		if hud.get_node_or_null(NodePath("HudRoot/" + n)) == null:
+			err = "HUD missing %s" % n
+	_cleanup([hud])
+	return err
+
+
+## Captures engine/script errors pushed while it's registered (OS.add_logger, Godot 4.5+).
+class _ErrLog extends Logger:
+	var errors: Array[String] = []
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String,
+			_editor_notify: bool, _error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		errors.append("%s:%d %s %s %s" % [file.get_file(), line, function, code, rationale])
+	func _log_message(_message: String, _error: bool) -> void:
+		pass
+
+
+## Connections on `sig` of `src` whose target is `w` or one of its descendants.
+func _conns_into(src: Object, sig: StringName, widgets: Array) -> int:
+	var n := 0
+	if src == null or not src.has_signal(sig):
+		return 0
+	for c in src.get_signal_connection_list(sig):
+		var o: Object = (c.callable as Callable).get_object()
+		for w in widgets:
+			if is_instance_valid(w) and o != null and (o == w or (o is Node and (w as Node).is_ancestor_of(o))):
+				n += 1
+	return n
+
+
+## QA B1: own Minimap -> stage change (old HUD leaves the tree, later freed) -> BE emits
+## items_changed / stat_changed / chase / inventory signals: no errors, no connections left.
+func test_items_widgets_exit_tree() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var hud: Node = load("res://scripts/ui/hud.gd").new()
+	hud.stats = ps
+	_root().add_child(hud)
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var hint := _mount("res://scripts/ui/lure_hint.gd", b)
+	var widgets := [hud, mm, strip, hint]
+	ps.grant_item(_item_db().make("minimap"))
+	var err := ""
+	if not mm.visible:
+		err = "setup: minimap should be visible"
+	if err.is_empty() and _conns_into(ps, &"items_changed", widgets) == 0:
+		err = "setup: widgets should listen to items_changed while in the tree"
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	for w in widgets:
+		_root().remove_child(w)   # stage change: the old level (and its HUD) leaves the tree
+	var left := 0
+	for sig in [&"items_changed", &"stat_changed"]:
+		left += _conns_into(ps, sig, widgets)
+	for sig in [&"chase_changed", &"inventory_changed", &"inventory_selected"]:
+		left += _conns_into(b, sig, widgets)
+	if err.is_empty() and left != 0:
+		err = "%d orphan connections after leaving the tree" % left
+	var ch := _Chaser.new(); _root().add_child(ch)
+	var bulb: Object = _item_db().make("flash_bulb")
+	var emit_all := func() -> void:
+		ps.begin_stage(null)
+		ps.grant_item(_item_db().make("sneakers"))
+		bulb.use_charge()
+		b.report_chase(ch, true); b.report_chase(ch, false)
+		b.set_items([{id = "l", slot = "music_box_world", name = "Music Box", lure = true}])
+		b.select_item(0)
+	ps.grant_item(bulb)
+	emit_all.call()
+	for w in widgets:
+		w.free()
+	emit_all.call()
+	OS.remove_logger(log)
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors after the HUD left the tree: %s" % [log.errors.slice(0, 3)]
+	# re-entering the tree reconnects (a HUD that's moved, not freed, keeps working)
+	var mm2 := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	_root().remove_child(mm2)
+	_root().add_child(mm2)
+	if err.is_empty() and (_conns_into(ps, &"items_changed", [mm2]) != 1 or not mm2.visible):
+		err = "re-entering the tree should reconnect exactly once"
+	_cleanup([mm2, ch, b, ps])
+	return err
+
+
+func test_owned_strip_stacks() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	var bulbs: Array = []
+	for i in 3:
+		bulbs.append(db.make("flash_bulb"))
+		ps.grant_item(bulbs[i])
+	ps.grant_item(db.make("sneakers"))
+	ps.grant_item(db.make("sneakers"))
+	ps.grant_item(db.make("minimap"))
+	var err := ""
+	if strip.entries.map(func(e): return [e.id, e.count]) != [["flash_bulb", 3], ["sneakers", 2], ["minimap", 1]]:
+		err = "duplicates should stack in first-owned order, got %s" % [strip.entries.map(func(e): return [e.id, e.count])]
+	if err.is_empty() and strip.tiles.size() != 3:
+		err = "one tile per id, got %d" % strip.tiles.size()
+	if err.is_empty():
+		var s0 := strip.tiles[0].get_node_or_null(^"Tile/Stack") as Label
+		var s1 := strip.tiles[1].get_node_or_null(^"Tile/Stack") as Label
+		if s0 == null or s0.text != "×3" or s1 == null or s1.text != "×2":
+			err = "stack badges should read ×3 / ×2"
+		elif strip.tiles[2].get_node_or_null(^"Tile/Stack") != null:
+			err = "single item -> no ×N badge"
+	if err.is_empty() and (_pips(strip, 0).total != 3 or _pips(strip, 0).left != 3):
+		err = "stacked charges sum: 3/3"
+	bulbs[1].use_charge()
+	if err.is_empty():
+		var n := strip.tiles[0].get_node_or_null(^"Charges/Count") as Label
+		if _pips(strip, 0).left != 2 or n == null or n.text != "2/3":
+			err = "one bulb spent -> 2/3"
+	if err.is_empty():
+		var pip := _pips(strip, 0)
+		if strip.PIP_R * 2.0 < 11.0 or pip.get_combined_minimum_size().y < 11.0:
+			err = "pips should be >= 11 px"
+	_cleanup([strip, ps])
+	return err
+
+
+func _strip_right_edge(strip: Control) -> float:
+	var r := 0.0
+	for row in strip.get_children():
+		for t in row.get_children():
+			r = maxf(r, (t as Control).get_global_rect().end.x)
+	return r
+
+
+func test_owned_strip_wraps() -> String:
+	var ps := _fresh_stats()
+	var hud: Node = load("res://scripts/ui/hud.gd").new()
+	hud.stats = ps
+	_root().add_child(hud)
+	var strip: Control = hud.owned_items
+	var db := _item_db()
+	var ids: Array = []
+	for r in db.ITEMS:
+		ids.append(str(r.id))
+	var err := ""
+	for i in 30:   # every ItemDb item once, then 10 duplicates
+		ps.grant_item(db.make(ids[i % ids.size()]))
+	_settle(hud)
+	var rows := strip.get_child_count()
+	var uniq := mini(30, ids.size())
+	if strip.entries.size() != uniq or strip.overflow != 0:
+		err = "30 owned (%d ids) -> %d stacks, no overflow; got %d / +%d" % [ids.size(), uniq, strip.entries.size(), strip.overflow]
+	elif rows != ceili(uniq / float(strip.PER_ROW)):
+		err = "should wrap to %d rows, got %d" % [ceili(uniq / float(strip.PER_ROW)), rows]
+	elif _strip_right_edge(strip) > 1020.0:
+		err = "right edge %.0f past 1020" % _strip_right_edge(strip)
+	ps.reset()
+	for i in 30:   # 30 distinct ids: cap + "+N"
+		var it := Item.new()
+		it.id = "fake_%02d" % i
+		it.display_name = "Fake Thing %d" % i
+		it.rarity = "common"
+		ps.grant_item(it)
+	_settle(hud)
+	var cap: int = strip.PER_ROW * strip.MAX_ROWS
+	if err.is_empty() and (strip.tiles.size() != cap - 1 or strip.overflow != 30 - (cap - 1)):
+		err = "30 distinct -> %d tiles + '+%d', got %d + %d" % [cap - 1, 30 - cap + 1, strip.tiles.size(), strip.overflow]
+	if err.is_empty():
+		var more := strip.find_child("More", true, false) as Label
+		if more == null or more.text != "+%d" % (30 - cap + 1):
+			err = "overflow tile should read +%d" % (30 - cap + 1)
+	if err.is_empty() and strip.get_child_count() != strip.MAX_ROWS:
+		err = "capped at %d rows" % strip.MAX_ROWS
+	if err.is_empty() and _strip_right_edge(strip) > 1020.0:
+		err = "capped strip right edge %.0f past 1020" % _strip_right_edge(strip)
+	ps.grant_item(_item_db().make("minimap"))
+	_settle(hud)
+	if err.is_empty() and _strip_right_edge(strip) >= (hud.minimap as Control).get_global_rect().position.x:
+		err = "strip should stay left of the minimap"
+	_cleanup([hud, ps])
+	return err
+
+
+func test_minimap_clamp_and_chase_end() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	ps.grant_item(_item_db().make("minimap"))
+	var ch := _Chaser.new(); _root().add_child(ch); ch.global_position = Vector2(600, 300)
+	var err := ""
+	b.report_chase(ch, true)   # no _process tick: the report itself redraws
+	if mm.snapshot.get("chasers", []).size() != 1:
+		err = "chase start -> red dot at once"
+	b.report_chase(ch, false)
+	if err.is_empty() and not mm.snapshot.chasers.is_empty():
+		err = "chase end -> red dot gone at once (not on the next 10 Hz tick)"
+	var r: Rect2 = mm.map_rect()
+	for p in [Vector2(1e6, -1e6), Vector2(-1e6, 1e6), Vector2(-50, 360)]:
+		var q: Vector2 = mm.dot_at(p, 4.0)
+		if err.is_empty() and not (q.x >= r.position.x + 4.0 and q.x <= r.end.x - 4.0 and q.y >= r.position.y + 4.0 and q.y <= r.end.y - 4.0):
+			err = "dot for %s drawn at %s, outside the frame %s" % [p, q, r]
+	_cleanup([mm, ch, b, ps])
+	return err
+
+
+func test_hud_hidden_end_screen() -> String:
+	var hud: Node = load("res://scripts/ui/hud.gd").new()
+	_root().add_child(hud)
+	var sc := UiScreen.new()
+	_root().add_child(sc)   # added after the HUD (node_added path)
+	var err := ""
+	if not hud.hud_root.visible:
+		err = "HUD visible with no screen open"
+	sc.open()
+	if err.is_empty() and hud.hud_root.visible:
+		err = "end screen open -> whole HUD hidden"
+	sc.close()
+	if err.is_empty() and not hud.hud_root.visible:
+		err = "screen closed -> HUD back"
+	var early := UiScreen.new()
+	_root().add_child(early)
+	var hud2: Node = load("res://scripts/ui/hud.gd").new()
+	_root().add_child(hud2)   # screen already in the tree (scan path)
+	early.open()
+	if err.is_empty() and hud2.hud_root.visible:
+		err = "screen present before the HUD should still hide it"
+	early.free()   # freed while open
+	if err.is_empty() and not hud2.hud_root.visible:
+		err = "screen freed -> HUD back"
+	_cleanup([sc, hud, hud2])
+	_reset_world()
 	return err
