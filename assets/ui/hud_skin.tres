@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="HudSkin" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hud_skin.gd" id="1_skin"]
+
+[resource]
+script = ExtResource("1_skin")
+ring_colors = {
+"puppet_hand": Color(0.95, 0.35, 0.35, 1)
+}
+ring_default = Color(0.95, 0.95, 0.85, 1)

@@ -13,6 +13,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+FESignals="*res://scripts/ui/fe_signals.gd"
 GameState="*res://scripts/autoload/game_state.gd"
 AssetProvenance="*res://scripts/autoload/asset_provenance.gd"
 PlayerStats="*res://scripts/autoload/player_stats.gd"
