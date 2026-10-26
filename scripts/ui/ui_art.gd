@@ -25,6 +25,21 @@ static func texture(slot: String) -> Texture2D:
 	return tex
 
 
+## SpriteFrames with one animation named after `slot`, or null when the slot or its
+## PNG is missing (checked first, so no AnimLibrary warnings before art lands).
+static func frames(slot: String) -> SpriteFrames:
+	if texture(slot) == null:
+		return null
+	var sf := AnimLibrary.frames_for([slot])
+	return sf if sf.has_animation(slot) and sf.get_frame_count(slot) > 0 else null
+
+
+## First frame of a slot's strip as a texture (icons / stills), or null.
+static func first_frame(slot: String) -> Texture2D:
+	var sf := frames(slot)
+	return sf.get_frame_texture(slot, 0) if sf else null
+
+
 static func clear_cache() -> void:
 	_cache.clear()
 

@@ -31,6 +31,15 @@ func run_all() -> Dictionary:
 		["ui_art_resolves_manifest_slots", test_ui_art_slots],
 		["fe_scripts_no_hardcoded_art_paths", test_no_art_paths],
 		["hearts_gold_wired_to_player_stats", test_player_stats_wiring],
+		["game_over_shows_on_died_and_pauses", test_game_over],
+		["game_over_fallback_panel_when_art_slot_missing", test_game_over_fallback],
+		["shop_opens_on_exit_buy_deducts_rejects_insufficient", test_shop_buy],
+		["shop_uses_be_shop_roll_stock_and_buy", test_shop_be_interface],
+		["shop_empty_item_source_no_errors", test_shop_empty],
+		["shop_ui_clear_of_merchant", test_shop_layout],
+		["alert_count_scales_past_3", test_alert_scales],
+		["stage_banner_shows_and_fades", test_stage_banner],
+		["main_scene_has_screens", test_main_screens],
 	]
 	var passed := 0
 	for item in checks:
@@ -530,4 +539,309 @@ func test_enemy_freed() -> String:
 	if err.is_empty() and b.can_throw():
 		err = "can_throw must be false with no live ringed enemy"
 	_cleanup([ov, arrows, cam, b])
+	return err
+
+
+# --- Screens / shop / alerts / banner (fe/screens-shop) ----------------------
+func _tree() -> SceneTree:
+	return Engine.get_main_loop() as SceneTree
+
+
+func _stats_bus() -> Array:
+	var ps: Node = load("res://scripts/autoload/player_stats.gd").new()
+	_root().add_child(ps)
+	var b := _bus()
+	b.wire_player_stats(ps)
+	return [ps, b]
+
+
+func _reset_world() -> void:
+	_tree().paused = false
+	var gs := _root().get_node_or_null(^"GameState")
+	if gs:
+		gs.reset()
+
+
+func test_game_over() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var go := _mount("res://scripts/ui/game_over.gd", b)
+	var err := ""
+	ps.add_gold(7)
+	if go.is_open() or go.visible:
+		err = "game over must start hidden"
+	var guard := 0
+	while ps.health > 0 and guard < 20:
+		ps.set("_invuln_left", 0.0)
+		ps.take_hit(1)
+		guard += 1
+	if err.is_empty() and not go.is_open():
+		err = "game over should open on PlayerStats.died"
+	if err.is_empty() and not _tree().paused:
+		err = "game over must pause the tree"
+	if err.is_empty() and go.process_mode != Node.PROCESS_MODE_ALWAYS:
+		err = "screen must keep processing while paused"
+	if err.is_empty() and (go.root as Control).mouse_filter != Control.MOUSE_FILTER_STOP:
+		err = "screen must capture the mouse"
+	if err.is_empty() and (go.gold_label.text.strip_edges() != "7 gold" or not go.stage_label.text.contains("1")):
+		err = "stage/gold wrong: '%s' '%s'" % [go.stage_label.text, go.gold_label.text]
+	if err.is_empty() and go.seed_label.visible:
+		err = "seed field must hide when the level has no seed"
+	var panel: Control = go.root.find_child("TextPanel", true, false)
+	if err.is_empty() and (panel == null or panel.anchor_left < 0.5):
+		err = "game-over text must sit on the right half"
+	if err.is_empty() and (go.retry_button == null or go.new_run_button == null):
+		err = "needs Retry and New run"
+	go.close()
+	if err.is_empty() and _tree().paused:
+		err = "closing must unpause"
+	_cleanup([go, b, ps])
+	_reset_world()
+	return err
+
+
+func test_game_over_fallback() -> String:
+	var b := _bus()
+	var go: Node = load("res://scripts/ui/game_over.gd").new()
+	go.set("bus", b)
+	var sk := HudSkin.new()
+	sk.game_over_slot = "no_such_slot"
+	sk.coin_slot = "no_such_coin"
+	go.set("skin", sk)
+	var log := _ErrCount.new()
+	OS.add_logger(log)
+	_root().add_child(go)
+	b.player_died.emit()
+	OS.remove_logger(log)
+	var err := ""
+	if go.has_art or go.root.find_child("TextPanel", true, false) is not PanelContainer:
+		err = "missing art slot should fall back to the themed panel"
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors: %s" % str(log.errors)
+	_cleanup([go, b])
+	_reset_world()
+	return err
+
+
+func test_shop_buy() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var gs := _root().get_node_or_null(^"GameState")
+	if gs == null:
+		_cleanup([b, ps])
+		return "GameState autoload missing"
+	b.wire_game_state(gs)
+	b.shop_stub = func(_n, _s, _sd): return [
+		{"id": "a", "display_name": "Soft Shoes", "description": "", "icon_slot": "item_icon_soft_shoes", "price": 6, "rarity": "common"},
+		{"id": "b", "display_name": "Bright Bulb", "description": "", "icon_slot": "no_icon", "price": 8, "rarity": "rare"},
+		{"id": "c", "display_name": "Minimap", "description": "", "icon_slot": "item_icon_minimap", "price": 3, "rarity": "rare"},
+		{"id": "d", "display_name": "Extra", "description": "", "icon_slot": "", "price": 1, "rarity": "common"},
+	]
+	ps.add_gold(10)
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	var err := ""
+	gs.on_reach_exit()   # REAL exit hook → FESignals.stage_cleared → shop
+	if not shop.is_open():
+		err = "shop should open on GameState.reached_exit"
+	if err.is_empty() and not _tree().paused:
+		err = "shop must pause the tree"
+	if err.is_empty() and shop.offers.size() != 3:
+		err = "default offer count should be 3, got %d" % shop.offers.size()
+	if err.is_empty() and not shop.buy_index(0):
+		err = "buy with enough gold should succeed"
+	if err.is_empty() and ps.gold != 4:
+		err = "gold should drop 10→4 via PlayerStats.try_spend, got %d" % ps.gold
+	if err.is_empty() and (not shop.is_sold(0) or shop.buy_index(0)):
+		err = "bought offer must be sold out and not re-buyable"
+	if err.is_empty() and shop.buy_index(1):
+		err = "buy with insufficient gold (8 > 4) must be rejected"
+	if err.is_empty() and (ps.gold != 4 or shop.is_sold(1)):
+		err = "rejected buy must not change gold/sold state"
+	if err.is_empty() and not shop.message.text.contains("Not enough"):
+		err = "rejected buy should give feedback"
+	shop._on_continue()
+	if err.is_empty() and (shop.is_open() or _tree().paused):
+		err = "Continue must close + unpause"
+	if err.is_empty() and b.stage != 2:
+		err = "Continue should advance the stage counter, got %d" % b.stage
+	_cleanup([shop, b, ps])
+	_reset_world()
+	return err
+
+
+class _FakeItem extends Resource:
+	var id := "x"
+	var display_name := "Lucky Coin"
+	var description := "More gold."
+	var icon_slot := "item_icon_lucky_coin"
+	var price := 5
+	var rarity := "epic"
+	var applied := 0
+	func apply() -> void: applied += 1
+	func remove() -> void: applied -= 1
+
+
+class _FakeShop extends RefCounted:
+	var ps: Node
+	var rolled := []
+	var items := []
+	func roll_stock(stage: int, run_seed: int) -> Array:
+		rolled = [stage, run_seed]
+		return items
+	func buy(item) -> bool:
+		if not ps.try_spend(item.price):
+			return false
+		item.apply()
+		return true
+
+
+func test_shop_be_interface() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var fs := _FakeShop.new()
+	fs.ps = ps
+	var it := _FakeItem.new()
+	fs.items = [it, _FakeItem.new()]
+	b._shop = fs
+	b.stage = 4
+	var offers: Array = b.get_shop_offer(3)
+	var err := ""
+	if fs.rolled != [4, -1]:
+		err = "should call Shop.roll_stock(stage, seed), got %s" % str(fs.rolled)
+	if err.is_empty() and (offers.size() != 2 or offers[0].display_name != "Lucky Coin" or offers[0].price != 5 or offers[0].icon_slot != "item_icon_lucky_coin" or offers[0].item != it):
+		err = "offer must mirror Item fields: %s" % str(offers)
+	ps.add_gold(6)
+	if err.is_empty() and (not b.buy_offer(offers[0]) or ps.gold != 1 or it.applied != 1):
+		err = "buy_offer should go through Shop.buy (gold %d applied %d)" % [ps.gold, it.applied]
+	if err.is_empty() and b.buy_offer(offers[1]):
+		err = "Shop.buy rejection must propagate"
+	_cleanup([b, ps])
+	return err
+
+
+func test_shop_empty() -> String:
+	var b := _bus()
+	var log := _ErrCount.new()
+	OS.add_logger(log)
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	b.stage_cleared.emit(1)
+	var bought: bool = shop.buy_index(0)
+	shop._on_continue()
+	OS.remove_logger(log)
+	var err := ""
+	if bought:
+		err = "nothing to buy in an empty shop"
+	if err.is_empty() and (shop.offers.size() != 0 or shop.message.text.is_empty()):
+		err = "empty source should show a message"
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors: %s" % str(log.errors)
+	_cleanup([shop, b])
+	_reset_world()
+	return err
+
+
+func test_shop_layout() -> String:
+	var b := _bus()
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	shop.open_shop()
+	shop._layout_merchant()
+	var band: Vector2 = shop.merchant_band()
+	var err := ""
+	var vw: float = shop.root.size.x
+	if vw <= 0.0:
+		err = "screen root has no size"
+	var expected: float = vw * 0.5 + (shop.skin.merchant_x - 160.0) * (vw / 320.0)
+	if err.is_empty() and absf((band.x + band.y) * 0.5 - expected) > 2.0:
+		err = "merchant should stand at backdrop x=172 (%.0f), got %.0f" % [expected, (band.x + band.y) * 0.5]
+	for n in ["OffersPanel", "InfoPanel"]:
+		var p: Control = shop.root.find_child(n, true, false)
+		var r := p.get_global_rect()
+		if err.is_empty() and r.position.x < band.y and r.end.x > band.x:
+			err = "%s %s overlaps merchant band %s" % [n, str(r), str(band)]
+	_cleanup([shop, b])
+	_reset_world()
+	return err
+
+
+class _Chaser extends Node2D:
+	var enraged := false
+
+
+func test_alert_scales() -> String:
+	var b := _bus()
+	var hud := _mount("res://scripts/ui/alert_hud.gd", b)
+	var es: Array = []
+	for i in 12:
+		var e := _Chaser.new()
+		e.add_to_group("puppets")
+		e.enraged = i < 7
+		_root().add_child(e)
+		es.append(e)
+	hud.refresh()
+	var err := ""
+	if b.enemy_total() != 12 or b.chasing_count() != 7:
+		err = "polled count should be 7 / 12, got %d / %d" % [b.chasing_count(), b.enemy_total()]
+	if err.is_empty() and hud.label.text != "Chasing 7 / 12":
+		err = "label '%s'" % hud.label.text
+	for i in 12:
+		b.report_chase(es[i], true)   # BE reports take over from polling
+	hud.refresh()
+	if err.is_empty() and hud.label.text != "Chasing 12 / 12":
+		err = "reported count should reach 12, label '%s'" % hud.label.text
+	for i in 13:
+		var e := _Chaser.new(); e.add_to_group("enemies"); _root().add_child(e); es.append(e)
+		b.report_chase(e, true)
+	hud.refresh()
+	if err.is_empty() and hud.label.text != "Chasing 25 / 25":
+		err = "should scale past the pip cap, label '%s'" % hud.label.text
+	es[0].free()
+	hud.refresh()
+	if err.is_empty() and hud.label.text != "Chasing 24 / 24":
+		err = "freed enemies drop out, label '%s'" % hud.label.text
+	es.remove_at(0)
+	_cleanup(es + [hud, b])
+	return err
+
+
+func test_stage_banner() -> String:
+	var b := _bus()
+	var bn: Node = load("res://scripts/ui/stage_banner.gd").new()
+	bn.set("bus", b)
+	bn.set("autoplay", false)
+	_root().add_child(bn)
+	var err := ""
+	b.announce_stage(3)
+	if bn.title.text != "Stage 3":
+		err = "banner should show 'Stage 3', got '%s'" % bn.title.text
+	bn._tween.custom_step(0.3)
+	if err.is_empty() and not bn.is_showing():
+		err = "banner should be visible after fade-in"
+	bn._tween.custom_step(10.0)
+	if err.is_empty() and bn.is_showing():
+		err = "banner should fade out and hide"
+	_cleanup([bn, b])
+	return err
+
+
+func test_main_screens() -> String:
+	var st: SceneState = (load("res://scenes/main.tscn") as PackedScene).get_state()
+	var names := []
+	for i in st.get_node_count():
+		names.append(str(st.get_node_name(i)))
+	for n in ["HUD", "GameOver", "Shop", "AIWatermark"]:
+		if not names.has(n):
+			return "main.tscn missing %s" % n
+	var hud: CanvasLayer = (load("res://scenes/ui/hud.tscn") as PackedScene).instantiate()
+	_root().add_child(hud)
+	var err := ""
+	for n in ["AlertHud", "StageBanner"]:
+		var c: Control = hud.find_child(n, true, false)
+		if c == null:
+			err = "HUD missing %s" % n
+		elif c.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			err = "%s must stay mouse-ignore" % n
+	_cleanup([hud])
 	return err
