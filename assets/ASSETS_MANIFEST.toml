@@ -370,6 +370,171 @@ loop = false
 pivot = [16, 16]
 notes = "32x32 shop item icon: lucky coin (more gold)"
 
+[[asset]]
+path = "assets/art/ui/icons/item_icon_quick_hands.png"
+slot = "item_icon_quick_hands"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Quick Hands (white glove with speed lines: faster pickups, shorter reach)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_dim_filter.png"
+slot = "item_icon_dim_filter"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Dim Filter (smoky violet lens filter with a crescent moon: softer, shorter beam)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_wide_lens.png"
+slot = "item_icon_wide_lens"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Wide Lens (flashlight head with a big lens and a wide fanned beam)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_sneakers.png"
+slot = "item_icon_sneakers"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Sneakers (red sneaker with speed lines: faster but squeaky)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_spring_socks.png"
+slot = "item_icon_spring_socks"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Spring Socks (striped sock on a coil spring: higher jump)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_banister_gloves.png"
+slot = "item_icon_banister_gloves"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, common rarity (rarity rim #b9b2c4): Banister Gloves (leather glove gripping a banister rail: faster stair climb)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_big_pockets.png"
+slot = "item_icon_big_pockets"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Big Pockets (denim pocket with a coin and key, green + badge: one more inventory slot)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_strong_arm.png"
+slot = "item_icon_strong_arm"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Strong Arm (flexed arm in the boy's teal sleeve with a throw arc: faster throws)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_thick_sweater.png"
+slot = "item_icon_thick_sweater"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Thick Sweater (cable-knit mustard sweater with a small blue shield: longer safety after a hit)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_gold_magnet.png"
+slot = "item_icon_gold_magnet"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, uncommon rarity (rarity rim #5fd08a): Gold Magnet (red horseshoe magnet pulling coins: more gold, slower climb)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_night_eyes.png"
+slot = "item_icon_night_eyes"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, rare rarity (rarity rim #5aa8ff): Night Eyes (green-glowing night goggles: light noticed later, narrower beam)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_ghost_slippers.png"
+slot = "item_icon_ghost_slippers"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, rare rarity (rarity rim #5aa8ff): Ghost Slippers (translucent ghostly slipper with a wisp tail and a -heart hint: much quieter, -1 max heart)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_grandfather_watch.png"
+slot = "item_icon_grandfather_watch"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, rare rarity (rarity rim #5aa8ff): Grandfather's Watch (gold pocket watch with tick marks: puppets startle slower, loud ticking)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_golden_heart.png"
+slot = "item_icon_golden_heart"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Golden Heart (gold heart with +2 badge and sparkles: +2 max hearts, less gold)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_shadow_cloak.png"
+slot = "item_icon_shadow_cloak"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon, legendary rarity (rarity rim #ffb640): Shadow Cloak (dark hooded cloak with glowing eyes in the hood: quieter and harder to notice, shorter light)"
+
 # --- Stage 1 environment (tileset atlas per docs/LEVELGEN.md: 16px tiles, 160px floors), exit door, parallax, decor props.
 
 [[asset]]

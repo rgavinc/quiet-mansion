@@ -48,6 +48,21 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | item_icon_bright_bulb | art/ui/icons/item_icon_bright_bulb.png | 32² | still, pivot [16, 16]: light startles faster |
 | item_icon_soft_shoes | art/ui/icons/item_icon_soft_shoes.png | 32² | still, pivot [16, 16]: quieter steps |
 | item_icon_lucky_coin | art/ui/icons/item_icon_lucky_coin.png | 32² | still, pivot [16, 16]: more gold |
+| item_icon_quick_hands | art/ui/icons/item_icon_quick_hands.png | 32² | still, pivot [16, 16], common rim: white glove + speed lines |
+| item_icon_dim_filter | art/ui/icons/item_icon_dim_filter.png | 32² | still, pivot [16, 16], common rim: smoky lens filter + moon |
+| item_icon_wide_lens | art/ui/icons/item_icon_wide_lens.png | 32² | still, pivot [16, 16], common rim: lens with wide fanned beam |
+| item_icon_sneakers | art/ui/icons/item_icon_sneakers.png | 32² | still, pivot [16, 16], common rim: red sneaker + speed lines |
+| item_icon_spring_socks | art/ui/icons/item_icon_spring_socks.png | 32² | still, pivot [16, 16], common rim: striped sock on a spring |
+| item_icon_banister_gloves | art/ui/icons/item_icon_banister_gloves.png | 32² | still, pivot [16, 16], common rim: glove gripping a banister |
+| item_icon_big_pockets | art/ui/icons/item_icon_big_pockets.png | 32² | still, pivot [16, 16], uncommon rim: denim pocket + coin/key, + badge |
+| item_icon_strong_arm | art/ui/icons/item_icon_strong_arm.png | 32² | still, pivot [16, 16], uncommon rim: flexed arm + throw arc |
+| item_icon_thick_sweater | art/ui/icons/item_icon_thick_sweater.png | 32² | still, pivot [16, 16], uncommon rim: cable-knit sweater + shield |
+| item_icon_gold_magnet | art/ui/icons/item_icon_gold_magnet.png | 32² | still, pivot [16, 16], uncommon rim: horseshoe magnet + coins |
+| item_icon_night_eyes | art/ui/icons/item_icon_night_eyes.png | 32² | still, pivot [16, 16], rare rim: green night goggles |
+| item_icon_ghost_slippers | art/ui/icons/item_icon_ghost_slippers.png | 32² | still, pivot [16, 16], rare rim: ghostly slipper + wisp, −heart |
+| item_icon_grandfather_watch | art/ui/icons/item_icon_grandfather_watch.png | 32² | still, pivot [16, 16], rare rim: gold pocket watch |
+| item_icon_golden_heart | art/ui/icons/item_icon_golden_heart.png | 32² | still, pivot [16, 16], legendary rim: gold heart + “+2” badge |
+| item_icon_shadow_cloak | art/ui/icons/item_icon_shadow_cloak.png | 32² | still, pivot [16, 16], legendary rim: hooded cloak, eyes in the dark |
 | exit_door_stage1 | art/props/exit_door_stage1.png | 48x64 | 4f @6fps loop, pivot [24, 63]: stage-1 stone-arch exit, green lamp, glow loop |
 | bg_stage1_far | art/backgrounds/bg_stage1_far.png | 320x180 | still, pivot [0, 0]: storm sky + moonlit windows, tiles in x, scroll 0.15 |
 | bg_stage1_mid | art/backgrounds/bg_stage1_mid.png | 320x180 | still, pivot [0, 0]: dim gallery portraits/columns, window gaps transparent, tiles in x, scroll 0.45 |
@@ -58,6 +73,8 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | prop_cobweb | art/props/prop_cobweb.png | 32² | still, pivot [0, 0]: top-left corner, flip_h for top-right |
 | prop_chest_closed | art/props/prop_chest_closed.png | 32² | still, pivot [16, 31] |
 | prop_chest_open | art/props/prop_chest_open.png | 32² | still, pivot [16, 31]: same footprint, gold inside |
+
+**Item icon rarity rims** (all `item_icon_<id>` slots are named by the item id in `scripts/items/item_db.gd`): the 15 icons above from `quick_hands` down carry a subtle rim. The silhouette outline is mixed 50% toward the rarity colour, plus a faint 1 px outer halo (alpha 70) in that colour: **common `#b9b2c4`** (pewter), **uncommon `#5fd08a`** (green), **rare `#5aa8ff`** (blue), **legendary `#ffb640`** (amber). Keep a 1 px transparent margin so the halo fits in 32×32. The first five icons (`extra_heart`, `minimap`, `bright_bulb`, `soft_shoes`, `lucky_coin`) predate the rims and have none yet. Their slot names already match the item ids. Contact sheet: `/workspace/qm-style-target/item_icons_4x.png` (not in the repo).
 
 ## Stage 1 environment — built to `docs/LEVELGEN.md`
 Numbers used (from LEVELGEN on `development`): **tile = 16 px**; a floor band is **10 tiles = 160 px** (floors 160 px apart, floor N surface at `level_origin_y − N·160`), bottom row of the band = floor slab (collision); top floor gets a 1-tile ceiling. Rooms 20–40 tiles wide, kits multiple of 4 wide × exactly 10 tall. **Doorways 3 tiles high in band rows 6–8** (0-based from the top). **Stair (lead decision, round 6; supersedes LEVELGEN's 4-tile stair): diagonal 15 tiles (240 px) rising exactly 160 px (one floor, ≈34°), plus a flat 3-tile (48 px) landing at each end = 21 tiles (336 px) total**; trigger covers both bands (320 px tall). Jump apex ≈ 52 px clears 2-tile props; furniture taller than 2 tiles blocks.
