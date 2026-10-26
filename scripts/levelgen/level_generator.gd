@@ -252,6 +252,10 @@ static func _populate(rng: RandomNumberGenerator, L: Dictionary, P: Dictionary, 
 				continue
 			if LevelValidator.in_line_of_sight(L, L.start, p):
 				continue
+			# walkers only where the boy can walk to (never a gallery sealed between two stair
+			# openings: they'd never move, QA); floaters drift through walls and may be anywhere
+			if StringName(StageTable.movement_for(etype)) != &"float" and not reach.has(LevelValidator.node_at(g.segments, f, x)):
+				continue
 			var crowded := false
 			for e in L.enemies:
 				if (e.pos as Vector2).distance_to(p) < ENEMY_SPACING:
@@ -640,9 +644,19 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 		var top := surf - (FLOOR_TILES - 1) * TILE
 		var h := (FLOOR_TILES - 1 - (DOOR_ROWS if wl.doorway else 0)) * TILE
 		placeholder.append(_box(geo, Rect2(wl.x * TILE, top, TILE, h), C_WALL))
+	# Furniture <= 2 tiles is a jump-up for the boy and walkable in the nav graph (segments only
+	# split at walls and tall furniture), but walkers can't jump: they parked against it (QA route
+	# gap). It gets its own WORLD body that every built enemy has a collision exception with, so
+	# walkers pass in front of it; the boy, light, sight rays and throws see it exactly as before.
+	var low_furn := StaticBody2D.new()
+	low_furn.name = "LowFurniture"
+	low_furn.collision_layer = PlayerStats.LAYER_WORLD
+	low_furn.collision_mask = 0
+	level.add_child(low_furn)
 	for fu in L.furniture:
 		var surf := float(LevelValidator.surface_y(fu.floor))
-		_box(geo, Rect2(fu.x * TILE, surf - fu.h * TILE, fu.w * TILE, fu.h * TILE), C_FURN)
+		var low := int(fu.h) <= LevelValidator.MAX_JUMP_TILES
+		_box(low_furn if low else geo, Rect2(fu.x * TILE, surf - fu.h * TILE, fu.w * TILE, fu.h * TILE), C_FURN)
 
 	var stairs := []
 	var lines: Array = []
@@ -650,7 +664,7 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	stair_root.name = "Stairs"
 	level.add_child(stair_root)
 	for s in L.stairs:
-		var st: Area2D = load("res://scripts/world/stair.gd").new()
+		var st: Area2D = load("res://scripts/levelgen/level_stair.gd").new()   # BE Stair + landing-side upper entry (QA B2)
 		st.position = s.bottom
 		st.bottom = Vector2.ZERO
 		st.top = s.top - s.bottom
@@ -706,17 +720,20 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 		if "def" in en:   # BE Enemy (#26): _ready applies type_id / movement from the def
 			en.set("def", def)
 		en.set_meta("enemy_def", def)
-		_circle(en, PUPPET_RADIUS)
-		en.position = e.pos
+		# BE's enemy shape exactly as BE's own scenes/tests make it: a centred circle, origin at
+		# the body centre (enemy_base _feet() = origin + _foot()). Never offset it (QA B1: a
+		# feet-origin offset broke the ledge ray and stair feet checks); spawn the centre so the
+		# feet (layout point) land on the floor.
+		_circle_centred(en, PUPPET_RADIUS)
+		var foot: float = en.call("_foot") if en.has_method("_foot") else PUPPET_RADIUS
+		en.position = (e.pos as Vector2) - Vector2(0, foot)
 		en.set_meta("enemy_type", str(e.type))
 		en.set_meta("movement", e.movement)
 		en.set_meta("home", e.home)
 		if "movement" in en:   # EnemyDef.movement once BE's state machine lands
 			en.set("movement", e.movement)
 		en_root.add_child(en)
-		var hb := en.get_node_or_null("Hitbox") as Node2D
-		if hb:
-			hb.position = Vector2(0, -PUPPET_RADIUS)   # feet origin: hit area sits on the body
+		en.add_collision_exception_with(low_furn)   # walkers can't jump: they pass low furniture
 		enemies.append(en)
 
 	var player := CharacterBody2D.new()
@@ -782,7 +799,17 @@ static func _box(body: StaticBody2D, r: Rect2, color: Color) -> ColorRect:
 	return vis
 
 
-## Collision circle with its bottom at the node origin (feet), matching bottom-centre art.
+## BE enemy body shape: circle centred on the node origin (BE convention).
+static func _circle_centred(body: CollisionObject2D, radius: float) -> void:
+	var cs := CollisionShape2D.new()
+	var c := CircleShape2D.new()
+	c.radius = radius
+	cs.shape = c
+	body.add_child(cs)
+
+
+## Collision circle with its bottom at the node origin (feet), matching bottom-centre art (boy:
+## his controller climbs with global_position = the stair's feet point).
 static func _circle(body: CollisionObject2D, radius: float) -> void:
 	var cs := CollisionShape2D.new()
 	var c := CircleShape2D.new()

@@ -46,7 +46,6 @@ func _ready() -> void:
 	GameState.reached_exit.connect(func(): _status.text = HINT + "\n" + "YOU ESCAPED")
 	GameState.died.connect(func(): _status.text = HINT + "\n" + "CAUGHT — you die")
 	GameState.noise_made.connect(func(_l, _at): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Noise! Nearby puppets may wake…")
-	GameState.puppet_alerted.connect(func(n): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Alerted puppets: %d / %d" % [n, GameState.enemy_count()])
 
 
 func _read_seed_args() -> void:

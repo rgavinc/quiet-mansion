@@ -9,6 +9,13 @@ extends RefCounted
 ##   var nav := LevelNav.current
 ##   var wp := nav.next_waypoint(my_pos, target_pos)
 ##   # wp = {} unreachable | {point} walk to it | {point, stair_to, stair} walk to point, then climb to stair_to
+## A target standing ON a stair (between its landings, e.g. the boy mid-climb) is reached by
+## taking that stair from whichever landing is nearer by route; it is never mapped to the floor
+## under / over it (that parked walkers directly below or above the boy, QA route gap).
+## next_waypoint is pure and re-planned every call, so a target changing floor re-routes at once.
+
+## How close (px, perpendicular) to a stair's line a point counts as on that stair.
+const ON_STAIR_PX := 20.0
 
 static var current: LevelNav = null
 
@@ -80,8 +87,56 @@ func route(a: Vector2, b: Vector2) -> Variant:
 	return hops
 
 
+## Index of the stair whose line p is on, strictly between its two landings; -1 if none.
+func stair_at(p: Vector2) -> int:
+	for i in stairs.size():
+		var s: Dictionary = stairs[i]
+		var b: Vector2 = s.bottom
+		var t: Vector2 = s.top
+		if p.y >= b.y - 2.0 or p.y <= t.y + 2.0:
+			continue
+		var q := Geometry2D.get_closest_point_to_segment(p, b, t)
+		if q.distance_to(p) <= ON_STAIR_PX:
+			return i
+	return -1
+
+
 ## Where to walk next to get from a toward b. See class doc.
 func next_waypoint(a: Vector2, b: Vector2) -> Dictionary:
+	var si := stair_at(b)
+	if si >= 0 and stair_at(a) != si:
+		return _toward_stair(a, si)
+	return _next_on_floors(a, b)
+
+
+## Target on stair si: walk (and climb other stairs if needed) to its nearer landing, then climb it.
+func _toward_stair(a: Vector2, si: int) -> Dictionary:
+	var s: Dictionary = stairs[si]
+	var best := {}
+	var best_d := INF
+	for up in [true, false]:
+		var enter: Vector2 = s.bottom if up else s.top
+		var exit: Vector2 = s.top if up else s.bottom
+		var r: Variant = route(a, enter)
+		if r == null:
+			continue
+		var d := _route_len(a, r as Array, enter)
+		if d < best_d:
+			best_d = d
+			best = {point = enter, stair_to = exit, stair = s} if (r as Array).is_empty() else _next_on_floors(a, enter)
+	return best
+
+
+func _route_len(a: Vector2, hops: Array, b: Vector2) -> float:
+	var d := 0.0
+	var cur := a
+	for h in hops:
+		d += absf(cur.x - (h.enter as Vector2).x) + (h.enter as Vector2).distance_to(h.exit)
+		cur = h.exit
+	return d + absf(cur.x - b.x)
+
+
+func _next_on_floors(a: Vector2, b: Vector2) -> Dictionary:
 	var r: Variant = route(a, b)
 	if r == null:
 		return {}

@@ -52,6 +52,10 @@ func run_all() -> Dictionary:
 		["fallback_after_zero_attempts", test_fallback_zero],
 		["fallback_on_impossible_params", test_fallback_impossible],
 		["nav_routes_via_stairs", test_nav_route],
+		["nav_target_on_stair_climbs_that_stair", test_nav_on_stair],
+		["nav_never_gives_up_across_floors", test_nav_cross_floor],
+		["rejects_unreachable_walker", test_reject_unreachable_walker],
+		["stair_upper_entry_only_from_top_landing", test_stair_upper_entry],
 		["build_survives_bad_input", test_build_bad_input],
 		["build_creates_level_nodes", test_build_nodes],
 	]
@@ -331,6 +335,90 @@ func test_fallback_impossible() -> String:
 	if int(L.rerolls) != LevelGenerator.MAX_ATTEMPTS or L.reject_reasons.size() != LevelGenerator.MAX_ATTEMPTS:
 		return "fallback after %d rerolls" % L.rerolls
 	return "" if LevelValidator.validate(L).is_empty() else "fallback invalid"
+
+
+## Route gap (QA, PR #13): the boy on a stair (mid-climb) used to map to the floor below or above,
+## so walkers parked directly under / over him. A target on stair si routes to si's nearer
+## landing and climbs si, from either floor.
+func test_nav_on_stair() -> String:
+	for sd in [1003, 1030, 11]:
+		for st in [1, 3, 5]:
+			var L := LevelGenerator.generate(sd, st)
+			var nav := LevelNav.from_layout(L)
+			for i in L.stairs.size():
+				var s: Dictionary = L.stairs[i]
+				for t in [0.3, 0.7]:
+					var on: Vector2 = (s.bottom as Vector2).lerp(s.top, t)
+					if nav.stair_at(on) != i:
+						return "seed %d stage %d: stair_at(%s) = %d, want %d" % [sd, st, on, nav.stair_at(on), i]
+					for end in [s.bottom, s.top]:
+						var d := 1.0 if end == s.bottom else -1.0
+						var a: Vector2 = end - Vector2(signf((s.top as Vector2).x - (s.bottom as Vector2).x) * d * 40.0, 0)
+						if nav.route(a, end) == null or not (nav.route(a, end) as Array).is_empty():
+							continue   # 40px off the landing isn't the landing's segment here
+						var wp := nav.next_waypoint(a, on)
+						if wp.get("stair") != s or not wp.has("stair_to"):
+							return "seed %d stage %d stair %d: from %s to on-stair %s gave %s" % [sd, st, i, a, on, wp]
+	return ""
+
+
+## Whenever a route exists and the floors differ, next_waypoint is a stair hop (never {} / a park).
+func test_nav_cross_floor() -> String:
+	for sd in 10:
+		for st in [1, 3, 5]:
+			var L := LevelGenerator.generate(sd, st)
+			var nav := LevelNav.from_layout(L)
+			var g := LevelValidator.floor_graph(L)
+			var pts: Array = [L.start, L.exit]
+			for e in L.enemies:
+				pts.append(e.pos)
+			for a in pts:
+				for b in pts:
+					if nav.floor_of(a) == nav.floor_of(b) or nav.route(a, b) == null:
+						continue
+					var wp := nav.next_waypoint(a, b)
+					if not wp.has("stair_to"):
+						return "seed %d stage %d: %s -> %s (floors %d -> %d) gave %s" % [sd, st, a, b, nav.floor_of(a), nav.floor_of(b), wp]
+	return ""
+
+
+## Walkers must spawn where they can walk to the boy: a walker in a sealed segment is rejected.
+func test_reject_unreachable_walker() -> String:
+	for sd in 40:
+		for st in [3, 4, 5]:
+			var L := LevelGenerator.generate(sd, st)
+			var g := LevelValidator.floor_graph(L)
+			var reach := LevelValidator.reachable_from(g, LevelValidator.node_at(g.segments, LevelValidator.floor_of(L.start.y), L.start.x))
+			for f in g.segments:
+				for seg in g.segments[f]:
+					var mid: float = ((seg as Vector2).x + (seg as Vector2).y) * 0.5
+					if reach.has(LevelValidator.node_at(g.segments, f, mid)):
+						continue
+					for e in L.enemies:
+						if StringName(e.movement) != &"float":
+							var T := L.duplicate(true)
+							for e2 in T.enemies:
+								if e2.pos == e.pos:
+									e2.pos = Vector2(mid, LevelValidator.surface_y(f))
+									break
+							return "" if _has(LevelValidator.validate(T), "not reachable from the start") else "walker in sealed segment %s:%s passed" % [f, seg]
+	return "no level with a sealed segment found (test needs another seed range)"
+
+
+## QA B2: on the upper floor a LevelStair accepts only the top-landing side, never the gallery
+## behind the far wall; lower floor and stair line unchanged (BE Stair).
+func test_stair_upper_entry() -> String:
+	for s in LevelGenerator.fallback_layout(1).stairs + LevelGenerator.generate(1003, 3).stairs:
+		var b: Vector2 = s.bottom
+		var t: Vector2 = s.top
+		var d := signf(t.x - b.x)
+		if not LevelStair.upper_entry_ok(b, t, t + Vector2(d * 20.0, 0)):
+			return "top landing refused for %s" % [s]
+		if LevelStair.upper_entry_ok(b, t, t - Vector2(d * 200.0, 0)):
+			return "gallery side accepted for %s" % [s]
+		if not LevelStair.upper_entry_ok(b, t, b - Vector2(d * 10.0, 0)):
+			return "lower floor refused for %s" % [s]
+	return ""
 
 
 func test_nav_route() -> String:
@@ -693,8 +781,20 @@ func test_enemy_defs() -> String:
 
 ## PRODUCT.md "Stair opening" (QA-revised): every opening (both directions) has a world-collision
 ## wall at its far edge (px 144 rising right / 192 rising left from the stair's left edge, on the
-## slab), >= 64px tall; the validator checks its placement; built rails match on every stage; the rail is painted from the atlas (stair_gallery_rail or the
+## slab), RAIL_H_PX (96px) tall, clearing the jump apex at the stat cap by >= 16px; the validator checks its placement; built rails match on every stage; the rail is painted from the atlas (stair_gallery_rail or the
 ## stair_rail_cap fallback).
+## Highest jump any item combo can produce: jump_velocity at its STAT_BOUNDS max (base if
+## uncapped) against gravity at its min (base if uncapped).
+static func max_jump_apex() -> float:
+	var jv := float(PlayerStats.BASE[&"jump_velocity"])
+	var g := float(PlayerStats.BASE[&"gravity"])
+	var bj: Array = PlayerStats.STAT_BOUNDS.get(&"jump_velocity", [1.0, 1.0])
+	var bg: Array = PlayerStats.STAT_BOUNDS.get(&"gravity", [1.0, 1.0])
+	jv *= float(bj[1])
+	g *= float(bg[0])
+	return jv * jv / (2.0 * g)
+
+
 func test_gallery_rails() -> String:
 	var check: Callable = load("res://tests/seed_sweep_impl.gd").rail_check
 	for st in range(1, StageTable.STAGE_COUNT + 1):
@@ -712,8 +812,9 @@ func test_gallery_rails() -> String:
 			var want_n := Vector2(x0 + 266.0, x0 + 272.0) if s.top.x > s.bottom.x else Vector2(x0 + 64.0, x0 + 70.0)
 			if n != want_n:
 				return "stage %d stair x=%d: near guard %s != %s" % [st, int(s.bottom.x), n, want_n]
-	if LevelValidator.RAIL_H_PX < 64.0:
-		return "rail collider below 64px (boy jumps ~52px)"
+	var apex := max_jump_apex()
+	if LevelValidator.RAIL_H_PX < apex + 16.0:
+		return "rail collider %dpx < max jump apex %.1fpx + 16" % [int(LevelValidator.RAIL_H_PX), apex]
 	for st in range(1, StageTable.STAGE_COUNT + 1):
 		var L := LevelGenerator.generate(3, st)
 		var w := Node2D.new()

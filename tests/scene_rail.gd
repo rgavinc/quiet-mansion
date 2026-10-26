@@ -3,7 +3,7 @@ extends RefCounted
 ## level with one stair rising right and one rising left (mirrored case):
 ##  (a) a boy-sized body (r 12, the boy's mask) and a walker (r 14, a walking Enemy's mask)
 ##      walking along the upper floor toward the opening's far edge, and the real boy jumping
-##      at it, stay on the upper floor (the 64px rail wall); a floater (no WORLD mask) drifts
+##      at it, stay on the upper floor (the 96px rail wall); a floater (no WORLD mask) drifts
 ##      through; walking off the stair-top landing toward the opening is stopped by the near-edge
 ##      guard (LevelValidator.stair_rail_near) instead of dropping a floor.
 ##  (b') QA edge post: the boy on the stair just below x+9 (~61px up, t 0.38) spamming jump (52px
@@ -28,7 +28,8 @@ func run_async(tree: SceneTree) -> Dictionary:
 	await tree.physics_frame
 	var picks := [L.stairs.filter(func(q): return q.top.x > q.bottom.x)[0], L.stairs.filter(func(q): return q.top.x < q.bottom.x)[0]]
 	var checks := [["rail_blocks_walkers_and_boy_at_far_edge", _far_edge], ["boy_jumping_at_rail_cannot_fall_in", _boy_jump],
-		["near_edge_stair_top_no_fall", _near_edge], ["boy_climbs_up_and_down_unsnagged", _boy_climb], ["boy_jumping_under_post_keeps_climbing", _boy_jump_on_stair], ["walker_climbs_up_and_down_unsnagged", _walker_climb]]
+		["near_edge_stair_top_no_fall", _near_edge], ["boy_climbs_up_and_down_unsnagged", _boy_climb], ["boy_jumping_under_post_keeps_climbing", _boy_jump_on_stair], ["walker_climbs_up_and_down_unsnagged", _walker_climb],
+		["boy_pressing_down_behind_far_rail_stays_on_gallery", _boy_down_behind_rail], ["boy_enters_stair_down_from_top_landing", _boy_down_from_landing]]
 	for c in checks:
 		for s in picks:
 			var err: String = await c[1].call(tree, world, built, s)
@@ -38,7 +39,154 @@ func run_async(tree: SceneTree) -> Dictionary:
 	await tree.process_frame
 	PlayerStats.reset(); GameState.reset()
 	Engine.time_scale = 1.0
-	return {"passed": checks.size() * 2 - failures.size(), "total": checks.size() * 2, "failures": failures}
+	var qa: String = await _qa_b2_exact(tree)
+	if not qa.is_empty():
+		failures.append("rail QA B2 level (seed 1003 stage 3 stair 0 + mirror): " + qa)
+	return {"passed": checks.size() * 2 + 1 - failures.size(), "total": checks.size() * 2 + 1, "failures": failures}
+
+
+## QA B2: the boy on the gallery side 20-60px behind the far rail wall pressing down must not
+## enter a stair approach across the opening (he slid through the rail, 526/526). LevelStair
+## only lets the upper floor enter from the top-landing side.
+func _boy_down_behind_rail(tree: SceneTree, _w: Node, built: Dictionary, s: Dictionary) -> String:
+	var wall: Vector2 = LevelValidator.stair_rail(s)
+	var side := -1.0 if s.top.x > s.bottom.x else 1.0   # gallery side of the far wall
+	var edge := wall.x if side < 0.0 else wall.y
+	for back in [20.0, 40.0, 60.0]:
+		var err: String = await _press_down_at(tree, built.player, Vector2(edge + side * (back + PLAYER_R), float(s.top.y)), s, side, edge)
+		if not err.is_empty():
+			return "%dpx behind the wall: %s" % [int(back), err]
+	return ""
+
+
+const PLAYER_R := 12.0
+
+
+## Boy standing at `at` (feet) on the upper floor holds move_down for 90 frames: he must stay on
+## that floor's surface and on the gallery side of `edge`, never in CLIMB.
+func _press_down_at(tree: SceneTree, p: CharacterBody2D, at: Vector2, s: Dictionary, side: float, edge: float) -> String:
+	p.state = p.State.NORMAL
+	p.stair = null
+	p.velocity = Vector2.ZERO
+	p.global_position = at
+	for i in 5:
+		await tree.physics_frame
+	Input.action_press(&"move_down")
+	var bad := ""
+	for i in 90:
+		await tree.physics_frame
+		var g := p.global_position
+		if p.state == p.State.CLIMB:
+			bad = "entered the stair (CLIMB) from the gallery side at %s" % g
+		elif absf(g.y - float(s.top.y)) > 3.0:
+			bad = "left the upper floor: at %s (surface y %d)" % [g, int(s.top.y)]
+		elif (g.x - edge) * side < 0.0:
+			bad = "went through the rail: at %s (wall edge x %d)" % [g, int(edge)]
+		if not bad.is_empty():
+			break
+	Input.action_release(&"move_down")
+	p.state = p.State.NORMAL
+	p.stair = null
+	return bad
+
+
+## Regression for the LevelStair restriction: from the top landing, down still takes the stair.
+func _boy_down_from_landing(tree: SceneTree, _w: Node, built: Dictionary, s: Dictionary) -> String:
+	var p: CharacterBody2D = built.player
+	var d := signf(s.top.x - s.bottom.x)
+	p.state = p.State.NORMAL
+	p.stair = null
+	p.velocity = Vector2.ZERO
+	p.global_position = (s.top as Vector2) + Vector2(d * 20.0, 0)
+	for i in 5:
+		await tree.physics_frame
+	Engine.time_scale = 3.0
+	Input.action_press(&"move_down")
+	var budget := int((288.0 + 40.0) / PlayerStats.get_stat(&"climb_speed") * 60.0 / 3.0 * 1.5) + 20
+	var entered := false
+	var frames := 0
+	while frames < budget:
+		await tree.physics_frame
+		frames += 1
+		entered = entered or p.state == p.State.CLIMB
+		if entered and p.state != p.State.CLIMB:
+			break
+	Input.action_release(&"move_down")
+	Engine.time_scale = 1.0
+	for i in 5:
+		await tree.physics_frame
+	if not entered:
+		return "never entered the stair from the top landing"
+	if p.global_position.distance_to(s.bottom) > 20.0:
+		return "didn't reach the bottom (at %s, want %s)" % [p.global_position, s.bottom]
+	return ""
+
+
+## QA's B2 level (seed 1003 stage 3, stair 0 rises LEFT: bottom (2112,0), top (1872,-160), so
+## the gallery is right of the far wall at x 2016-2022): the boy 20/40/60px behind the far wall
+## pressing down stays on the gallery; and from QA's logged point (1872,-160) - the top landing
+## point - pressing down only ever follows the stair line (never mid-air over the opening).
+## Mirror: the first stage-3 level from seed 1003 with a stair rising RIGHT, gallery side.
+func _qa_b2_exact(tree: SceneTree) -> String:
+	var errs := []
+	for want_right in [false, true]:
+		PlayerStats.reset(); GameState.reset()
+		var L: Dictionary
+		var s: Dictionary
+		var sd := 1003
+		while sd < 1103:
+			L = LevelGenerator.generate(sd, 3)
+			var pick = L.stairs.filter(func(q): return (q.top.x > q.bottom.x) == want_right)
+			if not pick.is_empty():
+				s = pick[0]
+				break
+			sd += 1
+		var world := Node2D.new()
+		tree.root.add_child(world)
+		var b := LevelGenerator.build(L, world)
+		for e in b.enemies:
+			e.get_parent().remove_child(e)
+			e.queue_free()
+		await tree.physics_frame
+		var tag := "seed %d stage 3 stair %d (%s)" % [sd, L.stairs.find(s), "rising right" if want_right else "rising left"]
+		var err: String = await _boy_down_behind_rail(tree, world, b, s)
+		if not err.is_empty():
+			errs.append("%s: %s" % [tag, err])
+		if not want_right:
+			err = await _boy_down_follows_line(tree, b, s)
+			if not err.is_empty():
+				errs.append("%s from QA's (1872,-160): %s" % [tag, err])
+		world.queue_free()
+		await tree.process_frame
+	PlayerStats.reset(); GameState.reset()
+	return "; ".join(errs)
+
+
+## From the top point pressing down: every frame the boy is on the stair line (within the
+## Stair width) or on the upper floor's landing side; never over the opening off the line.
+func _boy_down_follows_line(tree: SceneTree, built: Dictionary, s: Dictionary) -> String:
+	var p: CharacterBody2D = built.player
+	var st := _stair_node(built, s)
+	p.state = p.State.NORMAL
+	p.stair = null
+	p.velocity = Vector2.ZERO
+	p.global_position = s.top
+	for i in 3:
+		await tree.physics_frame
+	Input.action_press(&"move_down")
+	var bad := ""
+	for i in 150:
+		await tree.physics_frame
+		var g := p.global_position
+		var d := signf(s.top.x - s.bottom.x)
+		var on_landing := absf(g.y - float(s.top.y)) < 3.0 and (g.x - float(s.top.x)) * d >= -1.0
+		if not on_landing and not st.on_line(g) and absf(g.y - float(s.bottom.y)) > 3.0:
+			bad = "off the stair line over the opening at %s" % g
+			break
+	Input.action_release(&"move_down")
+	p.state = p.State.NORMAL
+	p.stair = null
+	return bad
 
 
 func _layout_with_both_directions() -> Dictionary:

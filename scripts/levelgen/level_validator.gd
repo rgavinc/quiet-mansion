@@ -27,7 +27,7 @@ extends RefCounted
 ##  - no prop ever has to be broken: every prop has a clear jump lane (PROP_LANE px each side,
 ##    no walls/doorway lintels, furniture, stairs, other props, chests, start or exit), and a
 ##    plain jump over it never comes within its touch radius (prop_jump_clears). No pickup/throw.
-##  - every gold pile and chest is reachable
+##  - every gold pile, chest and walking enemy is reachable
 ##  - no enemy within max(safe_radius, 1280px) of the start on ANY floor (straight-line
 ##    distance), none inside the start camera view, none in line of sight of the start
 ##  - nothing overlaps: start, exit, stairs, props, gold, chests, enemies each own a footprint
@@ -44,8 +44,10 @@ const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
 const STAIR_LANDING_PX := 48.0      # 3-tile flat landing beyond each end of the diagonal
 const STAIR_HOLE_PX := 144.0        # upper slab cut open over 9 tiles (x+9..x+17 rising right)
-const RAIL_H_PX := 64.0             # gallery rail collider height above the upper surface: visible handrail is 28px
-                                    # (finial 40px), invisible extension to 64px > the boy's ~52px jump apex
+const RAIL_H_PX := 96.0             # gallery rail collider height above the upper surface (QA: the boy's
+                                   # jump apex is ~52-55px; 96 leaves >= 40px for future jump boosts;
+                                   # test_levelgen checks apex at the stat cap + 16px <= this). The
+                                   # visible handrail is 28px, finial 40px; the rest is invisible.
 const NEAR_GUARD_PX := 16.0         # near-edge guard set-back from the top landing edge (> 14px radius)
 const RAIL_W_PX := 6.0              # rail wall thickness, on the slab at the opening's far edge
 const STAIR_FOOTPRINT_PX := STAIR_RUN_PX + 2.0 * STAIR_LANDING_PX   # 336px = 21 tiles
@@ -178,6 +180,11 @@ static func validate(layout: Variant) -> PackedStringArray:
 			var n := node_at(g.segments, floor_of(o.pos.y), o.pos.x)
 			if n == "" or not reach.has(n):
 				errs.append("%s at %s not reachable" % [key, o.pos])
+	for e in L.get("enemies", []):   # walkers must be able to walk to the boy (floaters fly)
+		if e.get("pos") is Vector2 and StringName(e.get("movement", &"walk")) != &"float":
+			var n := node_at(g.segments, floor_of(e.pos.y), e.pos.x)
+			if n == "" or not reach.has(n):
+				errs.append("walker %s at %s not reachable from the start" % [e.get("type", "?"), e.pos])
 
 	# enemies: distance (any floor), start camera view, line of sight
 	var safe := maxf(maxf(float(L.get("safe_radius", 0.0)), float(table.get("safe_radius", 0.0))), MIN_ENEMY_DIST)
@@ -475,7 +482,7 @@ static func stair_hole(s: Dictionary) -> Vector2:
 ## Gallery rail collider [a, b] px on to_floor (PRODUCT.md "Stair opening", QA-revised): a thin
 ## vertical wall at the FAR edge of the opening, where the upper floor drops off, standing on the
 ## solid slab: rising right just left of px 144 from the stair's leftmost tile edge (left edge of
-## x+9), rising left just right of px 192 (mirrored). From the upper surface up RAIL_H_PX (64px,
+## x+9), rising left just right of px 192 (mirrored). From the upper surface up RAIL_H_PX (96px,
 ## above the boy's ~52px jump). Layer WORLD: blocks the boy and walkers; floaters don't mask WORLD.
 ## A climber at that x is ~64px above the lower floor (96px under the wall's foot), so climbing
 ## never touches it. The visible `stair_gallery_rail` still spans the whole opening.
@@ -486,7 +493,7 @@ static func stair_rail(s: Dictionary) -> Vector2:
 	return Vector2(x0 + 192.0, x0 + 192.0 + RAIL_W_PX)
 
 
-## Near-edge guard [a, b] px on to_floor: the same 64px wall inside the opening, NEAR_GUARD_PX back
+## Near-edge guard [a, b] px on to_floor: the same RAIL_H_PX wall inside the opening, NEAR_GUARD_PX back
 ## from the stair-top landing edge, so a body walking off the top landing toward the opening is
 ## stopped on the slab corner instead of dropping a floor. NEAR_GUARD_PX (16) > the widest body
 ## radius (14), so a body standing on the stair's top point never touches it; climbers pass it
