@@ -12,7 +12,9 @@ signal died
 const BASE := {
 	&"max_health": 3.0,          # 3 hits = game over
 	&"move_speed": 140.0,        # px/s
-	&"jump_velocity": 320.0,     # px/s upward
+	&"jump_velocity": 320.0,     # px/s upward (~52px jump with gravity 980)
+	&"gravity": 980.0,           # px/s^2
+	&"climb_speed": 90.0,        # px/s along stairs
 	&"pickup_time": 1.0,         # s holding LMB to pick up
 	&"pickup_range": 40.0,       # px; leaving range cancels pickup
 	&"tap_threshold": 0.2,       # s; LMB shorter than this = throw
