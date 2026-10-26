@@ -52,7 +52,9 @@ notes = "Puppet alerted"
 path = "assets/art/ui/light_blob.png"
 slot = "flashlight_blob"
 status = "ai"
-notes = "Soft falloff texture for mouse flashlight"
+frame_size = [128, 128]
+pivot = [64, 64]
+notes = "Soft falloff texture for mouse flashlight (128x128 white, radial alpha falloff). Centre pivot; template assets/replace_me/flashlight_blob_template.png shows centre + 1/8, 1/4, 3/8, 1/2 radius rings"
 
 # --- Animated sprite strips (checkpoint 1). One horizontal PNG strip per slot, frames left->right, no padding,
 # transparent bg. frame_size/frames/fps/loop/pivot here are the single source of truth; pivot is in frame pixels.
@@ -168,7 +170,7 @@ frames = 7
 fps = 14
 loop = false
 pivot = [32, 63]
-notes = "64x64 puppet startled by flashlight (hero moment): 0 notice, 1 anticipation squash, 2 impact (white flash, smear, jaw splits, red eye glint), 3 overshoot scream (rows of teeth), 4 rebound, 5 finger wobble, 6 stunned hold. Play once and hold the last frame (6) while stunned"
+notes = "64x64 puppet startled by flashlight (hero moment): 0 notice, 1 anticipation squash, 2 impact (white flash, smear, mouth splits, red eye glint), 3 overshoot scream (mouth ~half the face height, red inner mouth, big teeth readable at 1x), 4 rebound, 5 finger wobble, 6 stunned hold. Play once and hold the last frame (6) while stunned"
 
 [[asset]]
 path = "assets/art/characters/puppet_chase.png"
@@ -179,7 +181,18 @@ frames = 8
 fps = 14
 loop = true
 pivot = [32, 63]
-notes = "64x64 enraged chase loop: jaws open wide over 0-3, snap shut on 4 (lunge + smear), finger-claw twitch, red eye glint on 3-4, red rim light"
+notes = "64x64 enraged SCUTTLE chase loop (moving right; flip_h for left): the fingers walk like legs on the floor in alternating pairs (feet planted on y=62-63 during stance), body leans forward and bobs on each contact (frames 0 and 4), sleeve trails behind, red scream mouth opens over 0-3 and snaps shut on 4 (lunge + smear), red eye glint on 3-4, red rim light"
+
+[[asset]]
+path = "assets/art/characters/puppet_chase_float.png"
+slot = "puppet_chase_float"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 14
+loop = true
+pivot = [32, 63]
+notes = "64x64 FLOATING enraged chase loop for the stage 4-5 float tier (the previous puppet_chase): jaws open wide over 0-3, snap shut on 4 (lunge + smear), finger-claw twitch, red eye glint on 3-4, red rim light"
 
 [[asset]]
 path = "assets/art/props/vase_idle.png"
@@ -345,3 +358,132 @@ fps = 1
 loop = false
 pivot = [16, 16]
 notes = "32x32 shop item icon: lucky coin (more gold)"
+
+# --- Stage 1 environment (tileset atlas per docs/LEVELGEN.md: 16px tiles, 160px floors), exit door, parallax, decor props.
+
+[[asset]]
+path = "assets/art/tiles/tiles_stage1.png"
+slot = "tiles_stage1"
+status = "ai"
+tile_size = [16, 16]
+columns = 8
+rows = 13
+tile_names = ["floor_top", "floor_top_alt", "floor_fill", "floor_fill_alt", "ceiling_trim", "ceiling_trim_hook", "slab_end_left", "slab_end_right", "wallpaper_damask", "wallpaper_stripe", "wallpaper_torn", "wallpaper_stained", "wallpaper_teal", "wainscot_rail", "wainscot_panel", "wainscot_skirting", "wall_column", "wall_column_top", "door_lintel", "door_post_left", "door_post_right", "door_head_side", "door_head_mid", "empty", "stair_r0_c0", "stair_r0_c1", "stair_r0_c2", "stair_r0_c3", "empty", "empty", "empty", "empty", "stair_r1_c0", "stair_r1_c1", "stair_r1_c2", "stair_r1_c3", "empty", "empty", "empty", "empty", "stair_r2_c0", "stair_r2_c1", "stair_r2_c2", "stair_r2_c3", "empty", "empty", "empty", "empty", "stair_r3_c0", "stair_r3_c1", "stair_r3_c2", "stair_r3_c3", "empty", "empty", "empty", "empty", "stair_r4_c0", "stair_r4_c1", "stair_r4_c2", "stair_r4_c3", "empty", "empty", "empty", "empty", "stair_r5_c0", "stair_r5_c1", "stair_r5_c2", "stair_r5_c3", "empty", "empty", "empty", "empty", "stair_r6_c0", "stair_r6_c1", "stair_r6_c2", "stair_r6_c3", "empty", "empty", "empty", "empty", "stair_r7_c0", "stair_r7_c1", "stair_r7_c2", "stair_r7_c3", "empty", "empty", "empty", "empty", "stair_r8_c0", "stair_r8_c1", "stair_r8_c2", "stair_r8_c3", "empty", "empty", "empty", "empty", "stair_r9_c0", "stair_r9_c1", "stair_r9_c2", "stair_r9_c3", "empty", "empty", "empty", "empty"]
+stair_stamp = [0, 3, 4, 10]
+notes = "Stage 1 tileset atlas, 16px tiles, 8 columns x 13 rows, index = row*8 + col (see tile_names and docs/DESIGN.md). Rows 0-2 single tiles; cols 0-3 of rows 3-12 are one 4x10-tile stair stamp (stair_stamp = [col, row, w, h]) rising one floor (160px) to the right: stamp top = upper floor surface/slab row, stamp bottom = lower floor surface. Flip_h for stairs rising left"
+
+[[asset]]
+path = "assets/art/props/exit_door_stage1.png"
+slot = "exit_door_stage1"
+status = "ai"
+frame_size = [48, 64]
+frames = 4
+fps = 6
+loop = true
+pivot = [24, 63]
+notes = "48x64 stage-1 exit door (stone arch, double door, green exit lamp, light leaking from the transom/threshold), 4f glow loop. Fits a 3-tile-high doorway (rows 6-8) with the arch above; pivot = bottom centre on the floor surface"
+
+[[asset]]
+path = "assets/art/backgrounds/bg_stage1_far.png"
+slot = "bg_stage1_far"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [0, 0]
+parallax_scroll = 0.15
+tile_x = true
+notes = "320x180 parallax far layer: storm sky, moon, lightning, distant wing with lit windows, rain. Tiles horizontally (wraps at x=320); suggested scroll 0.15"
+
+[[asset]]
+path = "assets/art/backgrounds/bg_stage1_mid.png"
+slot = "bg_stage1_mid"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [0, 0]
+parallax_scroll = 0.45
+tile_x = true
+notes = "320x180 parallax mid layer: dim gallery hallway with portraits, sconces, columns; transparent window gaps at x 116-160 and 276-320 show the far layer. Tiles horizontally; suggested scroll 0.45"
+
+[[asset]]
+path = "assets/art/backgrounds/bg_stage1_near_fog.png"
+slot = "bg_stage1_near_fog"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [0, 0]
+parallax_scroll = 1.2
+tile_x = true
+notes = "320x180 semi-transparent foreground fog strip (low drifting fog in the bottom ~60px). Draw in front of the level, scroll 1.2, tiles horizontally"
+
+[[asset]]
+path = "assets/art/props/prop_candelabra.png"
+slot = "prop_candelabra"
+status = "ai"
+frame_size = [32, 64]
+frames = 4
+fps = 8
+loop = true
+pivot = [16, 63]
+notes = "32x64 brass candelabra, 3 candles, 4f flame flicker loop. Decor (2 tiles wide, 4 tall: blocks per LEVELGEN furniture rule if given collision)"
+
+[[asset]]
+path = "assets/art/props/prop_portrait.png"
+slot = "prop_portrait"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 wall portrait (gilt frame, pale sitter with red eyes). Wall-hung: centre pivot, place in wallpaper rows 1-5"
+
+[[asset]]
+path = "assets/art/props/prop_grandfather_clock.png"
+slot = "prop_grandfather_clock"
+status = "ai"
+frame_size = [32, 64]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 63]
+notes = "32x64 grandfather clock still. Stands on the floor; 4 tiles tall"
+
+[[asset]]
+path = "assets/art/props/prop_cobweb.png"
+slot = "prop_cobweb"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [0, 0]
+notes = "32x32 corner cobweb for a top-left ceiling corner (pivot top-left); flip_h for top-right corners"
+
+[[asset]]
+path = "assets/art/props/prop_chest_closed.png"
+slot = "prop_chest_closed"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 31]
+notes = "32x32 treasure chest, closed. Pivot bottom centre on the floor"
+
+[[asset]]
+path = "assets/art/props/prop_chest_open.png"
+slot = "prop_chest_open"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 31]
+notes = "32x32 treasure chest, open with gold inside. Same footprint as prop_chest_closed (swap on open)"
