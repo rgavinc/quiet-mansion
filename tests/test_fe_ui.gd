@@ -82,6 +82,10 @@ func run_all() -> Dictionary:
 		["shop_owned_row_qa_repro_6_flash_bulbs_fits", test_shop_owned_qa_bulbs6],
 		["owned_strip_hud_columns_never_widen", test_strip_hud_no_widen],
 		["owned_strip_spent_tile_badge_full_opacity", test_strip_spent_badge],
+		["owned_strip_order_charged_then_stacked_then_rest", test_strip_order],
+		["shop_owned_row_qa_repro_order_shows_charged_items", test_shop_owned_qa_order],
+		["shop_owned_overflow_tooltip_lists_hidden_items", test_shop_overflow_tooltip],
+		["shop_owned_overflow_click_opens_list", test_shop_overflow_click],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -2624,7 +2628,10 @@ func _qa_shop(extra: PackedStringArray, copies: int) -> Array:
 func _qa_end(main: Node) -> void:
 	var fs := _root().get_node(^"FESignals")
 	_tree().paused = false
+	var cur := _tree().current_scene
 	_tree().current_scene = null
+	if is_instance_valid(cur) and cur != main:
+		cur.free()   # Continue swapped in a new stage
 	if is_instance_valid(main):
 		main.free()
 	fs.reset()
@@ -2639,6 +2646,8 @@ func _qa_end(main: Node) -> void:
 func _uniform_columns(strip: Control, bound: Rect2) -> String:
 	var step: float = strip.tile_size + strip.sep
 	for row in strip.get_children():
+		if not row is HBoxContainer:
+			continue   # the "+N" popover (top_level overlay)
 		var xs: Array = []
 		for col in row.get_children():
 			var r := (col as Control).get_global_rect()
@@ -2795,3 +2804,191 @@ func test_strip_spent_badge() -> String:
 		if not err.is_empty():
 			return err
 	return ""
+
+
+func test_strip_order() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	for id in ["sneakers", "soft_shoes", "thick_sweater", "soft_shoes", "music_box", "thick_sweater", "flash_bulb"]:
+		ps.grant_item(db.make(id))
+	var got: Array = strip.entries.map(func(e): return e.id)
+	var want := ["music_box", "flash_bulb", "soft_shoes", "thick_sweater", "sneakers"]
+	var err := ""
+	if got != want:
+		err = "order: charged, then stacked, then the rest (each by first owned): want %s, got %s" % [want, got]
+	var tiles_ids: Array = strip.tiles.map(func(t): return String(t.name).trim_prefix("Item_"))
+	if err.is_empty() and tiles_ids != want:
+		err = "tiles drawn in a different order: %s" % [tiles_ids]
+	_cleanup([strip, ps])
+	return err
+
+
+func _visible_ids(strip: Control) -> Array:
+	return strip.tiles.map(func(t): return String(t.name).trim_prefix("Item_"))
+
+
+func test_shop_owned_qa_order() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var vis := _visible_ids(strip)
+		for id in ["flash_bulb", "rabbits_foot", "music_box"]:
+			if not id in vis:
+				err = "%s must be visible in the shop row, not in +N (visible: %s)" % [id, vis]
+				break
+		var last := -1
+		var last_order := -1
+		for e in strip.entries:
+			var g: int = 0 if e.max_charges > 0 else (1 if e.count > 1 else 2)
+			if err.is_empty() and (g < last or (g == last and e.order < last_order)):
+				err = "%s out of order (group %d after %d)" % [e.id, g, last]
+			if g != last:
+				last_order = -1
+			last = g
+			last_order = e.order
+	_qa_end(r[2])
+	return err
+
+
+func _mouse(pos: Vector2, button := MOUSE_BUTTON_NONE, pressed := false) -> void:
+	var ev: InputEvent
+	if button == MOUSE_BUTTON_NONE:
+		ev = InputEventMouseMotion.new()
+	else:
+		ev = InputEventMouseButton.new()
+		ev.button_index = button
+		ev.pressed = pressed
+	ev.position = pos
+	ev.global_position = pos
+	_root().push_input(ev, true)   # viewport coords (headless window is 64x64, stretched)
+
+
+func _click(pos: Vector2) -> void:
+	_mouse(pos)
+	_mouse(pos, MOUSE_BUTTON_LEFT, true)
+	_mouse(pos, MOUSE_BUTTON_LEFT, false)
+
+
+func test_shop_overflow_tooltip() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var ps := _root().get_node(^"PlayerStats")
+		# hidden = every owned id not drawn as a tile (computed from PlayerStats, not the strip)
+		var owned: Array = []
+		for it in ps.owned_items:
+			if not it.id in owned:
+				owned.append(it.id)
+		var vis := _visible_ids(strip)
+		var hidden := owned.filter(func(id): return not id in vis)
+		if over == null:
+			err = "no +N tile"
+		elif over.mouse_filter != Control.MOUSE_FILTER_STOP:
+			err = "+N tile must take the mouse (STOP) so its tooltip shows"
+		elif (over.find_child("More", true, false) as Label).text != "+%d" % hidden.size():
+			err = "+N says %s, %d hidden" % [(over.find_child("More", true, false) as Label).text, hidden.size()]
+		if err.is_empty():
+			var c := over.get_global_rect().get_center()
+			_mouse(c)
+			var hov := _root().gui_get_hovered_control()
+			if hov != over:
+				err = "mouse over +N hovers %s, not the +N tile" % [hov.get_path() if hov else null]
+			else:
+				var tip := hov.get_tooltip(c - hov.get_global_rect().position)
+				var lines := tip.split("\n")
+				if lines.size() != hidden.size():
+					err = "tooltip has %d lines for %d hidden items: %s" % [lines.size(), hidden.size(), tip]
+				for i in lines.size():
+					if not err.is_empty():
+						break
+					var it: Object = null
+					for o in ps.owned_items:
+						if o.id == hidden[i]:
+							it = o
+							break
+					if not lines[i].begins_with(str(it.display_name)):
+							err = "tooltip line %d '%s' should be %s" % [i, lines[i], it.display_name]
+					var n := (ps.owned_items as Array).filter(func(o): return o.id == hidden[i]).size()
+					if err.is_empty() and n > 1 and not ("×%d" % n) in lines[i]:
+						err = "tooltip line '%s' missing ×%d" % [lines[i], n]
+					if err.is_empty() and int(it.max_charges) > 0 and not "charges" in lines[i]:
+						err = "tooltip line '%s' missing charges" % lines[i]
+		# the cards keep the mouse: hovering a Buy button hovers that button
+		if err.is_empty():
+			var buy := (shop.cards[0] as Control).find_child("Buy", true, false) as Control
+			_mouse(buy.get_global_rect().get_center())
+			if _root().gui_get_hovered_control() != buy:
+				err = "Buy button no longer gets the mouse"
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_overflow_click() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var c := over.get_global_rect().get_center()
+		_click(c)
+		_settle(shop)
+		var pop: Control = strip.popover
+		var panel: Control = shop.root.find_child("OffersPanel", true, false)
+		var cont: Control = shop.continue_button
+		var screen := Rect2(Vector2.ZERO, _root().get_visible_rect().size)
+		if not strip.is_overflow_open():
+			err = "clicking +N should open the hidden-items list"
+		if err.is_empty():
+			for e in strip.hidden_entries():
+				var cell := pop.find_child("Hidden_%s" % e.id, true, false)
+				if cell == null:
+					err = "list is missing %s" % e.id
+					break
+				var nm := cell.get_node_or_null(^"Name") as Label
+				if nm == null or not nm.text.begins_with(e.name):
+					err = "%s row should show its name" % e.id
+					break
+			var cells := pop.find_child("Items", true, false).get_child_count()
+			if err.is_empty() and cells != strip.overflow:
+				err = "list has %d rows for %d hidden" % [cells, strip.overflow]
+		var pr: Rect2 = pop.get_global_rect() if pop else Rect2()
+		if err.is_empty() and not screen.encloses(pr):
+			err = "list %s off screen" % pr
+		if err.is_empty() and not panel.get_global_rect().grow(0.5).encloses(pr):
+			err = "list %s should stay inside OffersPanel %s" % [pr, panel.get_global_rect()]
+		if err.is_empty() and pr.intersects(cont.get_global_rect()):
+			err = "list overlaps Continue"
+		if err.is_empty():
+			err = _qa_panel_check(shop)   # still 460 px, < 560 with the list open
+		# click +N again -> closes; open, click outside -> closes
+		if err.is_empty():
+			_click(c)
+			if strip.is_overflow_open():
+				err = "second click on +N should close the list"
+		if err.is_empty():
+			_click(c)
+			_settle(shop)
+			_click(Vector2(700, 650))   # empty floor under the merchant
+			if strip.is_overflow_open():
+				err = "click outside should close the list"
+		if err.is_empty():
+			_click(c)
+			_settle(shop)
+			_click(strip.popover.get_global_rect().get_center())
+			if not strip.is_overflow_open():
+				err = "a click inside the list should keep it open"
+		if err.is_empty():
+			cont.pressed.emit()
+			if strip.is_overflow_open():
+				err = "Continue should close the list"
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err

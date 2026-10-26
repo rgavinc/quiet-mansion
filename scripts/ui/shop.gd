@@ -125,7 +125,8 @@ func _build() -> void:
 	owned_strip.name = "OwnedItems"
 	owned_strip.skin = skin
 	owned_strip.stats = stats
-	owned_strip.make_compact(11, 1)   # one row of 11 (+N): fits OffersPanel's 460 px under 4 cards
+	owned_strip.make_compact(11, 1)
+	owned_strip.popover_bounds = left   # the overflow list stays inside OffersPanel   # one row of 11 (+N): fits OffersPanel's 460 px under 4 cards
 	owned_row.add_child(owned_strip)
 	lcol.add_child(owned_row)
 
@@ -247,6 +248,8 @@ func merchant_band() -> Vector2:
 ## `count` > 0 asks for at most that many. The demo stub gets the same cap.
 func open_shop(count: int = -1) -> void:
 	var n := clampi(count if count > 0 else skin.shop_offer_count, 1, MAX_CARDS)
+	if owned_strip:
+		owned_strip.close_overflow()
 	offers = bus.get_shop_offer(n) if bus and bus.has_method(&"get_shop_offer") else ([] as Array[Dictionary])
 	_tile_text = unique_initials(_catalogue_names(offers))
 	sold.clear()
@@ -508,6 +511,8 @@ func _sparkle(card: Control) -> void:
 
 
 func _on_continue() -> void:
+	if owned_strip:
+		owned_strip.close_overflow()
 	close()
 	if bus and bus.has_method(&"next_stage"):
 		bus.next_stage()

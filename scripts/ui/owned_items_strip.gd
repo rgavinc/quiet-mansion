@@ -2,7 +2,9 @@ extends VBoxContainer
 ## Owned-items strip (top-left, under hearts + gold). Driven by PlayerStats.items_changed,
 ## which BE fires on every buy / chest grant, every charge change (Item.use_charge /
 ## set_charges) and once per stage start (begin_stage refills charges).
-## One tile per owned item id: duplicates stack into one tile with a "×N" badge. Icon by
+## One tile per owned item id: duplicates stack into one tile with a "×N" badge.
+## Order (stable): items with charges first, then stacks (count > 1), then the rest, each
+## group in acquisition order, so what matters stays visible ahead of the "+N" tile. Icon by
 ## `icon_slot` (manifest), else a letter tile with the shop's initials (Shop.initials /
 ## unique_initials) on the rarity rim (HudSkin.rarity_colors, Designer's palette).
 ## Items with max_charges > 0 (Flash Bulb, Rabbit's Foot, Music Box) get charge pips under
@@ -54,6 +56,13 @@ var max_rows := MAX_ROWS
 var pip_r := PIP_R
 var sep := SEP
 var compact := false
+## "+N" reveals the hidden items: tooltip (mouse_filter STOP) + click toggles a popover list.
+## Off in the HUD (it never takes the mouse); make_compact() (shop) turns it on.
+var overflow_interactive := false
+## Popover stays inside this Control's rect (e.g. the shop's OffersPanel), else the screen.
+var popover_bounds: Control
+var overflow_tile: Control
+var popover: PanelContainer
 
 
 ## Shop variant: 28 px tiles, smaller pips, `row_tiles` a row, `rows` rows (+N past that).
@@ -64,6 +73,7 @@ func make_compact(row_tiles: int = 11, rows: int = 1) -> void:
 	sep = 4
 	per_row = row_tiles
 	max_rows = rows
+	overflow_interactive = true
 	if is_node_ready():
 		refresh()
 
@@ -112,16 +122,35 @@ func _stacks() -> Array:
 		e.count += 1
 		e.charges += int(it.get("charges")) if "charges" in it else 0
 		e.max_charges += int(it.get("max_charges")) if "max_charges" in it else 0
+	# stable: group key, then first-owned index
+	for i in order.size():
+		order[i].order = i
+	order.sort_custom(func(a, b):
+		var ka := _group(a)
+		var kb := _group(b)
+		return ka < kb or (ka == kb and a.order < b.order))
 	return order
+
+
+## 0 = has charges, 1 = stacked, 2 = the rest.
+static func _group(e: Dictionary) -> int:
+	if e.max_charges > 0:
+		return 0
+	if e.count > 1:
+		return 1
+	return 2
 
 
 func refresh() -> void:
 	if not is_inside_tree() or skin == null:
 		return
 	for c in get_children():
+		if c == popover:
+			continue
 		remove_child(c)
 		c.queue_free()
 	tiles.clear()
+	overflow_tile = null
 	entries = _stacks()
 	var names: PackedStringArray = []
 	for e in entries:
@@ -140,11 +169,18 @@ func refresh() -> void:
 			row.add_theme_constant_override("separation", sep)
 			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			add_child(row)
-		var t := _make_entry(entries[i]) if i < shown else _make_overflow(overflow, entries.slice(shown))
+		var t := _make_entry(entries[i]) if i < shown else _make_overflow(overflow, hidden_entries())
 		row.add_child(t)
 		if i < shown:
 			tiles.append(t)
+		else:
+			overflow_tile = t
 	visible = not entries.is_empty()
+	if popover and popover.visible:
+		if overflow > 0:
+			_fill_popover()
+		else:
+			close_overflow()
 
 
 ## Widest the strip can get (px): per_row tiles + gaps (columns never widen).
@@ -181,11 +217,37 @@ func _small_label(text: String, size: int) -> Label:
 	return l
 
 
+## Stacks hidden behind "+N" (in display order).
+func hidden_entries() -> Array:
+	return entries.slice(tiles.size()) if overflow > 0 else []
+
+
+## One line per stack: "Name", "Name ×N", plus " (c/max charges)" for charged items.
+static func entry_line(e: Dictionary) -> String:
+	var t: String = e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]
+	if e.max_charges > 0:
+		t += " (%d/%d charges)" % [e.charges, e.max_charges]
+	return t
+
+
+func overflow_tooltip() -> String:
+	var lines: PackedStringArray = []
+	for e in hidden_entries():
+		lines.append(entry_line(e))
+	return "\n".join(lines)
+
+
 func _make_overflow(n: int, hidden: Array = []) -> Control:
 	var col := VBoxContainer.new()
 	col.name = "Overflow"
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.tooltip_text = "\n".join(hidden.map(func(e): return e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]))
+	col.mouse_filter = Control.MOUSE_FILTER_STOP if overflow_interactive else Control.MOUSE_FILTER_IGNORE
+	if overflow_interactive:
+		col.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		col.gui_input.connect(_on_overflow_input)
+	var lines: PackedStringArray = []
+	for e in hidden:
+		lines.append(entry_line(e))
+	col.tooltip_text = "\n".join(lines)
 	_fix_column(col)
 	var box := _tile_box(Color(0.6, 0.55, 0.65))
 	var l := _small_label("+%d" % n, 11 if compact else 15)
@@ -307,6 +369,111 @@ func _badge(count: int) -> Control:
 	pill.offset_right = -1
 	pill.offset_bottom = -1
 	return overlay
+
+
+func _on_overflow_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+		toggle_overflow()
+		accept_event()
+
+
+func is_overflow_open() -> bool:
+	return popover != null and popover.visible
+
+
+func toggle_overflow() -> void:
+	if is_overflow_open():
+		close_overflow()
+	else:
+		open_overflow()
+
+
+func open_overflow() -> void:
+	if overflow <= 0 or not is_inside_tree():
+		return
+	if popover == null:
+		popover = PanelContainer.new()
+		popover.name = "OverflowList"
+		popover.top_level = true   # an overlay: containers don't lay it out or size by it
+		popover.z_index = 10
+		popover.mouse_filter = Control.MOUSE_FILTER_STOP   # clicks on the list stay on it
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.06, 0.045, 0.08, 0.96)
+		sb.border_color = Color(0.85, 0.78, 0.6)
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(6)
+		sb.set_content_margin_all(8)
+		popover.add_theme_stylebox_override(&"panel", sb)
+		add_child(popover)
+	popover.visible = true
+	_fill_popover()
+
+
+func close_overflow() -> void:
+	if popover:
+		popover.visible = false
+
+
+func _fill_popover() -> void:
+	for c in popover.get_children():
+		popover.remove_child(c)
+		c.queue_free()
+	var box := VBoxContainer.new()
+	box.name = "Box"
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 4)
+	var title := _small_label("Also owned", 12)
+	title.add_theme_color_override("font_color", Color(0.85, 0.8, 0.72))
+	box.add_child(title)
+	var grid := GridContainer.new()
+	grid.name = "Items"
+	grid.columns = 2
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 4)
+	for e in hidden_entries():
+		var cell := HBoxContainer.new()
+		cell.name = "Hidden_%s" % e.id
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_theme_constant_override("separation", 6)
+		cell.add_child(_make_entry(e))
+		var l := _small_label(entry_line(e), 11)
+		l.name = "Name"
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		cell.add_child(l)
+		grid.add_child(cell)
+	box.add_child(grid)
+	popover.add_child(box)
+	_place_popover.call_deferred()
+	_place_popover()
+
+
+## Above the "+N" tile, right-aligned to it, clamped inside popover_bounds (or the screen).
+func _place_popover() -> void:
+	if not is_overflow_open() or not is_inside_tree():
+		return
+	popover.reset_size()
+	var sz := popover.get_combined_minimum_size()
+	var b := popover_bounds.get_global_rect() if popover_bounds and is_instance_valid(popover_bounds) and popover_bounds.is_inside_tree() \
+			else get_viewport().get_visible_rect()
+	b = b.grow(-4.0)
+	var anchor := overflow_tile.get_global_rect() if overflow_tile and is_instance_valid(overflow_tile) else get_global_rect()
+	var pos := Vector2(anchor.end.x - sz.x, anchor.position.y - sz.y - 6.0)
+	pos.x = clampf(pos.x, b.position.x, maxf(b.end.x - sz.x, b.position.x))
+	pos.y = clampf(pos.y, b.position.y, maxf(b.end.y - sz.y, b.position.y))
+	popover.global_position = pos
+	popover.size = sz
+
+
+## Click outside the list (and outside "+N", which toggles itself) closes it.
+func _input(ev: InputEvent) -> void:
+	if not is_overflow_open():
+		return
+	if ev is InputEventMouseButton and ev.pressed:
+		var p: Vector2 = ev.position
+		var on_tile := overflow_tile != null and is_instance_valid(overflow_tile) and overflow_tile.get_global_rect().has_point(p)
+		if not on_tile and not popover.get_global_rect().has_point(p):
+			close_overflow()
 
 
 ## One dot per charge (filled = left this stage), wrapped onto up to `lines` (HUD 2, shop 1) lines inside the
