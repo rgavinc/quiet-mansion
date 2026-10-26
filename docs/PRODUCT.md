@@ -138,3 +138,17 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Replace flow:** draw over the template, save with the same name, adjust `frames`/`fps` in the manifest if needed, and flip the slot to `human`. That's it.
 - **Docs and guards:** `assets/README.md` (Lead) lists every slot's size, frame count, and pivot, generated from the manifest. CI fails if a sheet's size doesn't match its manifest entry. QA tests that every slot loads and animates with placeholder art.
 - UI skin values (ring colors, gauges, HUD) go in a separate theme file, since they aren't art slots.
+
+## Product decisions (Oct 25 evening)
+- **Enemy movement:** puppets on stages 1–3 walk with gravity and change floors only by stairs (on and off screen, via `LevelNav`). Floating enemies are stage 4+ only, marked solely by `EnemyDef.movement = &"float"`.
+- **Taking a hit:** a catch costs 1 heart and shoves the boy (with collision). The puppet then backs off/flinches ~1.5s so one contact never chains into a death. Catches go only through the puppet's hit `Area2D`; bodies stay solid.
+- **Knocking:** a left-mouse tap only targets knockable props, never puppets directly.
+- **Pickup timing:** measured from button-down; `pickup_time` = 1.0s; a tap (<0.2s) never shows the gauge.
+- **No continues:** death ends the run. *New run* (primary) = stage 1, 3 hearts, 0 gold, no items, new seed. *Retry seed* = same run seed, same fresh start at stage 1.
+- **Carry-over between stages:** hearts, gold, and bought/chest items carry over. Held props (vases etc.) belong to the level and are dropped.
+- **Run end:** clearing stage 5's exit shows a win screen (seed, gold, New run), not the shop.
+- **Stairs:** 15 tiles (240px) diagonal per floor (~34°) plus a 3-tile landing at each end (21 tiles total). Landings are kept clear.
+- **Stage 1 size:** at least 3 floors, ~3 screens wide; exit on a different floor than the start; no puppet within one screen of the start.
+- **Seed sweep:** 1,000 seeds per stage.
+- **Merge rule:** an author's "ready" message ends with "frozen at `<sha>`"; Lead merges only that sha; follow-ups go on a new branch.
+- **Wednesday first-look checklist:** generated multi-floor stage 1 start-to-exit; walking/stair-taking chasers; off-screen arrows that drain and give up; 1s light startle with visible twitch; vase noise pulling multiple chasers; vase gold and throws at the ringed puppet; styled game-over; merchant with a few working items.
