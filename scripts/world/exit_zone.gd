@@ -10,10 +10,10 @@ func _ready() -> void:
 	rect.size = Vector2(48, 64)
 	shape.shape = rect
 	add_child(shape)
-	var spr := Sprite2D.new()
-	var tex := load("res://assets/art/props/exit_door.png")
-	if tex:
-		spr.texture = tex
+	var spr := AnimatedSprite2D.new()
+	spr.sprite_frames = AnimLibrary.frames_for(["exit_door"])
+	if spr.sprite_frames.has_animation("exit_door"):
+		spr.play("exit_door")
 	add_child(spr)
 	body_entered.connect(_on_body)
 	# Also detect CharacterBody2D via area if needed — use physics process proximity as fallback

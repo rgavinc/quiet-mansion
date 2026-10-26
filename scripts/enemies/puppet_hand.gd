@@ -6,24 +6,30 @@ extends CharacterBody2D
 @export var catch_distance: float = 22.0
 
 var enraged: bool = false
-var _spr: Sprite2D
+var _spr: AnimatedSprite2D
 
 func _ready() -> void:
 	add_to_group("puppets")
-	_spr = Sprite2D.new()
-	_set_calm_tex()
+	_spr = AnimatedSprite2D.new()
 	add_child(_spr)
+	_set_calm_tex()
 	NoiseBus.noise.connect(_on_bus_noise)
 
 func _set_calm_tex() -> void:
-	var tex := load("res://assets/art/characters/puppet_hand_calm.png")
-	if tex and _spr:
-		_spr.texture = tex
+	_play("puppet_calm")
 
 func _set_enraged_tex() -> void:
-	var tex := load("res://assets/art/characters/puppet_hand_enraged.png")
-	if tex and _spr:
-		_spr.texture = tex
+	_play("puppet_chase")
+
+## Art by manifest slot only.
+func _play(slot: String) -> void:
+	if _spr == null:
+		return
+	if _spr.sprite_frames == null:
+		_spr.sprite_frames = AnimLibrary.frames_for(["puppet_calm", "puppet_startle", "puppet_chase"])
+	if _spr.sprite_frames.has_animation(slot):
+		_spr.play(slot)
+		_spr.offset = AnimLibrary.offset_for(slot)
 
 ## Hears any noise whose radius reaches it, on screen or not.
 func _on_bus_noise(at: Vector2, radius: float, _loudness: float, _source: Node) -> void:
