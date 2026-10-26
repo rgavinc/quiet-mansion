@@ -40,6 +40,10 @@ func run_all() -> Dictionary:
 		["alert_count_scales_past_3", test_alert_scales],
 		["stage_banner_shows_and_fades", test_stage_banner],
 		["main_scene_has_screens", test_main_screens],
+		["game_over_new_run_fresh_stage1_new_seed", test_new_run],
+		["game_over_retry_seed_fresh_stage1_same_run_seed", test_retry_seed],
+		["retry_seed_uses_run_seed_not_stage_seed", test_retry_uses_run_seed],
+		["next_stage_keeps_run_seed_and_stats", test_next_stage_keeps_run],
 	]
 	var passed := 0
 	for item in checks:
@@ -592,7 +596,13 @@ func test_game_over() -> String:
 	if err.is_empty() and (panel == null or panel.anchor_left < 0.5):
 		err = "game-over text must sit on the right half"
 	if err.is_empty() and (go.retry_button == null or go.new_run_button == null):
-		err = "needs Retry and New run"
+		err = "needs New run and Retry seed"
+	if err.is_empty() and (go.new_run_button.text != "New run" or go.retry_button.text != "Retry seed"):
+		err = "button labels: '%s' '%s'" % [go.new_run_button.text, go.retry_button.text]
+	if err.is_empty() and go.new_run_button.get_index() > go.retry_button.get_index():
+		err = "New run must be the primary (first) button"
+	if err.is_empty() and not go.retry_button.disabled:
+		err = "Retry seed must be disabled when the level has no seed"
 	go.close()
 	if err.is_empty() and _tree().paused:
 		err = "closing must unpause"
@@ -844,4 +854,150 @@ func test_main_screens() -> String:
 		elif c.mouse_filter != Control.MOUSE_FILTER_IGNORE:
 			err = "%s must stay mouse-ignore" % n
 	_cleanup([hud])
+	return err
+
+
+# --- No continues: New run / Retry seed ----------------------------------------
+const FAKE_LEVEL := "res://tests/fixtures/fake_level.tscn"
+
+
+## A run in progress: dying on `at_stage` of run seed `rs` with gold, an item
+## modifier and an inventory item. Returns [ps, bus, game_over].
+func _dying_run(rs: int, at_stage: int, level_seed: int = -1) -> Array:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	b.swap_deferred = false
+	var lvl: Node = load(FAKE_LEVEL).instantiate()
+	lvl.set("level_seed", rs if level_seed < 0 else level_seed)
+	lvl.set("stage", at_stage)
+	_root().add_child(lvl)
+	_tree().current_scene = lvl
+	b.stage = at_stage
+	var go := _mount("res://scripts/ui/game_over.gd", b)
+	ps.add_gold(25)
+	ps.add_modifier(&"max_health", 1.0, 1.0, "extra_heart")   # a bought item
+	ps.add_modifier(&"move_speed", 20.0, 1.0, "soft_shoes")
+	b.set_items([{id = "vase", slot = "vase", name = "Vase", throwable = true}])
+	var guard := 0
+	while ps.health > 0 and guard < 20:
+		ps.set("_invuln_left", 0.0)
+		ps.take_hit(1)
+		guard += 1
+	return [ps, b, go]
+
+
+func _fresh_run_err(ps: Node, b: Node) -> String:
+	var lvl: Node = _tree().current_scene
+	if lvl == null or lvl.scene_file_path != FAKE_LEVEL:
+		return "level was not re-instanced"
+	if int(lvl.get("stage")) != 1 or b.get_stage() != 1:
+		return "must restart at stage 1 (got %s / %d)" % [lvl.get("stage"), b.get_stage()]
+	if ps.health != 3 or ps.max_health() != 3 or b.health != 3 or b.max_health != 3:
+		return "hearts must be 3/3 (stats %d/%d, hud %d/%d)" % [ps.health, ps.max_health(), b.health, b.max_health]
+	if ps.gold != 0 or b.gold != 0:
+		return "gold must be 0 (stats %d, hud %d)" % [ps.gold, b.gold]
+	if not is_equal_approx(ps.get_stat(&"move_speed"), float(ps.BASE[&"move_speed"])):
+		return "item modifiers must be cleared"
+	if not b.items.is_empty():
+		return "inventory must be empty"
+	if _tree().paused:
+		return "new run must be unpaused"
+	return ""
+
+
+func _end_run(nodes: Array) -> void:
+	var cur := _tree().current_scene
+	_tree().current_scene = null
+	if is_instance_valid(cur):
+		cur.free()
+	_cleanup(nodes)
+	_reset_world()
+
+
+func test_new_run() -> String:
+	var r := _dying_run(4242, 3)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var go: Node = r[2]
+	var err := ""
+	if not go.is_open():
+		err = "game over should be open"
+	if err.is_empty() and (go.seed_label.text != "Run seed 4242" or go.retry_button.disabled):
+		err = "should show run seed 4242 with Retry seed enabled (got '%s')" % go.seed_label.text
+	if err.is_empty():
+		go.new_run_button.pressed.emit()
+		err = _fresh_run_err(ps, b)
+	if err.is_empty():
+		var s := int(_tree().current_scene.get("level_seed"))
+		if s < 0 or s == 4242:
+			err = "New run must roll a new seed (got %d)" % s
+		elif b.get_run_seed() != s:
+			err = "run seed must become the new level's seed (%d vs %d)" % [b.get_run_seed(), s]
+	_end_run([go, b, ps])
+	return err
+
+
+func test_retry_seed() -> String:
+	var r := _dying_run(4242, 3)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var go: Node = r[2]
+	go.retry_button.pressed.emit()
+	var err := _fresh_run_err(ps, b)
+	if err.is_empty() and int(_tree().current_scene.get("level_seed")) != 4242:
+		err = "Retry seed must replay seed 4242 (got %s)" % _tree().current_scene.get("level_seed")
+	if err.is_empty() and b.get_run_seed() != 4242:
+		err = "run seed must stay 4242"
+	if err.is_empty() and go.is_open():
+		err = "game over should close"
+	_end_run([go, b, ps])
+	return err
+
+
+## Even if a level reported a per-stage seed, Retry seed uses the run's stage-1 seed.
+func test_retry_uses_run_seed() -> String:
+	var r := _dying_run(4242, 4, 9999)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var go: Node = r[2]
+	var err := ""
+	# Run seed was captured at stage 1 before the death; simulate that.
+	if err.is_empty():
+		b.run_seed = 4242
+		go.show_for_run()
+		if go.seed_label.text != "Run seed 4242":
+			err = "game over must show the run seed, got '%s'" % go.seed_label.text
+	if err.is_empty():
+		go.retry_button.pressed.emit()
+		err = _fresh_run_err(ps, b)
+	if err.is_empty() and int(_tree().current_scene.get("level_seed")) != 4242:
+		err = "Retry seed used the stage seed %s, not run seed 4242" % _tree().current_scene.get("level_seed")
+	_end_run([go, b, ps])
+	return err
+
+
+func test_next_stage_keeps_run() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	b.swap_deferred = false
+	b.run_seed = -1
+	var lvl: Node = load(FAKE_LEVEL).instantiate()
+	lvl.set("level_seed", 5151)
+	_root().add_child(lvl)
+	_tree().current_scene = lvl
+	ps.add_gold(9)
+	ps.set("_invuln_left", 0.0)
+	ps.take_hit(1)
+	b.next_stage()
+	var cur: Node = _tree().current_scene
+	var err := ""
+	if cur == lvl or int(cur.get("stage")) != 2 or int(cur.get("level_seed")) != 5151:
+		err = "next stage must be stage 2 of run seed 5151 (got %s / %s)" % [cur.get("stage"), cur.get("level_seed")]
+	if err.is_empty() and (ps.gold != 9 or b.gold != 9 or ps.health != 2 or b.health != 2):
+		err = "Continue must keep hearts/gold (stats %d/%d, hud %d/%d)" % [ps.health, ps.gold, b.health, b.gold]
+	if err.is_empty() and b.get_run_seed() != 5151:
+		err = "run seed must persist across stages"
+	_end_run([b, ps])
 	return err

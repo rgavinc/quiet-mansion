@@ -1,6 +1,6 @@
 extends UiScreen
 ## Stage-clear + merchant shop. Opens on FESignals.stage_cleared (REAL:
-## GameState.reached_exit; TODO(BE-wire) PR #13 stage-complete signal), pauses the
+## GameState.reached_exit — Lead: that stays the hook), pauses the
 ## tree, shows N offers from FESignals.get_shop_offer (BE Shop.roll_stock when the
 ## class exists, else demo stub, else empty), buys via FESignals.buy_offer
 ## (Shop.buy / PlayerStats.try_spend). Continue → FESignals.next_stage().
