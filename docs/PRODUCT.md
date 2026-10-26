@@ -128,22 +128,12 @@ Every player action carries a cost or risk: light can startle, touching objects 
 
 ## Art: looks great, easy to replace (required)
 
-Gavin's rule: art should look Dead Cells quality, but any human artist must be able to swap it in **without touching code or scenes**.
+Gavin's rule: the art should look Dead Cells quality, and a human artist must be able to swap it in **without touching code or scenes**. The team agreed on the following (this replaces the earlier folder-per-animation draft):
 
-**Folder convention:** one folder per character or prop, one subfolder per animation:
-```
-assets/art/<thing>/<animation>/
-    frame_00.png, frame_01.png, …     # the frames the game loads
-    REFERENCE.png                     # labeled still: pose, facing, pivot dot, canvas size
-    anim.toml                         # fps, loop, pivot, hitbox; artist-editable
-```
-Example: `assets/art/boy/run/`, `assets/art/boy/pickup_channel/`, `assets/art/puppet_hand/startled/`, `assets/art/vase/break_wall/`.
-
-**Rules:**
-- The game **builds animations from these folders at load**, so drop in new frames and it plays. No `.tscn` edits and no hand-built SpriteFrames.
-- Frame count is free, but the canvas size and pivot must match what `REFERENCE.png` shows (e.g. boy 64×64, feet pivot). Changing them means changing `anim.toml`, not code.
-- Each `REFERENCE.png` names the pose in plain words, e.g. "side view, facing right, mid-jump apex, feet pivot".
-- Source files (`.aseprite`/`.psd`/`.blend`) sit next to the frames as `source.*`.
-- Every animation folder has one `ASSETS_MANIFEST.toml` entry (`ai` or `human`). Swapping the frames and flipping the entry to `human` is the whole job.
-- `docs/ART_REPLACE.md` (Designer): a one-page walkthrough with a screenshot of one folder, how to preview in game (debug hotkey to reload art), and the full list of slots.
-- QA adds a test that every manifest slot has a folder, a `REFERENCE.png`, an `anim.toml`, and at least one frame, and that the canvas sizes match.
+- **One source of truth: `assets/ASSETS_MANIFEST.toml`.** Each slot holds `frame_size`, `frames`, `fps`, `loop`, `pivot`, and the `ai`/`human` flag. No per-character config files and no frame counts in filenames.
+- **Sheets:** one horizontal PNG strip per animation, named by slot (e.g. `boy_run.png`). Frames are 64×64 for the boy and big enemies and 32×32 for lesser enemies and props. The pivot sits bottom-center on the feet line, with no padding.
+- **Code asks for slot names only** (`boy/run`, `vase/shatter_wall`), never file paths. One shared loader (Back End) builds animations from the manifest, and FE uses that same loader.
+- **Templates:** each slot has a labeled template in `assets/replace_me/` showing the frame grid, feet line, and hand point, plus a plain-words pose label.
+- **Replace flow:** draw over the template, save with the same name, adjust `frames`/`fps` in the manifest if needed, and flip the slot to `human`. That's it.
+- **Docs and guards:** `assets/README.md` (Lead) lists every slot's size, frame count, and pivot, generated from the manifest. CI fails if a sheet's size doesn't match its manifest entry. QA tests that every slot loads and animates with placeholder art.
+- UI skin values (ring colors, gauges, HUD) go in a separate theme file, since they aren't art slots.
