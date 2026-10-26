@@ -50,8 +50,8 @@ signal inventory_selected(index: int)
 # --- Run flow: screens / banner / alerts -----------------------------------
 ## REAL: PlayerStats.died (hearts hit 0). Game-over screen listens.
 signal player_died
-## REAL: GameState.reached_exit → stage cleared → shop. TODO(BE-wire): switch to the
-## generator's stage-complete signal if PR #13 (level generator) adds one.
+## REAL: GameState.reached_exit → stage cleared → shop (Lead: no separate
+## stage-complete signal is coming; reached_exit is the hook).
 signal stage_cleared(stage: int)
 ## Level start (scene swap here, or BE/generator calls announce_stage). Banner listens.
 signal stage_started(stage: int)
@@ -59,6 +59,8 @@ signal stage_started(stage: int)
 signal item_purchased(offer: Dictionary)
 
 # --- Stat defaults (TODO(BE-wire): read from PlayerStats) -----------------
+## Fresh-run hearts when no PlayerStats is wired (PlayerStats.BASE max_health).
+const DEFAULT_MAX_HEALTH := 3
 var max_health: int = 3
 var startle_time: float = 1.0
 var pickup_time: float = 1.0
@@ -86,6 +88,11 @@ var selected_index: int = -1
 ## flashlight_toggle itself. Keep false in the real game (BE owns input).
 var placeholder_input_enabled: bool = false
 
+## The run's STARTING (stage 1) seed. "Retry seed" replays this, never the
+## current stage's seed. -1 = not known yet (captured from the stage-1 level).
+var run_seed: int = -1
+## Tests: swap scenes synchronously instead of call_deferred.
+var swap_deferred := true
 ## Stage counter when the level scene has no `stage` property (pre PR #13).
 var stage: int = 1
 ## Demo-only shop stock: Callable(count: int, stage: int, seed: int) -> Array[Dictionary].
@@ -612,22 +619,51 @@ func _get_shop() -> Object:
 
 
 # --- Run flow ---------------------------------------------------------------------
-## Retry / New run: fresh stats, same (or new) seed, stage 1 (or given).
-## seed -1 = let the level roll a new one.
-func restart_run(run_seed: int = -1, at_stage: int = 1) -> void:
+## No continues (Product Director): dying ends the run. Both game-over buttons start a
+## FRESH run at stage 1 — PlayerStats.reset() (3 hearts, 0 gold, all item modifiers
+## cleared), FE inventory cleared, GameState reset.
+##   New run    → restart_run(-1)           : level rolls a new seed (Lead: -1 = roll).
+##   Retry seed → restart_run(get_run_seed()): the run's stage-1 seed again.
+## `at_stage` is ignored on purpose (always 1); kept for call-site compatibility.
+func restart_run(new_seed: int = -1, _at_stage: int = 1) -> void:
 	if _stats != null and is_instance_valid(_stats) and _stats.has_method(&"reset"):
-		_stats.reset()
-	stage = maxi(at_stage, 1)
-	_swap_scene.call_deferred(run_seed, stage)
+		_stats.reset()   # BE API: clears modifiers (items), health = base max, gold = 0
+	else:
+		# No PlayerStats wired (tests / tools): fresh FE numbers.
+		set_health(DEFAULT_MAX_HEALTH, DEFAULT_MAX_HEALTH)
+		set_gold(0)
+	run_seed = new_seed if new_seed >= 0 else -1
+	stage = 1
+	_request_swap(run_seed, 1, true)
 
 
-## Shop Continue: keep hearts/gold/items, load the next stage with the same run seed.
+## The RUN seed for "Retry seed" / the game-over screen. In PR #13 the level's
+## `level_seed` IS the run seed (each stage = run seed + stage number), so it is
+## the same on every stage; captured once and kept through next_stage().
+## -1 when the level has no seed (pre PR #13 main.gd).
+func get_run_seed() -> int:
+	if run_seed >= 0:
+		return run_seed
+	var s := get_seed()
+	if s >= 0:
+		run_seed = s
+	return s
+
+
+## Shop Continue: keep hearts/gold/items, load the next stage of the SAME run seed.
 func next_stage() -> void:
 	stage = get_stage() + 1
-	_swap_scene.call_deferred(get_seed(), stage)
+	_request_swap(get_run_seed(), stage, false)
 
 
-func _swap_scene(run_seed: int, at_stage: int) -> void:
+func _request_swap(level_seed: int, at_stage: int, fresh: bool) -> void:
+	if swap_deferred:
+		_swap_scene.call_deferred(level_seed, at_stage, fresh)
+	else:
+		_swap_scene(level_seed, at_stage, fresh)
+
+
+func _swap_scene(level_seed: int, at_stage: int, fresh: bool = false) -> void:
 	if not is_inside_tree():
 		return
 	var tree := get_tree()
@@ -641,20 +677,26 @@ func _swap_scene(run_seed: int, at_stage: int) -> void:
 	var packed: PackedScene = load(cur.scene_file_path)
 	var inst := packed.instantiate()
 	if "level_seed" in inst:
-		inst.set("level_seed", run_seed)
+		inst.set("level_seed", level_seed)   # -1 → the level rolls a new one
 	if "stage" in inst:
 		inst.set("stage", at_stage)
 	var keep_h := health
 	var keep_max := max_health
 	var keep_g := gold
-	reset()
+	reset()   # FE state incl. inventory items
 	stage = at_stage
-	set_health(keep_h, keep_max)
-	set_gold(keep_g)
+	if fresh:
+		set_health(health, max_health)   # values already fresh from PlayerStats.reset()
+		set_gold(gold)
+	else:
+		set_health(keep_h, keep_max)
+		set_gold(keep_g)
 	tree.root.remove_child(cur)
 	cur.queue_free()
 	tree.root.add_child(inst)
 	tree.current_scene = inst
+	if fresh and at_stage == 1 and run_seed < 0:
+		run_seed = get_seed()   # the new level rolled its seed in _ready
 
 
 ## Clears all state (tests / scene reloads).
