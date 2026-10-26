@@ -33,6 +33,18 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 - Hovering the mouse over a lit puppet selects it through `FESignals.select_enemy`. The selection stays when the light goes off.
 - Not done yet: the jump and gravity wait for Lead's floor layout.
 
+## Items, shop and chests
+- `Item` (`scripts/items/item.gd`, a Resource) has `id`, `display_name`, `description`, `icon_slot`, `price`, `rarity` and `mods` (`[{stat, add, mul}]`). `apply()` and `remove()` only call `PlayerStats.add_modifier` / `remove_modifiers_from`. Each instance uses its own source key (`item:<id>#<instance>`), so two copies stack and come off separately. A second `apply()` does nothing. `to_dict()` gives the FE offer fields.
+- `ItemDb` (`scripts/items/item_db.gd`) is the single table: 20 trade-off items. Each one has at least one upside and one downside, and only uses stats that gameplay reads. `ItemDb.make(id)` returns a fresh instance.
+- Rarity: common (weight 60, stage 1+), uncommon (30, 1+), rare (14, 2+), legendary (6, 4+).
+- `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage. The same (stage, seed) always gives the same stock. FE shows the first `shop_offer_count` (3).
+- `Shop.buy(item) -> bool` spends through `try_spend`. It then marks the item `sold` and calls `PlayerStats.grant_item` (apply + add to `owned_items` + `items_changed`). It returns false and changes nothing if gold is short or the item is already sold or applied.
+- `PlayerStats.owned_items`: items stay owned across Continue (PlayerStats is an autoload). `reset()` clears them along with every modifier. Signal: `items_changed(items)`. Helpers: `owns(id)` and `has_minimap()`.
+- Max health: a higher max heals by the same amount. A lower max only clamps current health, so it never costs you an extra heart.
+- New MIN floors keep stacked downsides sane: move_speed 60, climb_speed 30, pickup_range 16, light_range 80, light_angle_deg 10, light_detect_mult / noise_mult 0.2, gold_find_mult 0.1.
+- `Chest` (`scripts/world/chest.gd`, a WorldObject) opens through the normal LMB hold channel (`pickup_time × 1.5`), even when the inventory is full, via the new `WorldObject.on_hold_complete(by)` hook. It opens only once. It grants one item from `ItemDb.roll_chest(stage, seed)`. The seed is `loot_seed`, or a hash of run seed + stage + position. It also adds `gold_inside` and swaps the art from `prop_chest_closed` to `prop_chest_open`. It makes a creak: `DEFAULT_RADIUS × 0.5 × noise_mult`, loudness 0.6. Signal: `opened(item)`.
+- Stats waiting on other work: `light_detect_mult` and `light_startle_time` only matter once the enemy state machine (PR #26) lands. Nothing draws a minimap yet: FE should show it when `PlayerStats.has_minimap()` (or `stat_changed(&"minimap", ...)`).
+
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.
 - `Stair` (`scripts/world/stair.gd`) is an `Area2D` with local `bottom` and `top` points. Up or down anywhere inside its trigger enters `CLIMB` (see "Stairs" below), you move along the line at `climb_speed`, and you step off at either end. There's no jumping during pickup or climbing.

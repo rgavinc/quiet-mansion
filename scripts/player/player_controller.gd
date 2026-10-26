@@ -319,10 +319,10 @@ func _nearest_pickup() -> WorldObject:
 
 
 func _try_start_pickup() -> void:
-	if inventory.is_full():
-		return
 	var t := _nearest_pickup()
 	if t == null:
+		return
+	if inventory.is_full() and not t is Chest:   # opening a chest needs no free slot
 		return
 	state = State.PICKUP
 	pickup_target = t
@@ -348,7 +348,9 @@ func _complete_pickup() -> void:
 	var t := pickup_target
 	state = State.NORMAL
 	pickup_target = null
-	if inventory.add(t.to_item()):
+	if t.on_hold_complete(self):
+		pass   # e.g. a chest opened; nothing goes into the hands
+	elif inventory.add(t.to_item()):
 		t.broken = true  # removed from world silently
 		t.queue_free()
 	FESignals.report_pickup_completed()

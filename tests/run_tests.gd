@@ -10,7 +10,7 @@ func _run() -> void:
 	var total_passed := 0
 	var total_checks := 0
 	var all_fail: PackedStringArray = []
-	for path in ["res://tests/test_game_state.gd", "res://tests/test_provenance.gd", "res://tests/test_player_stats.gd", "res://tests/test_fe_ui.gd", "res://tests/test_anim_library.gd", "res://tests/test_pickup_throw.gd", "res://tests/test_jump_stairs.gd", "res://tests/test_enemy_fsm.gd"]:
+	for path in ["res://tests/test_game_state.gd", "res://tests/test_provenance.gd", "res://tests/test_player_stats.gd", "res://tests/test_fe_ui.gd", "res://tests/test_anim_library.gd", "res://tests/test_pickup_throw.gd", "res://tests/test_jump_stairs.gd", "res://tests/test_enemy_fsm.gd", "res://tests/test_items.gd"]:
 		var script: Script = load(path)
 		if script == null:
 			printerr("FAIL: load ", path)

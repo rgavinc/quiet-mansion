@@ -692,6 +692,7 @@ func test_shop_buy() -> String:
 		_cleanup([b, ps])
 		return "GameState autoload missing"
 	b.wire_game_state(gs)
+	b._shop = RefCounted.new()   # no roll_stock: skip BE's real Shop, use the stub below
 	b.shop_stub = func(_n, _s, _sd): return [
 		{"id": "a", "display_name": "Soft Shoes", "description": "", "icon_slot": "item_icon_soft_shoes", "price": 6, "rarity": "common"},
 		{"id": "b", "display_name": "Bright Bulb", "description": "", "icon_slot": "no_icon", "price": 8, "rarity": "rare"},
@@ -783,6 +784,7 @@ func test_shop_be_interface() -> String:
 
 func test_shop_empty() -> String:
 	var b := _bus()
+	b._shop = RefCounted.new()   # no roll_stock and no stub: an empty item source
 	var log := _ErrCount.new()
 	OS.add_logger(log)
 	var shop := _mount("res://scripts/ui/shop.gd", b)
