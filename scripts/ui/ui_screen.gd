@@ -116,13 +116,26 @@ static func backdrop(slot: String) -> TextureRect:
 
 
 ## Spinning coin icon (gold_coin slot) or a drawn gold disc fallback.
-static func coin_icon(slot: String, px: float = 28.0) -> Control:
+## Coin next to a gold number. Static face frame by default: `gold_coin` is a spin
+## loop (face → edge-on → face) and at UI size the edge-on frames read as a thin
+## sliver. `spin = true` plays the loop instead.
+static func coin_icon(slot: String, px: float = 28.0, spin: bool = false) -> Control:
 	var sf := UiArt.frames(slot)
 	var holder := Control.new()
 	holder.name = "Coin"
 	holder.custom_minimum_size = Vector2(px, px)
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if sf:
+	if sf and not spin:
+		var tr := TextureRect.new()
+		tr.name = "Face"
+		tr.texture = sf.get_frame_texture(slot, 0)   # frame 0 = full face
+		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		holder.add_child(tr)
+	elif sf:
 		var spr := AnimatedSprite2D.new()
 		spr.sprite_frames = sf
 		spr.animation = slot
