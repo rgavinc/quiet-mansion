@@ -5,7 +5,7 @@ extends CharacterBody2D
 @export var chase_speed: float = 95.0
 ## Catch = the player's body overlapping this hit Area2D. Independent of the movement
 ## collider and the art, so neither can silently remove the danger again.
-@export var hit_radius: float = 18.0
+@export var hit_radius: float = 18.0  # must reach past both body radii (12+14) to land on contact
 
 var enraged: bool = false
 var _spr: AnimatedSprite2D
@@ -14,7 +14,7 @@ var hitbox: Area2D
 func _ready() -> void:
 	add_to_group("puppets")
 	collision_layer = PlayerStats.LAYER_ENEMY
-	collision_mask = PlayerStats.LAYER_WORLD
+	collision_mask = PlayerStats.LAYER_WORLD | PlayerStats.LAYER_PLAYER  # solid: never overlaps the boy
 	_spr = AnimatedSprite2D.new()
 	add_child(_spr)
 	_set_calm_tex()
