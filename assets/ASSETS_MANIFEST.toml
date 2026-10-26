@@ -99,7 +99,8 @@ frames = 6
 fps = 10
 loop = true
 pivot = [32, 63]
-notes = "64x64 hold-to-pick-up crouch-and-reach loop (glances back, sweats). Hand point per frame (front hand): 46,56 46,57 46,57 46,58 46,56 46,56"
+hand_points = [[46, 56], [46, 57], [46, 57], [46, 58], [46, 56], [46, 56]]
+notes = "64x64 hold-to-pick-up crouch-and-reach loop (glances back, sweats). Attach point per frame in hand_points (front hand)"
 
 [[asset]]
 path = "assets/art/characters/boy_carry.png"
@@ -110,7 +111,8 @@ frames = 6
 fps = 10
 loop = true
 pivot = [32, 63]
-notes = "64x64 walk holding object overhead (object not baked in: draw held item with its bottom-center at the hand point). Hand point per frame: 31,21 30,20 31,20 31,21 30,20 31,20"
+hand_points = [[31, 21], [30, 20], [31, 20], [31, 21], [30, 20], [31, 20]]
+notes = "64x64 walk holding object overhead (object not baked in: draw held item with its bottom-center at the hand point). Attach points per frame in hand_points"
 
 [[asset]]
 path = "assets/art/characters/boy_throw.png"
@@ -121,7 +123,8 @@ frames = 4
 fps = 12
 loop = false
 pivot = [32, 63]
-notes = "64x64 overhead throw: 0 wind-up, 1 forward, 2 release (spawn projectile at hand point), 3 follow-through. Hand point per frame: 23,23 32,22 49,40 43,46"
+hand_points = [[23, 23], [32, 22], [49, 40], [43, 46]]
+notes = "64x64 overhead throw: 0 wind-up, 1 forward, 2 release (spawn projectile at hand point), 3 follow-through. Attach points per frame in hand_points"
 
 [[asset]]
 path = "assets/art/characters/boy_climb_stairs.png"
