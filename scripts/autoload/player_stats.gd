@@ -118,7 +118,18 @@ func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 		return false
 	if not ignore_invuln and _invuln_left > 0.0:
 		return false
+	# Item hooks: on_hit may change or cancel the damage; on_lethal_hit may save the boy.
+	for it in _live_items():
+		amount = int(it.on_hit(amount))
+	if amount <= 0:
+		return false
 	_invuln_left = get_stat(&"invuln_time")
+	if health - amount <= 0:
+		for it in _live_items():
+			if it.on_lethal_hit():
+				health = 1
+				health_changed.emit(health, max_health())
+				return true
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health())
 	if health == 0:
@@ -183,6 +194,94 @@ func owns(item_id: String) -> bool:
 ## FE minimap UI: show it when this is true (listen to stat_changed(&"minimap", v)).
 func has_minimap() -> bool:
 	return get_stat(&"minimap") >= 1.0
+
+
+# --- item behaviour dispatch (docs/BACKEND.md "Item behaviour hooks") ------------------
+## View size: an enemy farther than half of it from the boy (either axis) is off screen.
+const SCREEN_SIZE := Vector2(1280, 720)
+
+
+## Owned items that implement the hook API (live Item instances).
+func _live_items() -> Array:
+	var out: Array = []
+	for it in owned_items:
+		if is_instance_valid(it) and it is Item:
+			out.append(it)
+	return out
+
+
+## Re-emits items_changed (an item's charges changed).
+func notify_items_changed() -> void:
+	items_changed.emit(owned_items)
+
+
+## Stage start (PlayerController._ready: every stage builds a fresh player). Refills every
+## item's charges, runs on_stage_start, then emits items_changed once.
+func begin_stage(player: Node = null) -> void:
+	for it in _live_items():
+		it.charges = it.max_charges
+		it.on_stage_start(player)
+	items_changed.emit(owned_items)
+
+
+## NoiseBus.emit_noise: product of every item's on_noise multiplier.
+func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Variant) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.on_noise(at, radius, loudness, source))
+	return m
+
+
+## PlayerController throw / knock: items may write into `item` (the dict the enemy gets).
+func dispatch_throw(item: Dictionary, target: Variant) -> void:
+	for it in _live_items():
+		it.on_throw(item, target)
+
+
+## Enemy STARTLED -> about to chase. True if an item handled it (first one wins).
+func startle_handled(enemy: Node) -> bool:
+	for it in _live_items():
+		if it.on_startle(enemy):
+			return true
+	return false
+
+
+## Gold a breaking vase drops, after item hooks.
+func vase_gold(gold: int, vase: Variant = null) -> int:
+	for it in _live_items():
+		gold = int(it.on_vase_gold(gold, vase))
+	return gold
+
+
+## Move-speed multiplier for what the boy holds (Inventory.items).
+func carry_speed_mult(held: Array) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.carry_speed_mult(held))
+	return m
+
+
+## Multiplier on a searching enemy's give-up drain.
+func memory_drain_mult(enemy: Node, off_screen: bool) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.memory_drain_mult(enemy, off_screen))
+	return m
+
+
+## FE off-screen arrows: show a chaser's arrow only within this many px of the boy.
+## INF without Cracked Mirror (always show). Listen to items_changed to re-read it.
+func arrow_reveal_distance() -> float:
+	var d := INF
+	for it in _live_items():
+		d = minf(d, float(it.arrow_reveal_distance()))
+	return d
+
+
+## True if world point `p` is outside the view around `center` (the boy).
+static func is_off_screen(p: Vector2, center: Vector2) -> bool:
+	var d := (p - center).abs()
+	return d.x > SCREEN_SIZE.x * 0.5 or d.y > SCREEN_SIZE.y * 0.5
 
 
 ## New run. Keeps nothing: modifiers (all item effects) and owned items go.

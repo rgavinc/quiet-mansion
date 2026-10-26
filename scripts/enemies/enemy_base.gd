@@ -95,6 +95,7 @@ var _reported_chase: bool = false
 var _reported_startle: float = -1.0
 var _home_set: bool = false
 var _spr: AnimatedSprite2D
+var _stun_calm: bool = false        # Flash Bulb stun: back to CALM afterwards, never chase
 
 
 func _ready() -> void:
@@ -223,7 +224,10 @@ func _on_bus_noise(at: Vector2, radius: float, _loudness: float, _source: Node) 
 	if GameState.game_over or not is_inside_tree():
 		return
 	if NoiseBus.can_hear(global_position, at, radius, hearing_mult):
-		hear_noise()
+		if _source != null and is_instance_valid(_source) and _source.has_method(&"is_lure"):
+			hear_lure(at)
+		else:
+			hear_noise()
 
 
 ## Legacy GameState.make_noise path (not connected; callers may invoke it directly).
@@ -239,6 +243,32 @@ func hear_noise() -> void:
 		_track_left = maxf(_track_left, noise_track_time)
 		return
 	_enter_chase(noise_track_time)
+
+
+## A lure (Music Box) plays at `at`: hunt toward IT, not the boy (SEARCH with last_known =
+## the lure; each pulse refills memory). Sight of the boy still wins in _tick_hunt.
+func hear_lure(at: Vector2) -> void:
+	if state in [State.RECOVER, State.STUNNED]:
+		return
+	_enter_chase(0.0)
+	_track_left = 0.0
+	last_known = at
+	state = State.SEARCH
+	memory = 1.0
+	FESignals.report_chase_memory(self, memory)
+
+
+## Flash Bulb: the startle completed but is stunned instead of chasing; afterwards calm.
+func stun_from_startle(t: float) -> void:
+	_set_state(State.STUNNED)
+	_state_left = t
+	_stun_calm = true
+
+
+## Off screen relative to the boy (1280x720 view centred on him).
+func is_off_screen() -> bool:
+	var p := _player()
+	return p != null and PlayerStats.is_off_screen(global_position, p.global_position)
 
 
 ## Old name kept (tests, knock miss): instant chase as if it heard a noise.
@@ -315,7 +345,7 @@ func on_hit_by_throw(_item: Dictionary) -> void:
 		queue_free()
 		return
 	_set_state(State.STUNNED)
-	_state_left = stun_time
+	_state_left = maxf(_state_left if _stun_calm else 0.0, stun_time * float(_item.get("stun_mult", 1.0)))   # Heavy Vases
 
 
 ## Knock while calm can kill; while enraged or a miss → it chases.
@@ -362,7 +392,7 @@ func tick(delta: float) -> void:
 		State.STARTLED:
 			_stop_x(delta)
 			_state_left -= delta
-			if _state_left <= 0.0:
+			if _state_left <= 0.0 and not PlayerStats.startle_handled(self):   # item hooks (Flash Bulb)
 				_enter_chase(light_track_time)
 		State.CHASE, State.SEARCH:
 			_tick_hunt(delta, p, sees)
@@ -378,7 +408,14 @@ func tick(delta: float) -> void:
 			_stop_x(delta)
 			_state_left -= delta
 			if _state_left <= 0.0:
-				_resume_hunt()
+				if _stun_calm:
+					_stun_calm = false
+					if _track_left > 0.0:
+						_enter_chase(_track_left)   # heard the boy meanwhile
+					else:
+						_enter_calm()
+				else:
+					_resume_hunt()
 
 
 func _tick_startle(delta: float, p: Node2D) -> void:
@@ -405,7 +442,8 @@ func _tick_hunt(delta: float, p: Node2D, sees: bool) -> void:
 		return
 	state = State.SEARCH
 	var far := clampf(global_position.distance_to(p.global_position) / maxf(give_up_distance, 1.0), 0.25, 4.0)
-	memory = maxf(memory - delta * far / maxf(memory_time, 0.01), 0.0)
+	var drain := PlayerStats.memory_drain_mult(self, is_off_screen())   # item hooks (Cracked Mirror)
+	memory = maxf(memory - delta * far * drain / maxf(memory_time, 0.01), 0.0)
 	FESignals.report_chase_memory(self, memory)
 	if memory <= 0.0:
 		_enter_return()

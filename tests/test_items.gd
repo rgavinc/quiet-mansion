@@ -91,7 +91,9 @@ func test_db_valid() -> String:
 			return id + ": empty name/description/icon_slot"
 		if it.price <= 0: return id + ": price <= 0"
 		if not ItemDb.RARITY.has(it.rarity): return id + ": bad rarity " + it.rarity
-		if it.mods.is_empty(): return id + ": no modifiers"
+		# Behaviour items may carry their whole effect (and cost) in the hooks.
+		if it.mods.is_empty() and not it.has_behavior(): return id + ": no modifiers"
+		if r.has("script") and not it.has_behavior(): return id + ": script has no behaviour"
 		for m in it.mods:
 			if not PlayerStats.BASE.has(m.stat): return "%s: unknown stat %s" % [id, m.stat]
 	# The icons Designer already drew are used by the matching items.
@@ -117,6 +119,12 @@ func test_tradeoffs() -> String:
 		ItemDb.make(id).apply(s)
 		var better := false
 		var worse := false
+		# Behaviour items: the hook is the upside; a downside_behavior row's cost is in the
+		# hook too (tests/test_item_behaviors.gd checks each one through the real code).
+		var it_row := ItemDb.row(id)
+		if it_row.has("script"):
+			better = true
+			worse = bool(it_row.get("downside_behavior", false))
 		for k in good_up:
 			var dv: float = s.get_stat(k) - float(before[k])
 			if absf(dv) < 0.0001: continue
@@ -146,7 +154,7 @@ func test_round_trip() -> String:
 		var before := _snapshot(s)
 		var it := ItemDb.make(id)
 		it.apply(s)
-		if _diff(before, _snapshot(s)).is_empty():
+		if _diff(before, _snapshot(s)).is_empty() and not (it.has_behavior() and it.mods.is_empty()):
 			s.free(); return id + ": apply changed nothing"
 		it.apply(s)   # second apply is a no-op
 		it.remove(s)
@@ -154,7 +162,7 @@ func test_round_trip() -> String:
 		if after[&"_health"] > s.max_health() or after[&"_health"] < 1:
 			s.free(); return "%s: health %d out of 1..max" % [id, after[&"_health"]]
 		# Hearts lost to a lower max aren't handed back (test_max_health covers health).
-		after[&"_health"] = before[&"_health"] if id == "ghost_slippers" else after[&"_health"]
+		after[&"_health"] = before[&"_health"] if id in ["ghost_slippers", "rabbits_foot"] else after[&"_health"]
 		var d := _diff(before, after)
 		s.free()
 		if not d.is_empty(): return "%s not restored: %s" % [id, d]

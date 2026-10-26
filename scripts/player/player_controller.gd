@@ -51,6 +51,9 @@ func _ready() -> void:
 	add_child(inventory)
 	_hp_seen = PlayerStats.health
 	PlayerStats.health_changed.connect(_on_health_changed)
+	# Every stage builds a fresh player: this IS stage start for item behaviour
+	# (charges refill, Music Box lure into the hands, ...).
+	PlayerStats.begin_stage(self)
 
 
 func light_on() -> bool:
@@ -102,16 +105,21 @@ func tick(delta: float, dir: Vector2) -> void:
 			if dir.x != 0.0:
 				facing = 1 if dir.x > 0.0 else -1
 			if side_scroll:
-				velocity.x = dir.x * PlayerStats.get_stat(&"move_speed")
+				velocity.x = dir.x * move_speed()
 				_apply_gravity(delta)
 				if _jump_queued and _grounded():
 					velocity.y = -PlayerStats.get_stat(&"jump_velocity")
 				if absf(dir.y) > 0.5:
 					_try_enter_stair(dir.y)
 			else:
-				velocity = dir * PlayerStats.get_stat(&"move_speed")
+				velocity = dir * move_speed()
 			_update_hover_select()
 	_jump_queued = false
+
+
+## Walk speed now: the stat, times item carry penalties for what is held (Heavy Vases).
+func move_speed() -> float:
+	return PlayerStats.get_stat(&"move_speed") * PlayerStats.carry_speed_mult(inventory.items if inventory else [])
 
 
 func _grounded() -> bool:
@@ -261,18 +269,33 @@ func _tap() -> void:
 		var tgt: Node2D = FESignals.selected_enemy
 		if held.get("throwable", false) and is_instance_valid(tgt):
 			throw_at(tgt)
+		elif held.get("lure", false):
+			throw_toward(global_position + aim_dir.normalized() * LURE_THROW_DIST)   # Music Box: no target needed
 		return  # holding something with no ringed enemy: tap does nothing
 	_try_knock()
 
 
 func throw_at(tgt: Node2D) -> Node2D:
+	return _throw(tgt, Vector2.INF)
+
+
+## Throws the held item toward a world point (Music Box lure with no enemy ringed).
+const LURE_THROW_DIST := 320.0
+
+func throw_toward(point: Vector2) -> Node2D:
+	return _throw(null, point)
+
+
+func _throw(tgt: Node2D, point: Vector2) -> Node2D:
 	var it := inventory.take_current()
 	if it.is_empty():
 		return null
+	PlayerStats.dispatch_throw(it, tgt if tgt != null else point)   # item hooks may tag the dict
 	var t := Node2D.new()
 	t.set_script(load("res://scripts/world/thrown_object.gd"))
+	t.set("item", it)   # before _ready: the flight art depends on it
 	get_parent().add_child(t)
-	t.setup(global_position + Vector2(0, -20), it, tgt, self)
+	t.setup(global_position + Vector2(0, -20), it, tgt, self, point)
 	_throw_anim_left = 0.33
 	return t
 
@@ -300,7 +323,9 @@ func _try_knock() -> void:
 	var land := best.global_position + Vector2(facing * KNOCK_FALL_DIST, 0)
 	for e in get_tree().get_nodes_in_group("puppets"):
 		if e is Node2D and e.global_position.distance_to(land) <= 20.0 and e.has_method("on_hit_by_throw"):
-			e.on_hit_by_throw(best.to_item())
+			var knocked := best.to_item()
+			PlayerStats.dispatch_throw(knocked, e)   # a knocked vase counts as a vase hit
+			e.on_hit_by_throw(knocked)
 			break
 	best.break_apart()
 

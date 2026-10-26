@@ -35,15 +35,71 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 
 ## Items, shop and chests
 - `Item` (`scripts/items/item.gd`, a Resource) has `id`, `display_name`, `description`, `icon_slot`, `price`, `rarity` and `mods` (`[{stat, add, mul}]`). `apply()` and `remove()` only call `PlayerStats.add_modifier` / `remove_modifiers_from`. Each instance uses its own source key (`item:<id>#<instance>`), so two copies stack and come off separately. A second `apply()` does nothing. `to_dict()` gives the FE offer fields.
-- `ItemDb` (`scripts/items/item_db.gd`) is the single table: 20 trade-off items. Each one has at least one upside and one downside, and only uses stats that gameplay reads. `ItemDb.make(id)` returns a fresh instance.
+- `ItemDb` (`scripts/items/item_db.gd`) is the single table: 20 trade-off items (14 stat items + 6 behaviour items, see below). Each one has at least one upside and one downside, and only uses stats that gameplay reads. `ItemDb.make(id)` returns a fresh instance.
 - Rarity: common (weight 60, stage 1+), uncommon (30, 1+), rare (14, 2+), legendary (6, 4+).
-- `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage. The same (stage, seed) always gives the same stock. FE shows the first `shop_offer_count` (3).
+- `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage, each priced `ItemDb.shop_price(id, stage)` (see Gold economy). The same (stage, seed) always gives the same stock. FE shows the first `shop_offer_count` (3).
 - `Shop.buy(item) -> bool` spends through `try_spend`. It then marks the item `sold` and calls `PlayerStats.grant_item` (apply + add to `owned_items` + `items_changed`). It returns false and changes nothing if gold is short or the item is already sold or applied.
 - `PlayerStats.owned_items`: items stay owned across Continue (PlayerStats is an autoload). `reset()` clears them along with every modifier. Signal: `items_changed(items)`. Helpers: `owns(id)` and `has_minimap()`.
 - Max health: a higher max heals by the same amount. A lower max only clamps current health, so it never costs you an extra heart.
 - New MIN floors keep stacked downsides sane: move_speed 60, climb_speed 30, pickup_range 16, light_range 80, light_angle_deg 10, light_detect_mult / noise_mult 0.2, gold_find_mult 0.1.
 - `Chest` (`scripts/world/chest.gd`, a WorldObject) opens through the normal LMB hold channel (`pickup_time × 1.5`), even when the inventory is full, via the new `WorldObject.on_hold_complete(by)` hook. It opens only once. It grants one item from `ItemDb.roll_chest(stage, seed)`. The seed is `loot_seed`, or a hash of run seed + stage + position. It also adds `gold_inside` and swaps the art from `prop_chest_closed` to `prop_chest_open`. It makes a creak: `DEFAULT_RADIUS × 0.5 × noise_mult`, loudness 0.6. Signal: `opened(item)`.
 - Stats waiting on other work: `light_detect_mult` and `light_startle_time` only matter once the enemy state machine (PR #26) lands. Nothing draws a minimap yet: FE should show it when `PlayerStats.has_minimap()` (or `stat_changed(&"minimap", ...)`).
+
+## Item behaviour hooks (`be/item-behaviors`)
+Behaviour items are ItemDb rows with `script` (an `Item` subclass in `scripts/items/behaviors/`), `params` (every tunable; scripts read only `params`), optional `charges` (uses per stage) and `downside_behavior` (the cost is in the hook, not a stat mod). `ItemDb.make()` loads the script, deep-copies `params`, sets `max_charges`/`charges`.
+
+Hooks on `Item` (base = no-op) and where they are dispatched (all iterate `PlayerStats.owned_items`):
+
+| Hook | Dispatcher | Called from |
+|---|---|---|
+| `on_stage_start(player)` | `PlayerStats.begin_stage(player)` (refills charges first, then emits `items_changed` once) | end of `PlayerController._ready` (every stage builds a fresh player: main.gd and #13's LevelGenerator both) |
+| `on_hit(amount) -> int` (≤0 cancels) / `on_lethal_hit() -> bool` | inside `PlayerStats.take_hit` | enemy hits |
+| `on_throw(item_dict, target)` (may write into the dict) | `PlayerStats.dispatch_throw` | `PlayerController._throw` (throw_at / throw_toward) and `_try_knock` |
+| `on_noise(at, radius, loudness, source) -> mult` | `PlayerStats.noise_hook_mult` | `NoiseBus.emit_noise` (scales radius and loudness) |
+| `on_startle(enemy) -> bool` (true = handled, no chase) | `PlayerStats.startle_handled` | `Enemy.tick` STARTLED → chase |
+| `on_vase_gold(gold, vase) -> int` | `PlayerStats.vase_gold` | `WorldObject.break_apart` and `thrown_object._shatter` (vases only, `Item.is_vase`) |
+| `carry_speed_mult(held) -> mult` | `PlayerStats.carry_speed_mult` | `PlayerController.move_speed()` |
+| `memory_drain_mult(enemy, off_screen) -> mult` | `PlayerStats.memory_drain_mult` | `Enemy._tick_hunt` SEARCH drain (`Enemy.is_off_screen()`: \|dx\|>640 or \|dy\|>360 from the boy) |
+| `arrow_reveal_distance() -> float` | `PlayerStats.arrow_reveal_distance()` (min over items; `INF` with none) | FE off-screen arrows |
+
+Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()`). `use_charge()` / `set_charges()` re-emit `PlayerStats.items_changed(owned_items)`; so does `begin_stage`.
+
+| Item | Rarity | Base price | Upside | Cost | Tunables (`params`) |
+|---|---|---|---|---|---|
+| Rabbit's Foot `rabbits_foot` | rare | 14 | first lethal hit each stage leaves 1 heart (1 charge) | -1 max heart | — |
+| Music Box `music_box` | uncommon | 9 | each stage starts with a lure in hand (charge = lure in hand); thrown (at the ringed enemy, or along the aim 320 px with none ringed) it lands (`MusicBoxLure`) and pulses a noise every 0.5 s for 4 s; hearers SEARCH toward the lure, not the boy (`Enemy.hear_lure`) | takes a hand slot until thrown; doesn't kill/stun | lure_time 4, lure_interval 0.5, lure_radius 900, lure_loudness 1.2, world_slot |
+| Heavy Vases `heavy_vases` | common | 6 | vase throw/knock stun ×2 (`stun_mult` in the dict) | move ×0.85 while any vase is held | stun_mult 2, carry_speed_mult 0.85 |
+| Flash Bulb `flash_bulb` | rare | 14 | once per stage a completed startle stuns 2.5 s, then CALM (no chase, no FE chase report) | light_range ×0.9 | stun_time 2.5 |
+| Cracked Mirror `cracked_mirror` | uncommon | 9 | off-screen SEARCH memory drains ×1.4 | arrows hidden beyond 1280 px | offscreen_drain_mult 1.4, arrow_reveal_distance 1280 |
+| Greedy Sack `greedy_sack` | legendary | 22 | empty vases roll 1–3 gold | vase-break noise ×1.5 | gold_min 1, gold_max 3, noise_mult 1.5 |
+
+Removed (weaker) items: spring_socks, strong_arm, gold_magnet, night_eyes, grandfather_watch, shadow_cloak. Extra Heart's cost changed from noise ×1.15 to climb ×0.85. Noise budget: only lucky_coin, sneakers and greedy_sack pay with louder noise (test enforces ≤3).
+
+Art: the Music Box uses ONE slot, `music_box_world` (Designer PR #30), in flight and landed (`MusicBoxLure.add_visual`: AnimatedSprite2D via AnimLibrary with the manifest pivot, or an amber 12×10 ColorRect when the slot is missing). Icons are `item_icon_<id>`; FE's letter tile covers missing ones.
+
+## Gold economy — PROVISIONAL (pending Lead's per-stage numbers from the #13 sweep)
+Model (`StageTable` stages 1–5 as of #13 @316edf3; Monte Carlo, 20k runs): ground floor = rand(rooms_min..max) rooms of 5–10 units × 4 tiles; every floor has the same width; props per room = round(width_tiles × prop_density); a prop is a vase with p = vase_ratio; a vase holds gold with p 0.45, amount 1–3; loose piles = count × rand(amount range); chests give items, not gold; gold_find_mult 1. Lead's rework (≥3 floors / ~240 tiles on stage 1) will raise these.
+
+Everything collected:
+
+| Stage | Vases | Vase gold | Pile gold | Mean | p10 | p90 | Cumulative mean |
+|---|---|---|---|---|---|---|---|
+| 1 | 9.0 | 8.1 | 6.0 | 14.1 | 9 | 20 | 14.1 |
+| 2 | 12.4 | 11.1 | 12.0 | 23.2 | 17 | 30 | 37.2 |
+| 3 | 19.0 | 17.1 | 17.5 | 34.6 | 26 | 44 | 71.9 |
+| 4 | 24.7 | 22.2 | 27.0 | 49.2 | 40 | 59 | 121.1 |
+| 5 | 33.0 | 29.6 | 42.0 | 71.6 | 60 | 84 | 192.7 |
+
+Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`), `PRICE_SCALE = [1.2, 1.8, 2.5, 3.3]` for the shops after stages 1–4 (stage 5 is the win; no shop). Retune that one array (or row prices) when real numbers land. Check with "realistic" income = all piles + ~50% of vase gold, 4-offer stock rolled with the real weights:
+
+| Shop | Realistic income mean (p10–p90) | Mean offer | Mean cheapest of 4 | P(afford ≥1 from this stage's gold) | P(≥1 with carry, buying the cheapest each shop) |
+|---|---|---|---|---|---|
+| 1 | 10.1 (7–14) | 8.3 | 6.5 | 0.93 | 0.93 |
+| 2 | 17.6 (13–22) | 13.6 | 10.0 | 0.99 | 1.0 |
+| 3 | 26.0 (20–32) | 18.6 | 13.5 | 1.0 | 1.0 |
+| 4 | 38.1 (32–45) | 25.6 | 18.0 | 1.0 | 1.0 |
+
+So ≈1 item per shop; a rare (shop 2+: 25–29 g) or legendary (shop 4: 73–79 g) needs saving across shops. Greedy Sack adds ≈1.1 g per vase (≈+27 g on stage 4, +36 on stage 5) but can only be bought at shop 4, where little is left to spend on — flag for Designer. Script: re-run the Monte Carlo with the real per-stage numbers and adjust `PRICE_SCALE` so income/mean offer ≈ 1.2–1.5.
 
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.
