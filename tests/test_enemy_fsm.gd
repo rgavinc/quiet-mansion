@@ -34,6 +34,8 @@ func run_all() -> Dictionary:
 		["float_uses_chase_float_slot_or_falls_back", test_float_slot],
 		["wide_15_tile_stair_player_and_walker_climb", test_wide_stair],
 		["chase_count_live_enraged_truthful", test_live_count],
+		["startle_delay_is_manifest_frames_over_fps", test_startle_delay_anim],
+		["startle_delay_def_override_and_fallback", test_startle_delay_override],
 	]
 	var passed := 0
 	for item in checks:
@@ -103,7 +105,9 @@ func test_light_startle() -> Variant:
 		return e.state == e.State.CHASE)
 	if e.state != e.State.CHASE: return "never chased (state %d)" % e.state
 	if not saw_startled[0]: return "skipped STARTLED reaction"
-	if t < 1.0 or t > 1.0 + e.startle_reaction_time + 0.1: return "chase after %.2fs" % t
+	# PRODUCT.md: chase starts when the scream animation ends (~0.5 s after the 1 s startle).
+	var want: float = 1.0 + e.startle_delay()
+	if t < want - DT * 1.5 or t > want + DT * 1.5: return "chase after %.2fs, want %.2fs" % [t, want]
 	if not FESignals.chasing.has(e): return "report_chase(true) not sent"
 	return ""
 
@@ -518,3 +522,49 @@ func test_memory_distance() -> Variant:
 		far.tick(DT)
 	if not (far.memory < near.memory): return "far %.2f not below near %.2f after 1s" % [far.memory, near.memory]
 	return "" if absf(FESignals.get_chase_memory(far) - far.memory) < 0.001 else "FE memory not reported"
+
+
+## PD: STARTLED -> CHASE waits for the scream animation (manifest frames / fps via AnimLibrary).
+func test_startle_delay_anim() -> Variant:
+	_player()
+	var e := _puppet()
+	var slot := String(e.anim_startle)
+	var m := AnimLibrary.meta(slot)
+	if m.is_empty(): return "manifest has no %s slot" % slot
+	var want := float(m.get("frames", 0)) / float(m.get("fps", 1))
+	if want <= 0.0: return "%s has no frames/fps" % slot
+	if absf(e.startle_delay() - want) > 0.0001: return "delay %.3fs, frames/fps %.3fs" % [e.startle_delay(), want]
+	if absf(want - 0.5) > 0.1: return "scream anim %.2fs, PD wants ~0.5s" % want
+	e._enter_startled()
+	var t := _run(e, 2.0, func(): return e.state != e.State.STARTLED)
+	if e.state != e.State.CHASE: return "STARTLED led to state %d" % e.state
+	return "" if absf(t - want) <= DT * 1.5 else "chased %.3fs after the startle, anim is %.3fs" % [t, want]
+
+
+func test_startle_delay_override() -> Variant:
+	var src := GDScript.new()
+	src.source_code = "extends Resource\nvar startle_reaction_time := 0.2\n"
+	if src.reload() != OK: return "def script failed"
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	e.def = src.new()
+	_add(e, Vector2(300, 100))
+	if absf(e.startle_delay() - 0.2) > 0.0001: return "EnemyDef override ignored (%.3f)" % e.startle_delay()
+	e.startle_reaction_time = 0.0
+	var anim: float = Enemy.startle_anim_length(e.anim_startle)
+	if absf(e.startle_delay() - anim) > 0.0001: return "0 did not mean 'use the anim' (%.3f)" % e.startle_delay()
+	e.startle_reaction_time = -1.0
+	if absf(e.startle_delay() - anim) > 0.0001: return "negative did not mean 'use the anim'"
+	e.anim_startle = "no_such_slot"
+	if absf(e.startle_delay() - 0.5) > 0.0001: return "missing slot fallback %.3f" % e.startle_delay()
+	e.anim_startle = ""
+	if absf(e.startle_delay() - 0.5) > 0.0001: return "empty slot fallback %.3f" % e.startle_delay()
+	# a slot with no frames / no fps falls back too
+	AnimLibrary.meta("puppet_startle")   # make sure the manifest is loaded
+	AnimLibrary._entries["__test_noframes"] = {slot = "__test_noframes", frames = 0, fps = 14}
+	AnimLibrary._entries["__test_nofps"] = {slot = "__test_nofps", frames = 7, fps = 0}
+	var a := Enemy.startle_anim_length("__test_noframes")
+	var b := Enemy.startle_anim_length("__test_nofps")
+	AnimLibrary._entries.erase("__test_noframes")
+	AnimLibrary._entries.erase("__test_nofps")
+	if absf(a - 0.5) > 0.0001 or absf(b - 0.5) > 0.0001: return "no-frames/no-fps fallback %.3f / %.3f" % [a, b]
+	return ""

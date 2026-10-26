@@ -15,7 +15,7 @@ func run_all() -> Dictionary:
 		["ring_color_lookup_default", test_ring_colors],
 		["ring_single_selection", test_ring_single],
 		["ring_persists_light_off_with_glow", test_ring_light_off],
-		["startle_fills_over_startle_time", test_startle],
+		["startle_only_from_be_reports_once_per_enemy", test_startle],
 		["pickup_gauge_hides_on_cancel", test_pickup_cancel],
 		["offscreen_arrow_clamps_to_edge", test_edge_point],
 		["camera_nudge_is_capped", test_nudge],
@@ -37,7 +37,14 @@ func run_all() -> Dictionary:
 		["shop_uses_be_shop_roll_stock_and_buy", test_shop_be_interface],
 		["shop_empty_item_source_no_errors", test_shop_empty],
 		["shop_ui_clear_of_merchant", test_shop_layout],
+		["shop_shows_full_stock_clamped_1_to_4", test_shop_full_stock],
+		["shop_4_longest_fit_panel_with_message", test_shop_four_fit],
+		["shop_letter_tile_square_rarity_rim", test_shop_letter_tile],
+		["shop_initials_fixed_sample", test_initials_sample],
+		["gold_coin_icon_shows_face_not_sliver", test_coin_face],
 		["alert_count_scales_past_3", test_alert_scales],
+		["alert_count_follows_chase_reports", test_alert_follows_reports],
+		["arrows_for_offscreen_reported_chasers", test_arrows_from_reports],
 		["stage_banner_shows_and_fades", test_stage_banner],
 		["main_scene_has_screens", test_main_screens],
 		["game_over_new_run_fresh_stage1_new_seed", test_new_run],
@@ -56,6 +63,13 @@ func run_all() -> Dictionary:
 		["win_calls_gamestate_end_run_won_and_respects_run_over", test_win_end_run_won],
 	]
 	var passed := 0
+	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
+		checks.append_array([
+			["be_enemy_startle_counted_once", test_be_startle_once],
+			["be_enemy_chase_reports_drive_count_and_arrows", test_be_chase_reports],
+		])
+	if _item_db() != null:   # BE PR #27 present
+		checks.append(["shop_initials_unique_for_itemdb", test_initials_itemdb])
 	for item in checks:
 		var err: String = item[1].call()
 		if err.is_empty():
@@ -187,22 +201,46 @@ func test_ring_light_off() -> String:
 	return err
 
 
+## BE (Enemy._tick_startle, PR #26) reports startle itself. FE must store exactly
+## what was reported — once per enemy — and never integrate on top (double count).
 func test_startle() -> String:
 	var b := _bus()
 	var e := Node2D.new(); _root().add_child(e)
+	var f := Node2D.new(); _root().add_child(f)
+	var emits := {}   # instance id -> Array of reported values seen on startle_progress
+	b.startle_progress.connect(func(en, v):
+		var id: int = en.get_instance_id()
+		if not emits.has(id): emits[id] = []
+		emits[id].append(v))
 	b.startle_time = 1.0
 	b.report_lit(e, true)
-	b._process(0.5)
+	b.report_lit(f, true)
+	b._process(1.0)   # a lit second passing alone must not move startle (no FE integration)
 	var err := ""
-	if absf(b.get_startle(e) - 0.5) > 0.01:
-		err = "0.5 s lit → 0.5, got %f" % b.get_startle(e)
-	b._process(0.6)
-	if err.is_empty() and b.get_startle(e) < 1.0:
-		err = "should be full after 1.0 s"
+	if b.get_startle(e) != 0.0 or not emits.is_empty():
+		err = "FE integrated startle on its own: %f, emits %s" % [b.get_startle(e), emits]
+	# BE-style frames: Enemy reports 0.1 per frame for e, 0.05 for f; FE ticks in between.
+	for k in range(1, 11):
+		b.report_startle(e, k * 0.1)
+		b.report_startle(f, k * 0.05)
+		b._process(0.1)
+	var ee: Array = emits.get(e.get_instance_id(), [])
+	if err.is_empty() and (ee.size() != 10 or absf(ee[-1] - 1.0) > 0.0001):
+		err = "e: want 10 emits ending at 1.0 (one per BE report), got %s" % [ee]
+	if err.is_empty() and absf(b.get_startle(e) - 1.0) > 0.0001:
+		err = "e startle should be exactly BE's 1.0, got %f" % b.get_startle(e)
+	if err.is_empty() and absf(b.get_startle(f) - 0.5) > 0.0001:
+		err = "f startle should be exactly BE's 0.5 (counted once), got %f" % b.get_startle(f)
+	b.report_lit(f, false)   # beam left f: BE reports the reset; FE doesn't write startle
+	if err.is_empty() and absf(b.get_startle(f) - 0.5) > 0.0001:
+		err = "report_lit(false) must not overwrite BE's startle"
+	b.report_startle(f, 0.0)
+	if err.is_empty() and b.get_startle(f) != 0.0:
+		err = "BE reset report should zero f"
 	b.set_flashlight(false)
 	if err.is_empty() and b.get_startle(e) != 0.0:
-		err = "light off should reset startle"
-	_cleanup([e, b])
+		err = "light off should hide/reset the displayed startle"
+	_cleanup([e, f, b])
 	return err
 
 
@@ -434,7 +472,7 @@ func test_startle_meter_light() -> String:
 	_root().add_child(m)
 	b.startle_progress.connect(func(en, p): if en == e: m.set_progress(p))
 	b.report_lit(e, true)
-	b._process(0.4)
+	b.report_startle(e, 0.4)   # BE Enemy reports
 	m._process(0.0)
 	var err := ""
 	if not m.visible or m.progress <= 0.0:
@@ -515,6 +553,7 @@ func test_enemy_freed() -> String:
 	b.select_item(0)
 	b.select_enemy(e)
 	b.report_lit(e, true)
+	b.report_startle(e, 0.3)
 	b.report_chase(e, true)
 	b.report_chase_memory(e, 0.6)
 	var ring: Node2D = ov.get("ring")
@@ -668,8 +707,8 @@ func test_shop_buy() -> String:
 		err = "shop should open on GameState.reached_exit"
 	if err.is_empty() and not _tree().paused:
 		err = "shop must pause the tree"
-	if err.is_empty() and shop.offers.size() != 3:
-		err = "default offer count should be 3, got %d" % shop.offers.size()
+	if err.is_empty() and shop.offers.size() != 4:
+		err = "default offer count should be 4 (whole stock), got %d" % shop.offers.size()
 	if err.is_empty() and not shop.buy_index(0):
 		err = "buy with enough gold should succeed"
 	if err.is_empty() and ps.gold != 4:
@@ -804,12 +843,12 @@ func test_alert_scales() -> String:
 		es.append(e)
 	hud.refresh()
 	var err := ""
-	if b.enemy_total() != 12 or b.chasing_count() != 7:
-		err = "polled count should be 7 / 12, got %d / %d" % [b.chasing_count(), b.enemy_total()]
-	if err.is_empty() and hud.label.text != "Chasing 7 / 12":
+	if b.enemy_total() != 12 or b.chasing_count() != 0:
+		err = "`enraged` must not be polled: want 0 / 12, got %d / %d" % [b.chasing_count(), b.enemy_total()]
+	if err.is_empty() and hud.label.text != "Chasing 0 / 12":
 		err = "label '%s'" % hud.label.text
 	for i in 12:
-		b.report_chase(es[i], true)   # BE reports take over from polling
+		b.report_chase(es[i], true)   # only BE reports count
 	hud.refresh()
 	if err.is_empty() and hud.label.text != "Chasing 12 / 12":
 		err = "reported count should reach 12, label '%s'" % hud.label.text
@@ -825,6 +864,79 @@ func test_alert_scales() -> String:
 		err = "freed enemies drop out, label '%s'" % hud.label.text
 	es.remove_at(0)
 	_cleanup(es + [hud, b])
+	return err
+
+
+## Chase count = BE report_chase only: several chasers add up, a give-up
+## (report_chase false) drops it, duplicates don't double count; HUD follows the signal.
+func test_alert_follows_reports() -> String:
+	var b := _bus()
+	var hud := _mount("res://scripts/ui/alert_hud.gd", b)
+	var es: Array = []
+	for i in 5:
+		var e := _Chaser.new(); e.add_to_group("enemies"); _root().add_child(e); es.append(e)
+	var err := ""
+	for i in 3:
+		b.report_chase(es[i], true)
+	if b.chasing_count() != 3 or hud.label.text != "Chasing 3 / 5":
+		err = "3 reported chasers: count %d, label '%s'" % [b.chasing_count(), hud.label.text]
+	b.report_chase(es[0], true)   # BE re-reporting the same chaser
+	if err.is_empty() and b.chasing_count() != 3:
+		err = "duplicate report double counted: %d" % b.chasing_count()
+	b.report_chase(es[1], false)   # gave up (RETURN)
+	if err.is_empty() and (b.chasing_count() != 2 or hud.label.text != "Chasing 2 / 5"):
+		err = "give-up should drop to 2: count %d, label '%s'" % [b.chasing_count(), hud.label.text]
+	b.report_chase(es[1], false)
+	if err.is_empty() and b.chasing_count() != 2:
+		err = "second give-up changed the count"
+	es[4].enraged = true   # legacy flag without a report: ignored
+	if err.is_empty() and b.chasing_count() != 2:
+		err = "unreported enraged enemy counted"
+	b.report_chase(es[0], false); b.report_chase(es[2], false)
+	if err.is_empty() and (b.chasing_count() != 0 or hud.label.text != "Chasing 0 / 5"):
+		err = "all gave up: count %d, label '%s'" % [b.chasing_count(), hud.label.text]
+	_cleanup(es + [hud, b])
+	return err
+
+
+## Arrows = off-screen enemies BE reported chasing; gauge = reported chase memory.
+func test_arrows_from_reports() -> String:
+	var b := _bus()
+	var arrows := _mount("res://scripts/ui/offscreen_arrows.gd", b)
+	var cam := Camera2D.new(); _root().add_child(cam); cam.make_current()
+	var mk := func(at: Vector2) -> Node2D:
+		var e := _Chaser.new(); e.add_to_group("enemies"); _root().add_child(e)
+		e.global_position = at
+		return e
+	var a: Node2D = mk.call(Vector2(5000, 0))     # reported, off-screen
+	var u: Node2D = mk.call(Vector2(-5000, 0))    # enraged but never reported
+	var on: Node2D = mk.call(cam.get_screen_center_position())   # reported, on-screen
+	var n: Node2D = mk.call(Vector2(0, 5000))     # reported, no memory yet
+	u.enraged = true
+	b.report_chase(a, true); b.report_chase_memory(a, 0.4)
+	b.report_chase(on, true); b.report_chase_memory(on, 0.9)
+	arrows._process(0.1)
+	var err := ""
+	if arrows.arrows.size() != 1 or arrows.arrows[0]["enemy"] != a:
+		err = "want exactly one arrow (reported off-screen chaser), got %s" % [arrows.arrows.map(func(x): return x["enemy"])]
+	if err.is_empty() and absf(arrows.arrows[0]["ratio"] - 0.4) > 0.0001:
+		err = "gauge should be BE memory 0.4, got %f" % arrows.arrows[0]["ratio"]
+	b.report_chase_memory(a, 0.15)   # draining in SEARCH
+	arrows._process(0.1)
+	if err.is_empty() and absf(arrows.arrows[0]["ratio"] - 0.15) > 0.0001:
+		err = "gauge should follow the memory report, got %f" % arrows.arrows[0]["ratio"]
+	b.report_chase(n, true)
+	arrows._process(0.1)
+	if err.is_empty() and arrows.arrows.size() != 2:
+		err = "second off-screen chaser should add an arrow"
+	for x in arrows.arrows:
+		if err.is_empty() and x["enemy"] == n and x["ratio"] != 1.0:
+			err = "no memory report yet → full gauge, got %f" % x["ratio"]
+	b.report_chase(a, false); b.report_chase(n, false)   # gave up
+	arrows._process(0.1)
+	if err.is_empty() and not arrows.arrows.is_empty():
+		err = "arrows should go away on give-up reports"
+	_cleanup([a, u, on, n, arrows, cam, b])
 	return err
 
 
@@ -1409,4 +1521,312 @@ func test_win_end_run_won() -> String:
 		if n.is_open():
 			n.close()
 	_end_run([go, win, b, ps, gs])
+	return err
+
+
+# --- Real BE Enemy (PR #26) → FESignals autoload. Registered only when the enemy
+# FSM that reports startle/chase is present, so this branch also runs before #26.
+const ENEMY_BASE := "res://scripts/enemies/enemy_base.gd"
+
+
+func _be_enemy_reports() -> bool:
+	if not ResourceLoader.exists(ENEMY_BASE):
+		return false
+	var names: Array = (load(ENEMY_BASE) as Script).get_script_method_list().map(func(m): return m["name"])
+	return names.has("_tick_startle") and names.has("is_chasing") and names.has("hear_noise")
+
+
+func _be_add(n: Node, at: Vector2) -> Node:
+	_root().add_child(n)
+	n.global_position = at
+	return n
+
+
+func _be_reset(nodes: Array) -> void:
+	for n in nodes:
+		if is_instance_valid(n):
+			n.get_parent().remove_child(n)
+			n.free()
+	PlayerStats.reset()
+	GameState.reset()
+	FESignals.reset()
+
+
+func _be_puppet(at: Vector2):
+	var e = load("res://scripts/enemies/puppet_hand.gd").new()
+	_be_add(e, at)
+	e.sight_override = 1
+	e.tick(0.0)
+	return e
+
+
+## Real puppet lit for 0.5 s while FESignals ticks too: FE startle must equal the
+## enemy's own value (≈0.5), not BE + FE integration (≈1.0) — counted once.
+func test_be_startle_once() -> String:
+	_be_reset([])
+	var p: Node = _be_add(load("res://scripts/player/player_controller.gd").new(), Vector2(100, 100))
+	var e = _be_puppet(Vector2(300, 100))
+	var f = _be_puppet(Vector2(320, 100))
+	e.lit_override = 1
+	f.lit_override = 1
+	FESignals.set_flashlight(true)
+	FESignals.report_lit(e, true)   # what player_controller sends for beam hits
+	FESignals.report_lit(f, true)
+	var dt := 1.0 / 60.0
+	for i in 30:
+		e.tick(dt); f.tick(dt)
+		FESignals._process(dt)
+	var err := ""
+	for x in [e, f]:
+		if err.is_empty() and absf(FESignals.get_startle(x) - x.startle) > 0.0001:
+			err = "FE startle %.3f != enemy %.3f (double counted)" % [FESignals.get_startle(x), x.startle]
+		if err.is_empty() and absf(FESignals.get_startle(x) - 0.5) > 0.05:
+			err = "startle after 0.5 s lit should be ~0.5, got %.3f" % FESignals.get_startle(x)
+	e.lit_override = 0
+	e.tick(dt); FESignals._process(dt)
+	if err.is_empty() and FESignals.get_startle(e) != 0.0:
+		err = "beam left: BE's reset report should zero FE startle, got %f" % FESignals.get_startle(e)
+	if err.is_empty() and absf(FESignals.get_startle(f) - f.startle) > 0.0001:
+		err = "other enemy's startle disturbed"
+	_be_reset([e, f, p])
+	return err
+
+
+## Real puppets: several chase (noise) → count/arrows from reports; one gives up →
+## count drops and its arrow goes; live count matches GameState, no cap.
+func test_be_chase_reports() -> String:
+	_be_reset([])
+	var hud := _mount("res://scripts/ui/alert_hud.gd", FESignals)
+	var arrows := _mount("res://scripts/ui/offscreen_arrows.gd", FESignals)
+	var cam := Camera2D.new(); _root().add_child(cam); cam.make_current()
+	var p: Node = _be_add(load("res://scripts/player/player_controller.gd").new(), Vector2(100, 100))
+	var es: Array = []
+	for i in 5:
+		es.append(_be_puppet(Vector2(4000 + i * 40, 100)))   # off-screen
+	var err := ""
+	for i in 4:
+		es[i].hear_noise()
+	if FESignals.chasing_count() != 4 or GameState.chasing_count() != 4:
+		err = "4 chasing: FE %d, GameState %d" % [FESignals.chasing_count(), GameState.chasing_count()]
+	if err.is_empty() and (FESignals.enemy_total() != 5 or hud.label.text != "Chasing 4 / 5"):
+		err = "HUD '%s' total %d" % [hud.label.text, FESignals.enemy_total()]
+	arrows._process(0.1)
+	if err.is_empty() and arrows.arrows.size() != 4:
+		err = "want 4 arrows for off-screen chasers, got %d" % arrows.arrows.size()
+	# es[0] loses the boy and gives up (memory drains → RETURN → report_chase false).
+	var g = es[0]
+	g.sight_override = 0
+	g._track_left = 0.0
+	var dt := 1.0 / 60.0
+	var t := 0.0
+	var min_ratio := 1.0
+	while g.is_chasing() and t < 30.0:
+		g.tick(dt); t += dt
+		if FESignals.chasing.has(g):
+			min_ratio = minf(min_ratio, FESignals.get_chase_memory(g))
+	if err.is_empty() and g.is_chasing():
+		err = "puppet never gave up"
+	if err.is_empty() and min_ratio >= 1.0:
+		err = "chase memory never drained in FE (no report_chase_memory)"
+	if err.is_empty() and (FESignals.chasing_count() != 3 or hud.label.text != "Chasing 3 / 5"):
+		err = "give-up should drop to 3: %d, '%s'" % [FESignals.chasing_count(), hud.label.text]
+	arrows._process(0.1)
+	if err.is_empty() and (arrows.arrows.size() != 3 or arrows.arrows.any(func(x): return x["enemy"] == g)):
+		err = "gave-up puppet's arrow should go (arrows %d)" % arrows.arrows.size()
+	_cleanup([hud, arrows, cam])
+	_be_reset(es + [p])
+	return err
+
+
+# --- Shop: 4 cards, letter tiles, coin (fe/shop-4) ----------------------------
+const LONG_SAMPLE := [
+	{"id": "l1", "display_name": "Grandfather's Watch", "rarity": "rare", "price": 15, "icon_slot": "",
+		"description": "Puppets need +0.5 s of light to startle. Ticks loudly: noise carries 10% farther, and every step you take is a little easier to hear."},
+	{"id": "l2", "display_name": "Shadow Cloak", "rarity": "legendary", "price": 26, "icon_slot": "",
+		"description": "Noise carries 40% less far and light is noticed 40% slower. Light reaches 25% less far and the beam is a little narrower."},
+	{"id": "l3", "display_name": "Dim Filter", "rarity": "common", "price": 6, "icon_slot": "",
+		"description": "A softer beam: puppets take 40% longer to notice it. Light reaches 20% less far, so you see less of the hall ahead."},
+	{"id": "l4", "display_name": "Night Eyes", "rarity": "uncommon", "price": 15, "icon_slot": "",
+		"description": "Puppets take much longer to notice your light (x0.6). Beam 10 degrees narrower, and the edges of rooms stay dark."},
+]
+
+
+## BE's ItemDb script (PR #27) via the global class list, or null.
+func _item_db() -> Script:
+	for c in ProjectSettings.get_global_class_list():
+		if str(c.get("class", "")) == "ItemDb":
+			var db = load(str(c.get("path", "")))
+			return db if db is Script and "ITEMS" in db else null
+	return null
+
+
+## The 4 items with the longest descriptions: BE's real ones when ItemDb is there.
+func _longest_offers() -> Array:
+	var db := _item_db()
+	if db == null:
+		return LONG_SAMPLE.duplicate(true)
+	var rows: Array = []
+	for r in db.ITEMS:
+		rows.append({"id": str(r.id), "display_name": str(r.name), "description": str(r.desc),
+			"icon_slot": "", "price": int(r.price), "rarity": str(r.rarity)})
+	rows.sort_custom(func(x, y): return str(x.description).length() > str(y.description).length())
+	return rows.slice(0, 4)
+
+
+## Lays out containers synchronously (tests don't wait for deferred sorts).
+func _settle(n: Node) -> void:
+	for _pass in 4:
+		var stack: Array = [n]
+		while not stack.is_empty():
+			var c: Node = stack.pop_front()
+			if c is Container:
+				c.notification(Container.NOTIFICATION_SORT_CHILDREN)
+			stack.append_array(c.get_children())
+
+
+func _open_shop_with(items: Array, gold := 0) -> Array:
+	var b := _bus()
+	var fs := _FakeShop.new()
+	fs.items = items
+	b._shop = fs
+	b.gold = gold
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	shop.open_shop()
+	shop._layout_merchant()
+	_settle(shop)
+	return [shop, b]
+
+
+func test_shop_full_stock() -> String:
+	var err := ""
+	for pair in [[4, 4], [2, 2], [7, 4], [1, 1]]:
+		var items: Array = []
+		for i in pair[0]:
+			items.append({"id": "i%d" % i, "display_name": "Item %d" % i, "price": 1, "rarity": "common"})
+		var sb := _open_shop_with(items)
+		if err.is_empty() and sb[0].cards.size() != pair[1]:
+			err = "stock of %d should show %d cards, got %d" % [pair[0], pair[1], sb[0].cards.size()]
+		_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_shop_four_fit() -> String:
+	var sb := _open_shop_with(_longest_offers(), 0)
+	var shop: Node = sb[0]
+	var err := ""
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var frame_h: float = shop.root.size.y - panel.offset_top + panel.offset_bottom   # anchored height
+	if shop.cards.size() != 4:
+		err = "want 4 cards, got %d" % shop.cards.size()
+	shop.buy_index(0)   # 0 gold → "Not enough gold for …"
+	_settle(shop)
+	var msg: Label = shop.message
+	if err.is_empty() and not msg.text.begins_with("Not enough gold"):
+		err = "message '%s'" % msg.text
+	if err.is_empty() and panel.get_combined_minimum_size().y > frame_h + 0.5:
+		err = "4 long cards + message need %.0f px, frame has %.0f" % [panel.get_combined_minimum_size().y, frame_h]
+	var pr := panel.get_global_rect().grow(0.5)
+	if err.is_empty() and absf(panel.size.y - frame_h) > 0.5:
+		err = "OffersPanel grew past its frame: %.0f vs %.0f" % [panel.size.y, frame_h]
+	for c in shop.cards:
+		if err.is_empty() and not pr.encloses(c.get_global_rect()):
+			err = "%s %s outside OffersPanel %s" % [c.name, str(c.get_global_rect()), str(pr)]
+		var d: Label = c.find_child("Desc", true, false)
+		if err.is_empty() and (d.max_lines_visible != 2 or d.get_visible_line_count() > 2):
+			err = "%s description should be capped at 2 lines" % c.name
+		if err.is_empty() and not c.tooltip_text.contains(d.text):
+			err = "%s tooltip should carry the full description" % c.name
+	var last: Control = shop.cards[-1]
+	if err.is_empty() and (not msg.is_visible_in_tree() or msg.size.y < 1.0 or not pr.encloses(msg.get_global_rect())):
+		err = "message %s not visible inside OffersPanel %s" % [str(msg.get_global_rect()), str(pr)]
+	if err.is_empty() and msg.get_global_rect().position.y < last.get_global_rect().end.y:
+		err = "message overlaps the last card"
+	var band: Vector2 = shop.merchant_band()
+	for n in ["OffersPanel", "InfoPanel"]:
+		var r: Rect2 = shop.root.find_child(n, true, false).get_global_rect()
+		if err.is_empty() and r.position.x < band.y and r.end.x > band.x:
+			err = "%s %s overlaps merchant band %s" % [n, str(r), str(band)]
+	_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_shop_letter_tile() -> String:
+	var sb := _open_shop_with(_longest_offers().slice(0, 2) + [
+		{"id": "bp", "display_name": "Big Pockets", "price": 10, "rarity": "uncommon", "icon_slot": "no_such_icon", "description": "x"}])
+	var shop: Node = sb[0]
+	var err := ""
+	var c: Control = shop.cards[2]
+	var tile: Control = c.find_child("Icon", true, false)
+	if not tile is Panel:
+		err = "missing icon should give a letter tile, got %s" % tile.get_class()
+	if err.is_empty() and (absf(tile.size.x - tile.size.y) > 0.5 or tile.size.x < 63.0):
+		err = "tile should be a 64 px square, got %s (card %s)" % [str(tile.size), str(c.size)]
+	var l: Label = tile.find_child("Initials", true, false)
+	if err.is_empty() and l.text != "BP":
+		err = "initials '%s', want BP" % l.text
+	var rim: Color = shop.skin.rarity_colors["uncommon"]
+	var sbx := tile.get_theme_stylebox(&"panel") as StyleBoxFlat
+	if err.is_empty() and (sbx == null or not sbx.border_color.is_equal_approx(rim) or not rim.is_equal_approx(Color("#5fd08a"))):
+		err = "rim should be Designer's uncommon #5fd08a"
+	var nm: Label = c.find_child("Name", true, false)
+	if err.is_empty() and not nm.get_theme_color(&"font_color").is_equal_approx(rim):
+		err = "name colour should match the rarity rim"
+	_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_initials_sample() -> String:
+	var S = load("res://scripts/ui/shop.gd")
+	var want := {"Big Pockets": "BP", "Grandfather's Watch": "GW", "Minimap": "MI", "Sneakers": "SN",
+		"Soft Shoes": "SS", "  extra   heart ": "EH", "X": "X", "": "?"}
+	for k in want:
+		if S.initials(k) != want[k]:
+			return "initials('%s') = '%s', want '%s'" % [k, S.initials(k), want[k]]
+	var u: Dictionary = S.unique_initials(PackedStringArray(["Spring Socks", "Soft Shoes", "Bright Bulb"]))
+	var u2: Dictionary = S.unique_initials(PackedStringArray(["Soft Shoes", "Bright Bulb", "Spring Socks"]))
+	if u != {"Soft Shoes": "SS", "Spring Socks": "SO", "Bright Bulb": "BB"} or u != u2:
+		return "clash should give SS / SO regardless of order, got %s / %s" % [u, u2]
+	return ""
+
+
+func test_initials_itemdb() -> String:
+	var S = load("res://scripts/ui/shop.gd")
+	var names: PackedStringArray = []
+	for r in _item_db().ITEMS:
+		names.append(str(r.name))
+	var u: Dictionary = S.unique_initials(names)
+	var seen := {}
+	for n in names:
+		var t: String = u.get(n, "")
+		if t.length() != 2:
+			return "'%s' → '%s' is not two letters" % [n, t]
+		if seen.has(t):
+			return "'%s' and '%s' both → %s" % [seen[t], n, t]
+		seen[t] = n
+	return "" if seen.size() == names.size() else "%d names, %d tiles" % [names.size(), seen.size()]
+
+
+func test_coin_face() -> String:
+	var skin := HudSkin.load_default()
+	if UiArt.frames(skin.coin_slot) == null:
+		return ""   # no coin art: the drawn circle is used
+	var holder: Control = UiScreen.coin_icon(skin.coin_slot, 28)
+	var err := ""
+	var face: TextureRect = holder.get_node_or_null("Face")
+	if face == null:
+		err = "coin should be a static face frame, not the spin loop"
+	else:
+		var img := face.texture.get_image()
+		var cols := 0
+		for x in img.get_width():
+			for y in img.get_height():
+				if img.get_pixel(x, y).a > 0.5:
+					cols += 1
+					break
+		if cols < img.get_width() * 0.6:
+			err = "coin face only %d/%d px wide (sliver)" % [cols, img.get_width()]
+	holder.free()
 	return err

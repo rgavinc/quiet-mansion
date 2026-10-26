@@ -13,6 +13,12 @@ extends UiScreen
 ## + a drawn silhouette in the same spot.
 
 const BACKDROP_SIZE := Vector2(320, 180)
+## Most offer cards the left column holds (4 cards with 2-line descriptions + the
+## message line, tested). The stock BE's Shop.roll_stock returns is shown in full up
+## to this (BE ItemDb.STOCK_SIZE = 4).
+const MAX_CARDS := 4
+## Description lines per card; the full text is in the card's tooltip.
+const DESC_LINES := 2
 
 var title: Label
 var gold_label: Label
@@ -149,9 +155,12 @@ func merchant_band() -> Vector2:
 	return Vector2(merchant.position.x - 32 * s, merchant.position.x + 32 * s)
 
 
+## Shows the stock BE's Shop returns (all of it, clamped to 1..MAX_CARDS);
+## `count` > 0 asks for at most that many. The demo stub gets the same cap.
 func open_shop(count: int = -1) -> void:
-	var n := count if count > 0 else skin.shop_offer_count
+	var n := clampi(count if count > 0 else skin.shop_offer_count, 1, MAX_CARDS)
 	offers = bus.get_shop_offer(n) if bus and bus.has_method(&"get_shop_offer") else ([] as Array[Dictionary])
+	_tile_text = unique_initials(_catalogue_names(offers))
 	sold.clear()
 	for c in offers_box.get_children():
 		offers_box.remove_child(c)
@@ -188,9 +197,14 @@ func _make_card(i: int, o: Dictionary) -> Control:
 	var nm := UiScreen.label(str(o.get("display_name", "?")), 20, skin.rarity_colors.get(rarity, Color.WHITE))
 	nm.name = "Name"
 	info.add_child(nm)
-	var desc := UiScreen.label(str(o.get("description", "")), 15, Color(0.78, 0.75, 0.7))
+	var full := str(o.get("description", ""))
+	var desc := UiScreen.label(full, 15, Color(0.78, 0.75, 0.7))
+	desc.name = "Desc"
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	desc.custom_minimum_size = Vector2(220, 0)
+	desc.max_lines_visible = DESC_LINES   # long text ends in "…"; full text in the tooltip
+	desc.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	card.tooltip_text = "%s\n%s" % [str(o.get("display_name", "")), full] if not full.is_empty() else ""
 	info.add_child(desc)
 	row.add_child(info)
 	var buy := UiScreen.button("%d g" % int(o.get("price", 0)), 18)
@@ -213,19 +227,104 @@ func _icon_for(o: Dictionary) -> Control:
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		tr.custom_minimum_size = Vector2(64, 64)
+		tr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		return tr
+	# Fallback letter tile: square, two-letter initials, rim in the rarity colour.
 	var p := Panel.new()
 	p.name = "Icon"
 	p.theme_type_variation = &"HudSlot"
 	p.custom_minimum_size = Vector2(64, 64)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var l := UiScreen.label(str(o.get("display_name", "?")).left(1).to_upper(), 30)
+	var rim := skin.rarity_colors.get(str(o.get("rarity", "common")), skin.rarity_colors.get("common", Color.WHITE)) as Color
+	p.add_theme_stylebox_override(&"panel", _tile_style(rim))
+	var nm := str(o.get("display_name", "?"))
+	var l := UiScreen.label(str(_tile_text.get(nm, initials(nm))), 26, rim)
+	l.name = "Initials"
 	l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	p.add_child(l)
 	return p
+
+
+## Letter-tile text per display name (set in open_shop).
+var _tile_text: Dictionary = {}
+
+
+## Two-letter initials: first letters of the first two words ("Big Pockets" → "BP",
+## "Grandfather's Watch" → "GW"); one word → its first two letters ("Minimap" → "MI").
+static func initials(display_name: String) -> String:
+	var words: PackedStringArray = []
+	for w in display_name.strip_edges().split(" ", false):
+		var letters := ""
+		for ch in w:
+			if ch.to_upper() != ch.to_lower() or ch.is_valid_int():
+				letters += ch
+		if not letters.is_empty():
+			words.append(letters)
+	if words.is_empty():
+		return "?"
+	if words.size() == 1:
+		return words[0].left(2).to_upper()
+	return (words[0].left(1) + words[1].left(1)).to_upper()
+
+
+## initials() for each name, made unique within `names`: names are taken in sorted
+## order (so a tile never depends on which items rolled) and a clash keeps the first
+## letter and tries the following letters of the last word, then of the whole name
+## ("Soft Shoes" → "SS", "Spring Socks" → "SO").
+static func unique_initials(names: PackedStringArray) -> Dictionary:
+	var sorted := names.duplicate()
+	sorted.sort()
+	var out := {}
+	var used := {}
+	for nm in sorted:
+		if out.has(nm):
+			continue
+		var t := initials(nm)
+		if used.has(t):
+			var words := nm.strip_edges().split(" ", false)
+			var pool := (words[-1].substr(1) + nm.replace(" ", "").substr(1)).to_upper()
+			for ch in pool:
+				var cand := t.left(1) + ch
+				if ch.to_upper() != ch.to_lower() and not used.has(cand):
+					t = cand
+					break
+		used[t] = true
+		out[nm] = t
+	return out
+
+
+## All item names BE's ItemDb knows (so tiles are stable across visits), plus the
+## offers' own names; just the offers when ItemDb isn't there.
+func _catalogue_names(list: Array) -> PackedStringArray:
+	var out: PackedStringArray = []
+	for c in ProjectSettings.get_global_class_list():
+		if str(c.get("class", "")) == "ItemDb":
+			var db = load(str(c.get("path", "")))
+			if db is Script and "ITEMS" in db:
+				for r in db.ITEMS:
+					out.append(str(r.get("name", "")))
+			break
+	for o in list:
+		var nm := str(o.get("display_name", ""))
+		if not out.has(nm):
+			out.append(nm)
+	return out
+
+
+func _tile_style(rim: Color) -> StyleBox:
+	var theme := load("res://assets/ui/hud_theme.tres") as Theme
+	var base: StyleBox = theme.get_stylebox(&"panel", &"HudSlot") if theme and theme.has_stylebox(&"panel", &"HudSlot") else null
+	var sb := (base.duplicate() if base is StyleBoxFlat else StyleBoxFlat.new()) as StyleBoxFlat
+	sb.border_color = rim
+	if not base is StyleBoxFlat:
+		sb.bg_color = Color(0.07, 0.05, 0.09, 0.85)
+		sb.set_border_width_all(2)
+		sb.set_corner_radius_all(4)
+	return sb
 
 
 ## Returns true when bought. Sold-out / unaffordable → false + feedback, no gold change.

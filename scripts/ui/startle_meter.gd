@@ -1,7 +1,7 @@
 extends Node2D
 ## Small gauge over an enemy's head that fills toward a startle.
-## Driven by FESignals.startle_progress(enemy, 0..1); the placeholder adapter
-## integrates over FESignals.startle_time (default 1.0 s, TODO PlayerStats).
+## Driven by FESignals.startle_progress(enemy, 0..1), reported by BE's Enemy
+## (report_startle, PR #26). FE does not integrate startle.
 ## Visible only while that enemy is lit (light on) and progress > 0.
 
 var skin: HudSkin

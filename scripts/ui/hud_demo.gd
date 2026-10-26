@@ -225,7 +225,15 @@ func _update_enemies(delta: float) -> void:
 	for e in enemies:
 		if not is_instance_valid(e):
 			continue
+		# Demo stands in for BE's Enemy: it builds startle and REPORTS it (the real
+		# game: Enemy._tick_startle → FESignals.report_startle). FESignals never integrates.
 		var p: float = bus.get_startle(e)
+		if bus.is_lit(e) and not bus.chasing.has(e):
+			p = minf(p + delta / maxf(bus.startle_time, 0.01), 1.0)
+			bus.report_startle(e, p)
+		elif p > 0.0 and not bus.chasing.has(e):
+			p = 0.0
+			bus.report_startle(e, 0.0)
 		var body := e.get_node("Body") as Polygon2D
 		body.scale = Vector2.ONE * (1.0 + 0.12 * p * sin(Time.get_ticks_msec() * 0.05))
 		if p >= 1.0 and not bus.chasing.has(e):

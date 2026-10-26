@@ -119,7 +119,7 @@ Every enemy type is an `Enemy` subclass (or a plain `Enemy` with an `EnemyDef`) 
 | State | What it does | Leaves when |
 |------|------|------|
 | `CALM` | Idles / patrols `patrol_radius` around `home`. Light on it builds `startle` 0→1 over `PlayerStats` `light_startle_time` (1.0 s); light off resets it to 0. | startle hits 1 → `STARTLED`; a noise in range → `CHASE` |
-| `STARTLED` | Plays `puppet_startle` once and holds the last frame; waits `startle_reaction_time` (0.35 s). | → `CHASE` |
+| `STARTLED` | Plays `puppet_startle` once and holds the last frame; waits `startle_delay()`: the scream animation's length (manifest `frames / fps`, 7 / 14 = 0.5 s for the puppet), so the chase starts as the scream ends. | → `CHASE` |
 | `CHASE` | Runs at `chase_speed` to the boy. Memory stays 1 while it sees him or while a noise / light lets it track him without sight (`noise_track_time` 3 s, `light_track_time` 1 s). | loses him → `SEARCH`; lands a hit → `RECOVER`; throw → `STUNNED` |
 | `SEARCH` | Goes to `last_known`; `memory` drains, faster the farther the boy is: rate = `(1 / memory_time) * clamp(distance / give_up_distance, 0.25, 4)`. | sees / hears him → `CHASE`; memory 0 → `RETURN` |
 | `RETURN` | Walks home (counts as calm: light can startle it, a throw kills it). | home → `CALM` |
@@ -132,7 +132,16 @@ Every enemy type is an `Enemy` subclass (or a plain `Enemy` with an `EnemyDef`) 
 - `is_chasing()` = from chase start until give-up or death (CHASE, SEARCH and the RECOVER / STUNNED pauses inside it). `enraged` (legacy, FE polls it) returns the same value.
 
 ### Tunables (exports; an `EnemyDef` can set any of them)
-`type_id, movement, walk_speed 45, chase_speed 95, float_speed 45, climb_speed 80, hear_radius, hearing_mult 1, sight_range 560, memory_time 4, give_up_distance 900, noise_track_time 3, light_track_time 1, startle_reaction_time 0.35, recover_time 1.5, backoff_speed 60, stun_time 1.5, patrol_radius 0, shove_distance 48, hit_radius 18, anim_calm / anim_startle / anim_chase`.
+`type_id, movement, walk_speed 45, chase_speed 95, float_speed 45, climb_speed 80, hear_radius, hearing_mult 1, sight_range 560, memory_time 4, give_up_distance 900, noise_track_time 3, light_track_time 1, startle_reaction_time 0 (= use the startle anim length), recover_time 1.5, backoff_speed 60, stun_time 1.5, patrol_radius 0, shove_distance 48, hit_radius 18, anim_calm / anim_startle / anim_chase`.
+
+### Startle → chase delay
+`startle_delay()` = `startle_reaction_time` when it's > 0 (a per-type override in an `EnemyDef`, in seconds). At 0 or below (the default) it's `Enemy.startle_anim_length(anim_startle)` = the slot's `frames / fps` from `ASSETS_MANIFEST.toml` via `AnimLibrary`, so re-timing the scream art re-times the chase with no code change. A missing slot, or one with no frames or fps, falls back to `STARTLE_FALLBACK_TIME` (0.5 s). Measured on real frames: lit 1.00 s → `STARTLED`, then `CHASE` 30 frames (0.50 s) later.
+
+### Ledge backstop (walkers)
+Lead's stair-opening rail (#13) is the real fix; this is a backup that holds anywhere. Every frame a grounded side-scroll walker moves, `_ledge_ahead()` casts a ray straight down just ahead of its feet (half its collider width + 2 px + this frame's step) against `LAYER_WORLD`, `LEDGE_PROBE_DEPTH` (24 px) deep. No floor there means a floor edge or opening, so:
+- `CALM` patrol turns back (`_patrol_dir` flips).
+- `CHASE`, `SEARCH`, `RETURN` and the `RECOVER` back-off stop at the edge (`velocity.x = 0`, `ledge_stopped = true`) and never step off; they change floors only by stairs. A boy across a gap is waited for, and `SEARCH` memory drains as usual.
+- Not applied within ~one body width of a stair entry it's heading for (the stair top sits at the opening), to floaters, to top-down enemies, or when `floor_override` is set (sync tests have no slabs).
 
 ### EnemyDef plug-in
 Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copies every field in `DEF_FIELDS` the resource actually has, duck-typed, so an `EnemyDef` class (not written yet) just has to use these names. `movement = &"float"` (stage 4+) makes the enemy ignore gravity and drift straight through slabs and walls; its chase art is `<anim_chase>_float` (`puppet_chase_float`) when the manifest has that slot, else `anim_chase`.
@@ -150,4 +159,4 @@ Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copie
 - Top-down (`side_scroll` off) enemies move freely in 2D with no gravity.
 
 ### Test hooks and tests
-`sight_override`, `lit_override`, `floor_override` (-1 real, 0/1 forced) and `nav_override`. Tests: `tests/test_enemy_fsm.gd` (sync, `tick()`), `tests/scene_enemy.gd` (real physics: hit back-off, walker gravity + stairs, walker without stairs, float through floors). A check that hits a runtime script error counts as failed.
+`sight_override`, `lit_override`, `floor_override` (-1 real, 0/1 forced) and `nav_override`. Tests: `tests/test_enemy_fsm.gd` (sync, `tick()`), `tests/scene_enemy.gd` (real physics: hit back-off, walker gravity + stairs, walker without stairs, float through floors, startle → chase on real frames, walker turns at a floor gap while a floater crosses it). A check that hits a runtime script error counts as failed.

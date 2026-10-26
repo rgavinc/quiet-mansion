@@ -83,7 +83,7 @@ static func load_default() -> HudSkin:
 
 @export_group("Screens")
 ## Merchant shop: offers rolled per visit.
-@export var shop_offer_count: int = 3
+@export var shop_offer_count: int = 4
 ## Art slots (PR #14 names). Missing slot → themed panel / placeholder shapes.
 @export var shop_backdrop_slot: String = "shop_backdrop"
 @export var merchant_slot: String = "merchant_idle"
@@ -99,11 +99,12 @@ static func load_default() -> HudSkin:
 @export var screen_dim: Color = Color(0.02, 0.01, 0.03, 0.82)
 @export var title_color: Color = Color(0.85, 0.2, 0.2)
 @export var rarity_colors: Dictionary = {
-	"common": Color(0.8, 0.78, 0.72),
-	"uncommon": Color(0.45, 0.85, 0.45),
-	"rare": Color(0.4, 0.65, 1.0),
-	"epic": Color(0.8, 0.45, 1.0),
-	"legendary": Color(1.0, 0.7, 0.2),
+	# Designer's rarity palette (docs/DESIGN.md, item icon rims in PR #29).
+	"common": Color("#b9b2c4"),
+	"uncommon": Color("#5fd08a"),
+	"rare": Color("#5aa8ff"),
+	"epic": Color(0.8, 0.45, 1.0),   # not in BE's ItemDb; kept for safety
+	"legendary": Color("#ffb640"),
 }
 
 @export_group("Alert HUD")

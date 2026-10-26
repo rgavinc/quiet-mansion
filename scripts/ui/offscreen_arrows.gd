@@ -2,8 +2,9 @@ extends Control
 ## Smash-style edge arrows for CHASING enemies that are off-screen.
 ## Listens to FESignals.chase_changed (pulls FESignals.chasing each frame) and
 ## FESignals.chase_memory_changed. Each arrow carries a ring gauge:
-##   - BE chase memory ratio when reported (TODO(BE-wire): Enemy chase memory),
-##   - else 1 - distance_to_player / FESignals.give_up_distance.
+##   BE chase memory (report_chase_memory, PR #26: sent on chase start and every
+##   hunting frame; 1 while tracking, drains in SEARCH). Full until the first report.
+## Which enemies get arrows = FESignals.chasing (BE report_chase), never `enraged`.
 ## Lives in a CanvasLayer (screen space).
 
 var skin: HudSkin
@@ -28,7 +29,6 @@ func _process(_delta: float) -> void:
 		return
 	var vp := get_viewport_rect()
 	var xf := get_viewport().get_canvas_transform()
-	var player := get_tree().get_first_node_in_group("player") as Node2D
 	for raw in bus.chasing:   # untyped: a chaser may have been freed this frame
 		if raw == null or not is_instance_valid(raw):
 			continue
@@ -38,8 +38,7 @@ func _process(_delta: float) -> void:
 			continue
 		var ratio: float = bus.get_chase_memory(e)
 		if ratio < 0.0:
-			var d := player.global_position.distance_to(e.global_position) if player else 0.0
-			ratio = clampf(1.0 - d / maxf(bus.give_up_distance, 1.0), 0.0, 1.0)
+			ratio = 1.0   # chase just started; BE's first memory report is on its way
 		var placed := edge_point(vp, sp, skin.arrow_margin)
 		arrows.append({"enemy": e, "pos": placed[0], "angle": placed[1], "ratio": ratio,
 			"color": skin.ring_color_for(bus.enemy_type_id(e))})
