@@ -50,6 +50,12 @@ func _physics_process(_delta: float) -> void:
 		break_apart()
 
 
+## Called when the player's hold-LMB channel on this object completes. Return true if
+## the object handled it itself (e.g. Chest opens) and must NOT go into the Inventory.
+func on_hold_complete(_by: Node) -> bool:
+	return false
+
+
 ## Item dictionary that goes into Inventory when picked up.
 func to_item() -> Dictionary:
 	return {

@@ -7,6 +7,8 @@ signal health_changed(current: int, max_hp: int)
 signal gold_changed(current: int, delta: int)
 signal stat_changed(stat: StringName, value: float)
 signal died
+## Owned (bought / chest) items changed. `items` is PlayerStats.owned_items.
+signal items_changed(items: Array)
 
 ## Base values. Tune here; every class reads through get_stat().
 const BASE := {
@@ -27,6 +29,7 @@ const BASE := {
 	&"invuln_time": 1.0,         # s after a hit
 	&"inventory_slots": 3.0,
 	&"gold_find_mult": 1.0,
+	&"minimap": 0.0,             # >= 1 = the minimap item is owned (FE minimap reads has_minimap())
 }
 
 ## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
@@ -42,10 +45,23 @@ const MIN := {
 	&"tap_threshold": 0.05,
 	&"light_startle_time": 0.2,
 	&"inventory_slots": 1.0,
+	# Item-stack floors (any item combo stays playable):
+	&"move_speed": 60.0,
+	&"climb_speed": 30.0,
+	&"pickup_range": 16.0,
+	&"light_range": 80.0,
+	&"light_angle_deg": 10.0,
+	&"light_detect_mult": 0.2,
+	&"noise_mult": 0.2,
+	&"gold_find_mult": 0.1,
 }
 
 var health: int = 3
 var gold: int = 0
+## Bought and chest items (Item resources) this run. Survives stage Continue (this
+## autoload is never re-created); cleared, with their modifiers, by reset().
+## Held props are NOT here — they live in the level's Inventory and are dropped.
+var owned_items: Array = []
 ## modifiers: Array of {stat, add, mul, source}
 var _mods: Array[Dictionary] = []
 var _invuln_left: float = 0.0  # counts down in _process, so it freezes while paused (shop)
@@ -74,7 +90,8 @@ func add_modifier(stat: StringName, add: float = 0.0, mul: float = 1.0, source: 
 	assert(BASE.has(stat), "Unknown stat: %s" % stat)
 	_mods.append({stat = stat, add = add, mul = mul, source = source})
 	if stat == &"max_health":
-		health = clampi(health + int(add), 1, max_health())
+		# More max hearts heal by that much; fewer only clamp (never costs an extra heart).
+		health = clampi(health + maxi(int(add), 0), 1, max_health())
 		health_changed.emit(health, max_health())
 	stat_changed.emit(stat, get_stat(stat))
 
@@ -145,9 +162,37 @@ func try_spend(cost: int) -> bool:
 	return true
 
 
-## New run. Keeps nothing.
+## Applies `item` (its modifiers, source = item.source_key()) and adds it to
+## owned_items. Shop.buy() and Chest.open() both end here. Gold is NOT touched.
+func grant_item(item: Object) -> bool:
+	if item == null or not item.has_method(&"apply") or owned_items.has(item):
+		return false
+	item.apply(self)
+	owned_items.append(item)
+	items_changed.emit(owned_items)
+	return true
+
+
+func owns(item_id: String) -> bool:
+	for it in owned_items:
+		if is_instance_valid(it) and str(it.get("id")) == item_id:
+			return true
+	return false
+
+
+## FE minimap UI: show it when this is true (listen to stat_changed(&"minimap", v)).
+func has_minimap() -> bool:
+	return get_stat(&"minimap") >= 1.0
+
+
+## New run. Keeps nothing: modifiers (all item effects) and owned items go.
 func reset() -> void:
 	_mods.clear()
+	for it in owned_items:
+		if is_instance_valid(it) and "_applied_to" in it:
+			it.set("_applied_to", null)
+	owned_items.clear()
+	items_changed.emit(owned_items)
 	_invuln_left = 0.0
 	health = max_health()
 	gold = 0
