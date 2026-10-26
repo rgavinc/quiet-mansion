@@ -12,6 +12,7 @@ func run_all() -> Dictionary:
 	var failures: PackedStringArray = []
 	var checks := [
 		["three_hits_dies", test_three_hits_dies],
+		["no_damage_after_run_over", test_no_hit_after_run_over],
 		["modifier_add_mul", test_modifier_add_mul],
 		["remove_by_source", test_remove_by_source],
 		["max_health_item", test_max_health_item],
@@ -150,3 +151,18 @@ func test_stat_floors() -> String:
 	var ok: bool = s.max_health() >= 1 and s.health >= 1 and s.get_stat(&"pickup_time") > 0.0
 	s.free()
 	return "" if ok else "stats went below floors"
+
+
+func test_no_hit_after_run_over() -> String:
+	PlayerStats.reset(); GameState.reset()
+	GameState.on_reach_exit()   # win / stage clear: run over
+	var died := [false]
+	var cb := func(): died[0] = true
+	PlayerStats.died.connect(cb)
+	var landed := PlayerStats.take_hit(3, true)
+	PlayerStats.died.disconnect(cb)
+	var hp := PlayerStats.health
+	GameState.reset(); PlayerStats.reset()
+	if landed or hp != 3: return "hit landed after run over (hp %d)" % hp
+	if died[0]: return "died emitted after run over"
+	return ""
