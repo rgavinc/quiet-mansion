@@ -31,6 +31,7 @@ var health: int = 3
 var gold: int = 0
 ## modifiers: Array of {stat, add, mul, source}
 var _mods: Array[Dictionary] = []
+var _last_hit_ms: int = -1
 
 
 func _ready() -> void:
@@ -74,9 +75,14 @@ func remove_modifiers_from(source: Variant) -> void:
 		health_changed.emit(health, max_health())
 
 
-func take_hit(amount: int = 1) -> void:
+## Enforces invuln_time here so no caller can double-hit. Tests may pass ignore_invuln.
+func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 	if health <= 0:
-		return
+		return false
+	var now := Time.get_ticks_msec()
+	if not ignore_invuln and _last_hit_ms >= 0 and now - _last_hit_ms < int(get_stat(&"invuln_time") * 1000.0):
+		return false
+	_last_hit_ms = now
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health())
 	if health == 0:
@@ -85,6 +91,11 @@ func take_hit(amount: int = 1) -> void:
 			var gs := get_node_or_null(^"/root/GameState")
 			if gs:
 				gs.on_caught()
+	return true
+
+
+func is_invulnerable() -> bool:
+	return _last_hit_ms >= 0 and Time.get_ticks_msec() - _last_hit_ms < int(get_stat(&"invuln_time") * 1000.0)
 
 
 func heal(amount: int = 1) -> void:
@@ -109,6 +120,7 @@ func try_spend(cost: int) -> bool:
 ## New run. Keeps nothing.
 func reset() -> void:
 	_mods.clear()
+	_last_hit_ms = -1
 	health = max_health()
 	gold = 0
 	health_changed.emit(health, max_health())
