@@ -18,6 +18,7 @@ func run_all() -> Dictionary:
 		["gold_spend", test_gold_spend],
 		["invuln_blocks_double_hit", test_invuln],
 		["rejects_bad_values", test_bad_values],
+		["invuln_expires_by_game_time", test_invuln_expires],
 		["input_bindings", test_bindings],
 		["input_actions", test_input_actions],
 	]
@@ -121,3 +122,14 @@ func test_bindings() -> String:
 	if not _bound("inv_next", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		return "inv_next not on wheel"
 	return ""
+
+
+func test_invuln_expires() -> String:
+	var s := _make()
+	s.take_hit()
+	s._process(0.5)
+	if s.take_hit(): s.free(); return "hit landed at 0.5s of 1.0s invuln"
+	s._process(0.6)
+	var ok: bool = s.take_hit()
+	s.free()
+	return "" if ok else "invuln never expired"
