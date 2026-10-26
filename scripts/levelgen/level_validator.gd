@@ -87,6 +87,11 @@ static func validate(layout: Variant) -> PackedStringArray:
 		errs.append("level only %d tiles wide" % W)
 		return errs
 	var bounds := level_bounds(L)
+	var stage := int(L.get("stage", 0))
+	var table := {}
+	if stage >= 1 and stage <= StageTable.STAGE_COUNT and not L.get("custom_params", false):
+		table = StageTable.params(stage)
+	var table_errs := _table_errors(L, F, W, stage, table)
 
 	for r in L.rooms:
 		var w := int(r.x1) - int(r.x0)
@@ -142,6 +147,7 @@ static func validate(layout: Variant) -> PackedStringArray:
 			if o.what != "stair" and int(o.floor) == tf and o.b > hole.x and o.a < hole.y:
 				errs.append("%s at %s over the stair %d->%d slab cutout" % [o.what, o.pos, ff, tf])
 	if not errs.is_empty():
+		errs.append_array(table_errs)
 		return errs
 
 	# reachability over the floor graph (same graph LevelNav routes enemies on)
@@ -159,7 +165,7 @@ static func validate(layout: Variant) -> PackedStringArray:
 				errs.append("%s at %s not reachable" % [key, o.pos])
 
 	# enemies: distance (any floor), start camera view, line of sight
-	var safe := maxf(float(L.get("safe_radius", 0.0)), MIN_ENEMY_DIST)
+	var safe := maxf(maxf(float(L.get("safe_radius", 0.0)), float(table.get("safe_radius", 0.0))), MIN_ENEMY_DIST)
 	var view := start_view(L)
 	for e in L.enemies:
 		var p: Vector2 = e.get("pos", Vector2.INF)
@@ -221,7 +227,37 @@ static func validate(layout: Variant) -> PackedStringArray:
 				errs.append("budget: %d/%d %s" % [(L[k] as Array).size(), int(bud.get(k, 0)), k])
 	else:
 		errs.append("budget is not a Dictionary")
+	errs.append_array(table_errs)
 	return errs
+
+
+## Stage-table rules (QA): floors, width, budget and enemy types must match StageTable for
+## the layout's stage unless it was built with custom params.
+static func _table_errors(L: Dictionary, F: int, W: int, stage: int, table: Dictionary) -> PackedStringArray:
+	var te: PackedStringArray = []
+	# the stage table is the source of truth (QA): floors, width, budget, safe radius, enemy types
+	if not table.is_empty():
+		var wt: Array = table.width_tiles
+		if F != int(table.floors):
+			te.append("stage %d needs %d floors, has %d" % [stage, table.floors, F])
+		if W < int(wt[0]) or W > int(wt[wt.size() - 1]):
+			te.append("stage %d width %d tiles outside the table's %d-%d" % [stage, W, wt[0], wt[wt.size() - 1]])
+		var tb := StageTable.budget(stage)
+		if L.budget is Dictionary:
+			for k in tb:
+				if int((L.budget as Dictionary).get(k, -1)) != int(tb[k]):
+					te.append("budget %s %d != stage table %d" % [k, int((L.budget as Dictionary).get(k, -1)), tb[k]])
+	for e in L.enemies:
+		var id := str(e.get("type", ""))
+		if not StageTable.ENEMY_TYPES.has(id):
+			te.append("enemy type '%s' not in StageTable.ENEMY_TYPES" % id)
+			continue
+		var t: Dictionary = StageTable.ENEMY_TYPES[id]
+		if stage >= 1 and int(t.min_stage) > stage:
+			te.append("enemy type %s before its min_stage %d" % [id, t.min_stage])
+		if StringName(e.get("movement", &"")) != StringName(t.movement):
+			te.append("enemy %s movement %s != table %s" % [id, e.get("movement"), t.movement])
+	return te
 
 
 ## Everything that takes floor space: [{what, floor, a, b, pos}] (stairs on both their floors).

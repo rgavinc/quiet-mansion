@@ -112,6 +112,18 @@ static func movement_for(id: String) -> StringName:
 	return enemy_type(id).get("movement", &"walk")
 
 
+## EnemyDef for a type id (unknown ids -> puppet_hand). A fresh resource per call.
+static func enemy_def(id: String) -> EnemyDef:
+	var key := id if ENEMY_TYPES.has(id) else "puppet_hand"
+	var t: Dictionary = ENEMY_TYPES[key]
+	var d := EnemyDef.new()
+	d.type_id = StringName(key)
+	d.movement = t.get("movement", &"walk")
+	d.min_stage = int(t.get("min_stage", 1))
+	d.script_path = script_for(key)
+	return d
+
+
 ## Script to instance for a type; types without their own script yet use puppet_hand.
 static func script_for(id: String) -> String:
 	var s: String = enemy_type(id).get("script", "")

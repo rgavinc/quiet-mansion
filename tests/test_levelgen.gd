@@ -27,6 +27,10 @@ func run_all() -> Dictionary:
 		["route_never_crosses_slab_cutout", test_cutout_splits_floor],
 		["build_cuts_slab_and_paints_atlas", test_build_cutout],
 		["stage_count_is_table_size", test_stage_count],
+		["rejects_layout_off_stage_table", test_reject_off_table],
+		["rejects_loot_on_stair_landings", test_reject_loot_on_landing],
+		["enemies_are_enemydefs_at_table_count", test_enemy_defs],
+		["fallbacks_match_stage_table_and_are_only_last_resort", test_fallback_table],
 		["rejects_enemy_near_start", test_reject_enemy_near],
 		["rejects_enemy_within_a_screen_any_floor", test_reject_enemy_other_floor],
 		["rejects_enemy_on_start_screen", test_reject_enemy_on_screen],
@@ -607,3 +611,102 @@ func test_stage_count() -> String:
 	if StageTable.STAGE_COUNT != StageTable.STAGES.size() or StageTable.stage_count() != StageTable.STAGE_COUNT:
 		return "STAGE_COUNT != STAGES.size()"
 	return "" if load("res://scripts/ui/fe_signals.gd").MAX_STAGES == StageTable.STAGE_COUNT else "FE MAX_STAGES not from StageTable"
+
+
+## QA dry-run findings: the stage table is the source of truth, checked by the validator.
+func test_reject_off_table() -> String:
+	var L := LevelGenerator.generate(4, 1)
+	L.width_tiles = 96
+	if not _has(LevelValidator.validate(L), "outside the table"):
+		return "96-tile stage 1 passed"
+	L = LevelGenerator.generate(4, 3)
+	L.floors = 3   # stage 3 is 4 floors
+	if not _has(LevelValidator.validate(L), "needs 4 floors"):
+		return "3-floor stage 3 passed"
+	L = LevelGenerator.generate(4, 5)
+	L.budget = {enemies = 3, props = 7, gold = 0, chests = 0}   # a shrunken budget can't pass
+	L.enemies = L.enemies.slice(0, 3)
+	L.props = L.props.slice(0, 7)
+	L.gold = []
+	L.chests = []
+	if not _has(LevelValidator.validate(L), "!= stage table"):
+		return "under-budget stage 5 passed"
+	# a layout claiming a smaller safe radius still gets the table's 1280px
+	L = LevelGenerator.generate(4, 1)
+	L.safe_radius = 300.0
+	L.enemies[0].pos = L.start + Vector2(683, 0)
+	if not _has(LevelValidator.validate(L), "too close to start"):
+		return "puppet 683px from spawn passed"
+	# enemy types: float before stage 4, movement not the table's, unknown ids
+	L = LevelGenerator.generate(4, 2)
+	L.enemies[0].type = "t4"
+	L.enemies[0].movement = &"float"
+	if not _has(LevelValidator.validate(L), "min_stage"):
+		return "float enemy at stage 2 passed"
+	L = LevelGenerator.generate(4, 1)
+	L.enemies[0].movement = &"float"
+	if not _has(LevelValidator.validate(L), "movement"):
+		return "puppet_hand with float movement passed"
+	L = LevelGenerator.generate(4, 1)
+	L.enemies[0].type = "placeholder"
+	return "" if _has(LevelValidator.validate(L), "not in StageTable") else "unknown enemy type passed"
+
+
+## Chests and gold may not sit on a landing, the step run, or the cutout.
+func test_reject_loot_on_landing() -> String:
+	var s: Dictionary = LevelGenerator.fallback_layout(1).stairs[0]
+	var land: Array = LevelValidator.stair_landings(s)
+	var L := LevelGenerator.fallback_layout(1)
+	L.chests[0].pos = Vector2((land[0].a + land[0].b) / 2.0, LevelValidator.surface_y(int(s.from_floor)))
+	if not _has(LevelValidator.validate(L), "overlaps"):
+		return "chest on the bottom landing passed"
+	L = LevelGenerator.fallback_layout(1)
+	L.gold[0].pos = Vector2((land[1].a + land[1].b) / 2.0, LevelValidator.surface_y(int(s.to_floor)))
+	if not _has(LevelValidator.validate(L), "overlaps"):
+		return "gold on the top landing passed"
+	L = LevelGenerator.fallback_layout(1)
+	L.props[0].pos = Vector2(s.bottom.x + signf(s.top.x - s.bottom.x) * 64.0, LevelValidator.surface_y(int(s.from_floor)))
+	return "" if _has(LevelValidator.validate(L), "overlaps") else "prop on the stair steps passed"
+
+
+## Built enemies: exactly the table count, each a BE Enemy carrying a table EnemyDef.
+func test_enemy_defs() -> String:
+	var check: Callable = load("res://tests/seed_sweep.gd").enemy_check
+	for st in [1, 4, 5]:
+		var w := Node2D.new()
+		w.set_meta(&"lg_test", true)
+		root.add_child(w)
+		var L := LevelGenerator.generate(11, st)
+		var b := LevelGenerator.build(L, w)
+		var err: String = check.call(w, L, st)
+		if err.is_empty() and b.enemies.size() != int(StageTable.STAGES[st].enemies):
+			err = "build returned %d enemies" % b.enemies.size()
+		w.free()
+		if not err.is_empty():
+			return "stage %d: %s" % [st, err]
+	var d := StageTable.enemy_def("t5")
+	if d.movement != &"float" or d.min_stage != 5 or not ResourceLoader.exists(d.script_path):
+		return "t5 EnemyDef wrong"
+	return ""
+
+
+## The 5 known-good layouts follow their stage table exactly, pass the validator, and are
+## never reached by real seeds (generate marks them `fallback`, which the sweep fails on).
+func test_fallback_table() -> String:
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var L := LevelGenerator.fallback_layout(st)
+		var P := StageTable.params(st)
+		var wt: Array = P.width_tiles
+		if int(L.floors) != int(P.floors) or int(L.width_tiles) < int(wt[0]) or int(L.width_tiles) > int(wt[1]):
+			return "stage %d fallback %d floors x %d tiles" % [st, L.floors, L.width_tiles]
+		if L.enemies.size() != int(P.enemies) or L.props.size() != int(P.props) or L.gold.size() != int(P.gold_piles) or L.chests.size() != int(P.chests):
+			return "stage %d fallback under budget" % st
+		for e in L.enemies:
+			if e.pos.distance_to(L.start) < 1280.0:
+				return "stage %d fallback puppet %dpx from spawn" % [st, int(e.pos.distance_to(L.start))]
+		if not LevelValidator.validate(L).is_empty():
+			return "stage %d fallback: %s" % [st, LevelValidator.validate(L)[0]]
+		for sd in 20:
+			if LevelGenerator.generate(sd, st).fallback:
+				return "stage %d seed %d hit the fallback" % [st, sd]
+	return ""

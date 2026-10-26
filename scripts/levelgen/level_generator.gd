@@ -56,12 +56,16 @@ static func generate(seed_value: int, stage: int, opts: Dictionary = {}) -> Dict
 		var rng := RandomNumberGenerator.new()
 		rng.seed = derive_seed(seed_value, stage, attempt)
 		var L := generate_layout(rng, stage, P)
+		if over is Dictionary and not (over as Dictionary).is_empty():
+			L.custom_params = true   # tests only: table-match rules relaxed (see LevelValidator)
 		var errs := LevelValidator.validate(L)
 		if errs.is_empty():
 			L.merge({seed = seed_value, attempt = attempt, rerolls = attempt, fallback = false,
 					reject_reasons = reasons, build_seed = derive_seed(seed_value, stage, attempt)}, true)
 			return L
 		reasons.append(errs[0])
+	push_warning("LevelGenerator: seed %d stage %d failed all %d attempts (last: %s); using the stage %d known-good layout" % [
+			seed_value, stage, max_a, reasons[-1] if not reasons.is_empty() else "max_attempts 0", clampi(stage, 1, StageTable.STAGE_COUNT)])
 	var fb := fallback_layout(stage)
 	fb.merge({seed = seed_value, attempt = -1, rerolls = max_a, fallback = true,
 			reject_reasons = reasons, build_seed = derive_seed(seed_value, stage, -1)}, true)
@@ -583,7 +587,8 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 		return {}
 	var L: Dictionary = layout if layout is Dictionary else {}
 	if not LevelValidator.validate(L).is_empty():
-		push_warning("LevelGenerator.build: invalid layout, using fallback")
+		push_warning("LevelGenerator.build: invalid layout (seed %s stage %s): %s; using the stage known-good layout" % [
+				L.get("seed", "?"), L.get("stage", "?"), LevelValidator.validate(L).slice(0, 1)])
 		L = fallback_layout(int(L.get("stage", 1)))
 	seed(int(L.get("build_seed", 0)))   # Vase._ready rolls hidden gold with the global RNG
 	var F := int(L.floors)
@@ -680,7 +685,11 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	var enemies := []
 	var en_root := _child(world, "Puppets", level)
 	for e in L.enemies:
-		var en: CharacterBody2D = load(StageTable.script_for(str(e.type))).new()
+		var def := StageTable.enemy_def(str(e.type))
+		var en: CharacterBody2D = load(def.script_path).new()
+		if "def" in en:   # BE Enemy (#26): _ready applies type_id / movement from the def
+			en.set("def", def)
+		en.set_meta("enemy_def", def)
 		_circle(en, PUPPET_RADIUS)
 		en.position = e.pos
 		en.set_meta("enemy_type", str(e.type))

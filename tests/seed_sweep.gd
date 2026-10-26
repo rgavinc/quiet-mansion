@@ -86,6 +86,8 @@ func _run() -> void:
 				if int(got[k]) < int(want[k]):
 					short[k] += 1
 					errs.append("short %s %d/%d" % [k, got[k], want[k]])
+			if L.get("fallback", false):
+				errs.append("retries exhausted, known-good layout used (%s)" % [L.get("reject_reasons", []).slice(-1)])
 			if var_to_str(LevelGenerator.generate(s, stage)) != var_to_str(L):
 				nondet += 1
 				errs.append("layout differs when regenerated")
@@ -128,6 +130,23 @@ func _run() -> void:
 	quit(0 if ok else 1)
 
 
+## QA: enemies in the booted scene are exactly the stage table's count, every one a real
+## EnemyDef-driven `Enemy` (type and movement from the table), no stand-ins or leftovers.
+static func enemy_check(main: Node, L: Dictionary, stage: int) -> String:
+	var want := int(StageTable.budget(stage).enemies)
+	var got: Array = main.get_tree().get_nodes_in_group("enemies").filter(func(n): return main.is_ancestor_of(n))
+	if got.size() != want or L.enemies.size() != want:
+		return "%d enemy nodes / %d in layout, stage table says %d" % [got.size(), L.enemies.size(), want]
+	for n in got:
+		var d: Variant = n.get("def")
+		if not (d is EnemyDef):
+			return "enemy %s has no EnemyDef" % n.name
+		var t: Dictionary = StageTable.ENEMY_TYPES.get(str(d.type_id), {})
+		if t.is_empty() or n.get("movement") != t.movement or n.get("type_id") != d.type_id or int(t.min_stage) > stage:
+			return "enemy %s def %s/%s doesn't match the table" % [n.name, d.type_id, n.get("movement")]
+	return ""
+
+
 func _boot(s: int, stage: int, frames: int) -> String:
 	root.get_node("PlayerStats").reset()
 	root.get_node("GameState").reset()
@@ -145,8 +164,9 @@ func _boot(s: int, stage: int, frames: int) -> String:
 		var p: CharacterBody2D = built.player
 		var L: Dictionary = built.layout
 		var b: Rect2 = built.bounds
+		err = enemy_check(main, L, stage)
 		var dir := "move_right" if L.exit.x > L.start.x else "move_left"
-		for f in frames:
+		for f in (frames if err.is_empty() else 0):
 			if f == frames / 4:
 				Input.action_press(dir)
 			if f == frames * 3 / 4:
