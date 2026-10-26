@@ -24,7 +24,7 @@ Everything FE draws listens to **one adapter**, `scripts/ui/fe_signals.gd`
 (autoload `FESignals`). Back End's foundation (`PlayerStats`, `NoiseBus`,
 `Enemy` state machine, pickup/throw, `Inventory`) is **not on `development`
 yet**, so every signal below is a **placeholder** marked `TODO(BE-wire)` in
-that file. When BE lands, only `FESignals._wire_backend()` changes; widgets stay
+that file. The one exception: if `/root/PlayerStats` exists (BE PR #1), hearts and gold, plus `startle_time`/`pickup_time`, are wired to it automatically. When BE lands, only `FESignals._wire_backend()` changes; widgets stay
 as they are.
 
 ## Pieces and what they listen to
@@ -57,7 +57,7 @@ Enemy type id for ring colours comes from `get_type_id()`, then a `type_id` prop
 - Optional art slots. If one of these is added to `ASSETS_MANIFEST.toml` (as `ai` first), the UI uses it instead of the drawn placeholder: `ui_heart_full`, `ui_heart_empty`, `ui_gold`, and `icon_<item slot>`. FE added **no PNGs** in this PR, so the manifest and watermark are unchanged.
 
 ## Input map (Product names)
-`jump` (Space), `flashlight_toggle` (RMB), `interact` (LMB: hold = pickup, tap < 0.2 s = throw), `inv_next` (wheel down), `inv_prev` (wheel up), plus `move_left`/`move_right` (A/D, arrows) for the demo. These were added because BE had not added them yet. The round-1 `player_controller.gd` still hard-codes its keys (BE-owned).
+`jump` (Space), `flashlight_toggle` (RMB), `interact` (LMB: hold = pickup, tap < 0.2 s = throw), `inv_next` (wheel down), `inv_prev` (wheel up), plus `move_left/right/up/down`. The `[input]` block is copied byte-for-byte from BE PR #1 (`be/player-stats`), so the two PRs merge cleanly. The round-1 `player_controller.gd` still hard-codes its keys (BE-owned).
 
 ## Demo
 `scenes/ui/hud_demo.tscn` fakes BE so you can see every piece: A/D to move, aim with the mouse, RMB for the light, hold LMB on a vase to pick it up, tap LMB to throw, scroll the wheel to switch items. Debug-only keys: H hit, J heal, G +gold, C send the far enemy chasing, R reset.

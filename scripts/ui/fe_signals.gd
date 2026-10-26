@@ -87,7 +87,22 @@ func _ready() -> void:
 ##   player.pickup_progress.connect(report_pickup_progress) ...
 ## and set `max_health/startle_time/pickup_time` from PlayerStats.
 func _wire_backend() -> void:
-	pass
+	# Deferred: PlayerStats is listed after FESignals in [autoload].
+	_wire_player_stats.call_deferred()
+
+
+## Real once BE PR "PlayerStats autoload" is merged; a no-op until then.
+func _wire_player_stats() -> void:
+	var ps := get_node_or_null(^"/root/PlayerStats")
+	if ps == null:
+		return
+	ps.health_changed.connect(func(c: int, m: int) -> void: set_health(c, m))
+	ps.gold_changed.connect(func(c: int, _d: int) -> void: set_gold(c))
+	if ps.has_method(&"get_stat"):
+		startle_time = ps.get_stat(&"light_startle_time")
+		pickup_time = ps.get_stat(&"pickup_time")
+	set_health(ps.health, ps.max_health())
+	set_gold(ps.gold)
 
 
 # --- Stats -----------------------------------------------------------------
