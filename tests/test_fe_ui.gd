@@ -37,6 +37,11 @@ func run_all() -> Dictionary:
 		["shop_uses_be_shop_roll_stock_and_buy", test_shop_be_interface],
 		["shop_empty_item_source_no_errors", test_shop_empty],
 		["shop_ui_clear_of_merchant", test_shop_layout],
+		["shop_shows_full_stock_clamped_1_to_4", test_shop_full_stock],
+		["shop_4_longest_fit_panel_with_message", test_shop_four_fit],
+		["shop_letter_tile_square_rarity_rim", test_shop_letter_tile],
+		["shop_initials_fixed_sample", test_initials_sample],
+		["gold_coin_icon_shows_face_not_sliver", test_coin_face],
 		["alert_count_scales_past_3", test_alert_scales],
 		["alert_count_follows_chase_reports", test_alert_follows_reports],
 		["arrows_for_offscreen_reported_chasers", test_arrows_from_reports],
@@ -63,6 +68,8 @@ func run_all() -> Dictionary:
 			["be_enemy_startle_counted_once", test_be_startle_once],
 			["be_enemy_chase_reports_drive_count_and_arrows", test_be_chase_reports],
 		])
+	if _item_db() != null:   # BE PR #27 present
+		checks.append(["shop_initials_unique_for_itemdb", test_initials_itemdb])
 	for item in checks:
 		var err: String = item[1].call()
 		if err.is_empty():
@@ -699,8 +706,8 @@ func test_shop_buy() -> String:
 		err = "shop should open on GameState.reached_exit"
 	if err.is_empty() and not _tree().paused:
 		err = "shop must pause the tree"
-	if err.is_empty() and shop.offers.size() != 3:
-		err = "default offer count should be 3, got %d" % shop.offers.size()
+	if err.is_empty() and shop.offers.size() != 4:
+		err = "default offer count should be 4 (whole stock), got %d" % shop.offers.size()
 	if err.is_empty() and not shop.buy_index(0):
 		err = "buy with enough gold should succeed"
 	if err.is_empty() and ps.gold != 4:
@@ -1626,4 +1633,198 @@ func test_be_chase_reports() -> String:
 		err = "gave-up puppet's arrow should go (arrows %d)" % arrows.arrows.size()
 	_cleanup([hud, arrows, cam])
 	_be_reset(es + [p])
+	return err
+
+
+# --- Shop: 4 cards, letter tiles, coin (fe/shop-4) ----------------------------
+const LONG_SAMPLE := [
+	{"id": "l1", "display_name": "Grandfather's Watch", "rarity": "rare", "price": 15, "icon_slot": "",
+		"description": "Puppets need +0.5 s of light to startle. Ticks loudly: noise carries 10% farther, and every step you take is a little easier to hear."},
+	{"id": "l2", "display_name": "Shadow Cloak", "rarity": "legendary", "price": 26, "icon_slot": "",
+		"description": "Noise carries 40% less far and light is noticed 40% slower. Light reaches 25% less far and the beam is a little narrower."},
+	{"id": "l3", "display_name": "Dim Filter", "rarity": "common", "price": 6, "icon_slot": "",
+		"description": "A softer beam: puppets take 40% longer to notice it. Light reaches 20% less far, so you see less of the hall ahead."},
+	{"id": "l4", "display_name": "Night Eyes", "rarity": "uncommon", "price": 15, "icon_slot": "",
+		"description": "Puppets take much longer to notice your light (x0.6). Beam 10 degrees narrower, and the edges of rooms stay dark."},
+]
+
+
+## BE's ItemDb script (PR #27) via the global class list, or null.
+func _item_db() -> Script:
+	for c in ProjectSettings.get_global_class_list():
+		if str(c.get("class", "")) == "ItemDb":
+			var db = load(str(c.get("path", "")))
+			return db if db is Script and "ITEMS" in db else null
+	return null
+
+
+## The 4 items with the longest descriptions: BE's real ones when ItemDb is there.
+func _longest_offers() -> Array:
+	var db := _item_db()
+	if db == null:
+		return LONG_SAMPLE.duplicate(true)
+	var rows: Array = []
+	for r in db.ITEMS:
+		rows.append({"id": str(r.id), "display_name": str(r.name), "description": str(r.desc),
+			"icon_slot": "", "price": int(r.price), "rarity": str(r.rarity)})
+	rows.sort_custom(func(x, y): return str(x.description).length() > str(y.description).length())
+	return rows.slice(0, 4)
+
+
+## Lays out containers synchronously (tests don't wait for deferred sorts).
+func _settle(n: Node) -> void:
+	for _pass in 4:
+		var stack: Array = [n]
+		while not stack.is_empty():
+			var c: Node = stack.pop_front()
+			if c is Container:
+				c.notification(Container.NOTIFICATION_SORT_CHILDREN)
+			stack.append_array(c.get_children())
+
+
+func _open_shop_with(items: Array, gold := 0) -> Array:
+	var b := _bus()
+	var fs := _FakeShop.new()
+	fs.items = items
+	b._shop = fs
+	b.gold = gold
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	shop.open_shop()
+	shop._layout_merchant()
+	_settle(shop)
+	return [shop, b]
+
+
+func test_shop_full_stock() -> String:
+	var err := ""
+	for pair in [[4, 4], [2, 2], [7, 4], [1, 1]]:
+		var items: Array = []
+		for i in pair[0]:
+			items.append({"id": "i%d" % i, "display_name": "Item %d" % i, "price": 1, "rarity": "common"})
+		var sb := _open_shop_with(items)
+		if err.is_empty() and sb[0].cards.size() != pair[1]:
+			err = "stock of %d should show %d cards, got %d" % [pair[0], pair[1], sb[0].cards.size()]
+		_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_shop_four_fit() -> String:
+	var sb := _open_shop_with(_longest_offers(), 0)
+	var shop: Node = sb[0]
+	var err := ""
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var frame_h: float = shop.root.size.y - panel.offset_top + panel.offset_bottom   # anchored height
+	if shop.cards.size() != 4:
+		err = "want 4 cards, got %d" % shop.cards.size()
+	shop.buy_index(0)   # 0 gold → "Not enough gold for …"
+	_settle(shop)
+	var msg: Label = shop.message
+	if err.is_empty() and not msg.text.begins_with("Not enough gold"):
+		err = "message '%s'" % msg.text
+	if err.is_empty() and panel.get_combined_minimum_size().y > frame_h + 0.5:
+		err = "4 long cards + message need %.0f px, frame has %.0f" % [panel.get_combined_minimum_size().y, frame_h]
+	var pr := panel.get_global_rect().grow(0.5)
+	if err.is_empty() and absf(panel.size.y - frame_h) > 0.5:
+		err = "OffersPanel grew past its frame: %.0f vs %.0f" % [panel.size.y, frame_h]
+	for c in shop.cards:
+		if err.is_empty() and not pr.encloses(c.get_global_rect()):
+			err = "%s %s outside OffersPanel %s" % [c.name, str(c.get_global_rect()), str(pr)]
+		var d: Label = c.find_child("Desc", true, false)
+		if err.is_empty() and (d.max_lines_visible != 2 or d.get_visible_line_count() > 2):
+			err = "%s description should be capped at 2 lines" % c.name
+		if err.is_empty() and not c.tooltip_text.contains(d.text):
+			err = "%s tooltip should carry the full description" % c.name
+	var last: Control = shop.cards[-1]
+	if err.is_empty() and (not msg.is_visible_in_tree() or msg.size.y < 1.0 or not pr.encloses(msg.get_global_rect())):
+		err = "message %s not visible inside OffersPanel %s" % [str(msg.get_global_rect()), str(pr)]
+	if err.is_empty() and msg.get_global_rect().position.y < last.get_global_rect().end.y:
+		err = "message overlaps the last card"
+	var band: Vector2 = shop.merchant_band()
+	for n in ["OffersPanel", "InfoPanel"]:
+		var r: Rect2 = shop.root.find_child(n, true, false).get_global_rect()
+		if err.is_empty() and r.position.x < band.y and r.end.x > band.x:
+			err = "%s %s overlaps merchant band %s" % [n, str(r), str(band)]
+	_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_shop_letter_tile() -> String:
+	var sb := _open_shop_with(_longest_offers().slice(0, 2) + [
+		{"id": "bp", "display_name": "Big Pockets", "price": 10, "rarity": "uncommon", "icon_slot": "no_such_icon", "description": "x"}])
+	var shop: Node = sb[0]
+	var err := ""
+	var c: Control = shop.cards[2]
+	var tile: Control = c.find_child("Icon", true, false)
+	if not tile is Panel:
+		err = "missing icon should give a letter tile, got %s" % tile.get_class()
+	if err.is_empty() and (absf(tile.size.x - tile.size.y) > 0.5 or tile.size.x < 63.0):
+		err = "tile should be a 64 px square, got %s (card %s)" % [str(tile.size), str(c.size)]
+	var l: Label = tile.find_child("Initials", true, false)
+	if err.is_empty() and l.text != "BP":
+		err = "initials '%s', want BP" % l.text
+	var rim: Color = shop.skin.rarity_colors["uncommon"]
+	var sbx := tile.get_theme_stylebox(&"panel") as StyleBoxFlat
+	if err.is_empty() and (sbx == null or not sbx.border_color.is_equal_approx(rim) or not rim.is_equal_approx(Color("#5fd08a"))):
+		err = "rim should be Designer's uncommon #5fd08a"
+	var nm: Label = c.find_child("Name", true, false)
+	if err.is_empty() and not nm.get_theme_color(&"font_color").is_equal_approx(rim):
+		err = "name colour should match the rarity rim"
+	_cleanup(sb)
+	_reset_world()
+	return err
+
+
+func test_initials_sample() -> String:
+	var S = load("res://scripts/ui/shop.gd")
+	var want := {"Big Pockets": "BP", "Grandfather's Watch": "GW", "Minimap": "MI", "Sneakers": "SN",
+		"Soft Shoes": "SS", "  extra   heart ": "EH", "X": "X", "": "?"}
+	for k in want:
+		if S.initials(k) != want[k]:
+			return "initials('%s') = '%s', want '%s'" % [k, S.initials(k), want[k]]
+	var u: Dictionary = S.unique_initials(PackedStringArray(["Spring Socks", "Soft Shoes", "Bright Bulb"]))
+	var u2: Dictionary = S.unique_initials(PackedStringArray(["Soft Shoes", "Bright Bulb", "Spring Socks"]))
+	if u != {"Soft Shoes": "SS", "Spring Socks": "SO", "Bright Bulb": "BB"} or u != u2:
+		return "clash should give SS / SO regardless of order, got %s / %s" % [u, u2]
+	return ""
+
+
+func test_initials_itemdb() -> String:
+	var S = load("res://scripts/ui/shop.gd")
+	var names: PackedStringArray = []
+	for r in _item_db().ITEMS:
+		names.append(str(r.name))
+	var u: Dictionary = S.unique_initials(names)
+	var seen := {}
+	for n in names:
+		var t: String = u.get(n, "")
+		if t.length() != 2:
+			return "'%s' → '%s' is not two letters" % [n, t]
+		if seen.has(t):
+			return "'%s' and '%s' both → %s" % [seen[t], n, t]
+		seen[t] = n
+	return "" if seen.size() == names.size() else "%d names, %d tiles" % [names.size(), seen.size()]
+
+
+func test_coin_face() -> String:
+	var skin := HudSkin.load_default()
+	if UiArt.frames(skin.coin_slot) == null:
+		return ""   # no coin art: the drawn circle is used
+	var holder: Control = UiScreen.coin_icon(skin.coin_slot, 28)
+	var err := ""
+	var face: TextureRect = holder.get_node_or_null("Face")
+	if face == null:
+		err = "coin should be a static face frame, not the spin loop"
+	else:
+		var img := face.texture.get_image()
+		var cols := 0
+		for x in img.get_width():
+			for y in img.get_height():
+				if img.get_pixel(x, y).a > 0.5:
+					cols += 1
+					break
+		if cols < img.get_width() * 0.6:
+			err = "coin face only %d/%d px wide (sliver)" % [cols, img.get_width()]
+	holder.free()
 	return err
