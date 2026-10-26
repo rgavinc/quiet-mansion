@@ -62,7 +62,12 @@ const STAT_BOUNDS := {
 	&"pickup_time": [0.3, 3.0],         # 0.3 .. 3 s
 	&"pickup_range": [0.5, 2.0],        # 20 .. 80 px
 	&"gold_find_mult": [0.25, 3.0],
-	&"give_up_speed": [0.3, 3.0],       # hook only: searching enemy memory drain (Cracked Mirror)
+	&"give_up_speed": [0.3, 3.0],       # hook only: searching enemy memory drain (Cracked Mirror x1.4 per copy)
+	# Behaviour effects that multiply across stacked copies (PD): bound on the product of all
+	# copies, applied where the product is formed; the stat bounds above still apply on top.
+	&"stun_mult": [0.5, 2.5],           # Heavy Vases thrown/knocked vase stun (x2 per copy): x2.5 total max
+	&"item_noise_mult": [0.5, 2.0],     # on_noise hooks: Greedy Sack vase-break noise (x1.5 per copy)
+	&"item_carry_mult": [0.7, 1.0],     # carry_speed_mult hooks: Heavy Vases carry slow (x0.85 per copy)
 }
 
 ## `stat`'s effective multiplier `m` (vs base) clamped to STAT_BOUNDS (unchanged if unbounded).
@@ -248,6 +253,7 @@ func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Varian
 	var m := 1.0
 	for it in _live_items():
 		m *= float(it.on_noise(at, radius, loudness, source))
+	m = clamp_mult(&"item_noise_mult", m)
 	# The cap is on the whole noise effect: stat (already in `radius`) x hooks.
 	var ns := get_stat(&"noise_mult")
 	return clamp_mult(&"noise_mult", ns * m) / ns
@@ -257,6 +263,8 @@ func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Varian
 func dispatch_throw(item: Dictionary, target: Variant) -> void:
 	for it in _live_items():
 		it.on_throw(item, target)
+	if item.has("stun_mult"):   # Heavy Vases multiply it once per copy
+		item["stun_mult"] = clamp_mult(&"stun_mult", float(item["stun_mult"]))
 
 
 ## Enemy STARTLED -> about to chase. True if an item handled it (first one wins).
@@ -279,6 +287,7 @@ func carry_speed_mult(held: Array) -> float:
 	var m := 1.0
 	for it in _live_items():
 		m *= float(it.carry_speed_mult(held))
+	m = clamp_mult(&"item_carry_mult", m)
 	var ms := get_stat(&"move_speed") / float(BASE[&"move_speed"])
 	return clamp_mult(&"move_speed", ms * m) / ms
 

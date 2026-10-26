@@ -54,6 +54,11 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
   | `pickup_range` | ×0.5 | ×2.0 | 20–80 px |
   | `gold_find_mult` | ×0.25 | ×3.0 | |
   | `give_up_speed` (`memory_drain_mult` hooks, no BASE row) | ×0.3 | ×3.0 | searching enemies' memory drain |
+  | `stun_mult` (Heavy Vases, ×2 per copy) | ×0.5 | ×2.5 | PD: ×2.5 total whatever the copies (1 copy ×2, 2+ copies ×2.5) |
+  | `item_noise_mult` (`on_noise` hooks: Greedy Sack vase break, ×1.5 per copy) | ×0.5 | ×2.0 | then `noise_mult` above on stat × hooks |
+  | `item_carry_mult` (`carry_speed_mult` hooks: Heavy Vases, ×0.85 per copy) | ×0.7 | ×1.0 | then `move_speed` above on stat × hooks |
+
+  Stacked behaviour effects (PD): every behaviour effect that multiplies across copies has a row above, bounding the product of all copies. `stun_mult` is clamped in `PlayerStats.dispatch_throw` after the hooks write it and again in `Enemy.on_hit_by_throw` where the stun is computed. `item_noise_mult` / `item_carry_mult` are clamped in `noise_hook_mult` / `carry_speed_mult`, and Cracked Mirror's ×1.4 off-screen drain uses `give_up_speed`. Effects that don't multiply: Greedy Sack gold (it only fills empty vases), Cracked Mirror arrow distance (min), and Flash Bulb / Rabbit's Foot / Music Box (one copy per event).
 
   Additive stats keep the absolute `MIN` floors (max_health 1, pickup_time 0.1 s, tap_threshold 0.05 s, light_startle_time 0.2 s, inventory_slots 1, light_angle_deg 10). Tests: each bound stat stacked 10× at ×2 / ×0.5 lands exactly on its own max / min; 10 Greedy Sacks / Cracked Mirrors / Heavy Vases clamp through the hooks; every stat an item multiplies must have a bound.
 - Item text: `desc` in ItemDb holds tokens, not numbers, for every percentage; `ItemDb.describe(row)` fills them from the row's own mods / params (`{mul:stat}` = \|mul−1\|, `{inv:stat}` = \|1/mul−1\| for time-based effects like `light_detect_mult` ×0.6 → "67% longer", `{add:stat}`, `{param:key}` = \|param−1\|). `test_items` rejects hand-written "N%" and checks every % against the effect measured through PlayerStats with the item granted.
@@ -77,7 +82,7 @@ Hooks on `Item` (base = no-op) and where they are dispatched (all iterate `Playe
 | `memory_drain_mult(enemy, off_screen) -> mult` | `PlayerStats.memory_drain_mult` | `Enemy._tick_hunt` SEARCH drain (`Enemy.is_off_screen()`: \|dx\|>640 or \|dy\|>360 from the boy) |
 | `arrow_reveal_distance() -> float` | `PlayerStats.arrow_reveal_distance()` (min over items; `INF` with none) | FE off-screen arrows |
 
-Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()`). `use_charge()` / `set_charges()` re-emit `PlayerStats.items_changed(owned_items)`; so does `begin_stage`.
+Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()`). `use_charge()` / `set_charges()` re-emit `PlayerStats.items_changed(owned_items)`; so does `begin_stage`. Stacked copies: each copy has its own charges (the FE tile sums them, e.g. 1/2), and one event spends at most one copy. `on_lethal_hit` / `on_startle` stop at the first item that handles the event (Rabbit's Foot, Flash Bulb). `on_throw` goes to every item, so Music Box spends only when the thrown dict is its OWN lure (`owns_lure`: the lure id is per instance). Tests: Music Box ×2 (QA repro), Rabbit's Foot ×2, Flash Bulb ×4. Hooks without charges (on_noise, carry, give-up, Heavy Vases' stun tag) stack as passive effects, bounded per effect by `STAT_BOUNDS` (see Stat caps). Vase gold doesn't stack.
 
 | Item | Rarity | Base price | Upside | Cost | Tunables (`params`) |
 |---|---|---|---|---|---|

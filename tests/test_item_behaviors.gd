@@ -18,6 +18,10 @@ func run_all() -> Dictionary:
 		["music_box_tap_throws_facing_not_last_aim", test_music_box_facing],
 		["heavy_vases_double_stun_and_carry_slow", test_heavy_vases],
 		["flash_bulb_stuns_startle_once_per_stage", test_flash_bulb],
+		["music_box_x2_one_throw_spends_one_copy", test_music_box_x2],
+		["rabbits_foot_x2_one_save_per_copy", test_rabbits_foot_x2],
+		["flash_bulb_x4_one_stun_per_copy", test_flash_bulb_x4],
+		["stacked_behavior_effects_clamp_to_bounds", test_stacked_behavior_bounds],
 		["cracked_mirror_offscreen_drain_and_arrow_distance", test_cracked_mirror],
 		["greedy_sack_vase_gold_and_louder_break", test_greedy_sack],
 		["charges_and_items_changed_on_use_and_stage_start", test_charges_signal],
@@ -434,6 +438,8 @@ func test_hook_bounds() -> Variant:
 	var vase := {script_path = "res://scripts/world/vase.gd"}
 	for i in 10:
 		_grant("greedy_sack"); _grant("cracked_mirror"); _grant("heavy_vases")
+		PlayerStats.add_modifier(&"noise_mult", 0.0, 2.0, "stack%d" % i)   # push the stat to its max too
+		PlayerStats.add_modifier(&"move_speed", 0.0, 0.5, "stack%d" % i)
 	var noise := PlayerStats.get_stat(&"noise_mult") * PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase)
 	if absf(noise - 3.0) > 1e-4: return "vase noise x%.3f, want capped at x3.0" % noise
 	var give_up := PlayerStats.memory_drain_mult(null, true)
@@ -442,4 +448,143 @@ func test_hook_bounds() -> Variant:
 	p.inventory.items.append(vase)
 	var spd: float = p.move_speed() / float(PlayerStats.BASE[&"move_speed"])
 	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-4: return "carry speed x%.3f, want floor x%.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
+	return ""
+
+
+# --- Stacked charged items: one event spends exactly one copy -------------------------
+## [charges, max_charges] summed over owned copies of `id` (what the FE stacked tile shows).
+func _stack(id: String) -> Array:
+	var c := 0
+	var m := 0
+	for it in PlayerStats.owned_items:
+		if str(it.id) == id:
+			c += it.charges
+			m += it.max_charges
+	return [c, m]
+
+
+## QA repro: grant 2 Music Boxes, start a stage, throw once -> 1/2 and a lure still in hand.
+func test_music_box_x2() -> Variant:
+	var a := _grant("music_box")
+	var b := _grant("music_box")
+	var p := _player(Vector2(600, 100))   # stage start: each copy puts its own lure in hand
+	if _stack("music_box") != [2, 2]: return "stage start %s, want 2/2" % [_stack("music_box")]
+	var lures := 0
+	for d in p.inventory.items:
+		if d.get("lure", false): lures += 1
+	if lures != 2: return "%d lures in hand at stage start, want 2" % lures
+	_watch()
+	FESignals.selected_enemy = null
+	var first: Dictionary = p.inventory.current()
+	p._tap()
+	if _stack("music_box") != [1, 2]: return "after one throw %s, want 1/2" % [_stack("music_box")]
+	var spent: Item = a if a.owns_lure(first) else b
+	var kept: Item = b if spent == a else a
+	if spent.charges != 0 or kept.charges != 1: return "wrong copy spent (thrown lure's box %d, other %d)" % [spent.charges, kept.charges]
+	if _changed.is_empty(): return "items_changed not fired on the first throw"
+	var second: Dictionary = p.inventory.current()
+	if not second.get("lure", false): return "no lure in hand after the first throw (%s)" % [second]
+	if not kept.owns_lure(second): return "lure in hand isn't the unspent box's"
+	var n := _changed.size()
+	p._tap()
+	if _stack("music_box") != [0, 2]: return "after two throws %s, want 0/2" % [_stack("music_box")]
+	if _changed.size() <= n: return "items_changed not fired on the second throw"
+	return ""
+
+
+func test_rabbits_foot_x2() -> Variant:
+	_grant("rabbits_foot")
+	_grant("rabbits_foot")
+	_player()
+	if _stack("rabbits_foot") != [2, 2]: return "stage start %s, want 2/2" % [_stack("rabbits_foot")]
+	_watch()
+	for i in 2:
+		PlayerStats.health = 1
+		var n := _changed.size()
+		PlayerStats.take_hit(1, true)
+		if PlayerStats.health != 1: return "lethal hit %d not saved" % (i + 1)
+		if _stack("rabbits_foot") != [1 - i, 2]: return "after save %d: %s, want %d/2" % [i + 1, _stack("rabbits_foot"), 1 - i]
+		if _changed.size() <= n: return "items_changed not fired on save %d" % (i + 1)
+	PlayerStats.take_hit(1, true)
+	return "" if PlayerStats.health == 0 else "third lethal hit saved with 2 feet"
+
+
+func test_flash_bulb_x4() -> Variant:
+	for i in 4:
+		_grant("flash_bulb")
+	_player()
+	if _stack("flash_bulb") != [4, 4]: return "stage start %s, want 4/4" % [_stack("flash_bulb")]
+	var e := _puppet(Vector2(300, 100), 0)
+	_watch()
+	for i in 4:
+		var n := _changed.size()
+		e.lit_override = 1
+		_run(e, 3.0, func(): return e.state != e.State.CALM and e.state != e.State.STARTLED)
+		if e.state != e.State.STUNNED: return "startle %d not stunned (state %d)" % [i + 1, e.state]
+		if _stack("flash_bulb") != [3 - i, 4]: return "after stun %d: %s, want %d/4" % [i + 1, _stack("flash_bulb"), 3 - i]
+		if _changed.size() <= n: return "items_changed not fired on stun %d" % (i + 1)
+		e.lit_override = 0
+		_run(e, 2.6)
+		if e.state != e.State.CALM: return "not calm after stun %d (state %d)" % [i + 1, e.state]
+	e.lit_override = 1
+	_run(e, 3.0, func(): return e.state == e.State.CHASE or e.state == e.State.STUNNED)
+	return "" if e.state == e.State.CHASE else "fifth startle with 4 bulbs not a chase (state %d)" % e.state
+
+
+# --- Stacked multiplicative behaviour effects (PD): product of copies clamps to STAT_BOUNDS ---
+## Vase thrown at an enraged puppet: [stun_mult in the dict, stun seconds on the enemy].
+func _stacked_vase_stun() -> Array:
+	var p := _player(Vector2(100, 100))
+	var e := _puppet(Vector2(300, 100), 0)
+	e.lit_override = 1
+	_run(e, 3.0, func(): return e.state == e.State.CHASE)
+	if e.state != e.State.CHASE: return [-1.0, -1.0]
+	var d := {id = "v", script_path = "res://scripts/world/vase.gd", throwable = true}
+	PlayerStats.dispatch_throw(d, e)   # the real throw path's hook step
+	e.on_hit_by_throw(d)
+	var r := [float(d.get("stun_mult", 1.0)), e._state_left / e.stun_time]
+	_clean()
+	return r
+
+
+func test_stacked_behavior_bounds() -> Variant:
+	var B: Dictionary = PlayerStats.STAT_BOUNDS
+	for k in [&"stun_mult", &"item_noise_mult", &"item_carry_mult", &"give_up_speed"]:
+		if not B.has(k): return "no bounds for %s" % k
+	if B[&"stun_mult"][1] != 2.5: return "stun cap x%s, PD says x2.5" % B[&"stun_mult"][1]
+	var vase := {script_path = "res://scripts/world/vase.gd"}
+	# Heavy Vases stun: 1 copy keeps x2.0; 2 copies exactly x2.5 (not x4); 5 copies still x2.5.
+	for case in [[1, 2.0], [2, 2.5], [5, 2.5]]:
+		for i in case[0]: _grant("heavy_vases")
+		var r := _stacked_vase_stun()
+		if r[0] < 0.0: return "puppet never chased"
+		if absf(r[0] - case[1]) > 1e-4: return "%d Heavy Vases: stun_mult x%.3f, want x%.2f" % [case[0], r[0], case[1]]
+		if absf(r[1] - case[1]) > 1e-3: return "%d Heavy Vases: enemy stunned x%.3f, want x%.2f" % [case[0], r[1], case[1]]
+	# An over-tagged dict from anywhere still stuns at most x2.5 on the enemy side.
+	_player(Vector2(100, 100))
+	var e := _puppet(Vector2(300, 100), 0)
+	e.lit_override = 1
+	_run(e, 3.0, func(): return e.state == e.State.CHASE)
+	if e.state != e.State.CHASE: return "puppet never chased (over-tag case)"
+	e.on_hit_by_throw({stun_mult = 8.0})
+	if absf(e._state_left / e.stun_time - 2.5) > 1e-3: return "enemy took an uncapped stun x%.2f" % (e._state_left / e.stun_time)
+	_clean()
+	# Greedy Sack vase-break noise hook: 1 copy x1.5, 2 copies x2.0 (not x2.25).
+	for case in [[1, 1.5], [2, 2.0], [4, 2.0]]:
+		for i in case[0]: _grant("greedy_sack")
+		var m := PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase)
+		if absf(m - case[1]) > 1e-4: return "%d Greedy Sacks: vase noise x%.3f, want x%.2f" % [case[0], m, case[1]]
+		_clean()
+	# Heavy Vases carry slow: 1 copy x0.85, 2 copies x0.7225 (inside), 3+ copies floor x0.7.
+	for case in [[1, 0.85], [2, 0.7225], [3, 0.7], [4, 0.7]]:
+		for i in case[0]: _grant("heavy_vases")
+		var m := PlayerStats.carry_speed_mult([vase])
+		if absf(m - case[1]) > 1e-4: return "%d Heavy Vases: carry x%.4f, want x%.2f" % [case[0], m, case[1]]
+		_clean()
+	# Cracked Mirror off-screen give-up: 2 copies x1.96 (inside), 4 copies x3.0 (capped).
+	for case in [[1, 1.4], [2, 1.96], [4, 3.0]]:
+		for i in case[0]: _grant("cracked_mirror")
+		var m := PlayerStats.memory_drain_mult(null, true)
+		if absf(m - case[1]) > 1e-4: return "%d Cracked Mirrors: give-up x%.3f, want x%.2f" % [case[0], m, case[1]]
+		_clean()
 	return ""
