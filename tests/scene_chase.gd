@@ -154,7 +154,11 @@ static func run_at(tree: SceneTree, L: Dictionary, boy_at: Vector2, en_feet: Vec
 	while frames < max_frames:
 		await tree.physics_frame
 		frames += 1
-		if not is_instance_valid(walker) or GameState.game_over:
+		if GameState.game_over or (is_instance_valid(walker) and int(walker.get("state")) == int(walker.State.RECOVER)) \
+				or p.global_position.distance_to(boy_at) > 4.0:
+			ok = true   # caught / landed a hit (RECOVER) / shoved the boy: it reached him. On a stair
+			break       # the hit lands while feet are still > 8px below his (2:3 slope)
+		if not is_instance_valid(walker):
 			break
 		var feet: Vector2 = walker.global_position + Vector2(0, float(walker.call("_foot")))
 		if nav.floor_of(feet) == nav.floor_of(boy_at) and absf(feet.x - boy_at.x) < REACH_PX and absf(feet.y - boy_at.y) < 8.0:
