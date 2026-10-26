@@ -10,6 +10,8 @@ var _spr: AnimatedSprite2D
 
 func _ready() -> void:
 	add_to_group("puppets")
+	collision_layer = PlayerStats.LAYER_ENEMY
+	collision_mask = PlayerStats.LAYER_WORLD
 	_spr = AnimatedSprite2D.new()
 	add_child(_spr)
 	_set_calm_tex()

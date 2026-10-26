@@ -34,6 +34,8 @@ const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry
 
 func _ready() -> void:
 	add_to_group("player")
+	collision_layer = PlayerStats.LAYER_PLAYER
+	collision_mask = PlayerStats.LAYER_WORLD
 	_anim = AnimatedSprite2D.new()
 	_anim.name = "Anim"
 	_anim.sprite_frames = AnimLibrary.frames_for(ANIM_SLOTS)
@@ -289,7 +291,9 @@ func _try_start_pickup() -> void:
 		return
 	state = State.PICKUP
 	pickup_target = t
-	pickup_progress = 0.0
+	# Count from the button press, not from the tap threshold, so a full pickup = pickup_time.
+	var dur := maxf(PlayerStats.get_stat(&"pickup_time") * t.pickup_time_mult, 0.05)
+	pickup_progress = clampf(_interact_held / dur, 0.0, 0.99)
 	FESignals.report_pickup_started(t)
 
 
