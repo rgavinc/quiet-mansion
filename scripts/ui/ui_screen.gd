@@ -1,6 +1,6 @@
 class_name UiScreen
 extends CanvasLayer
-## Base for full-screen FE screens (game over, shop). While open it pauses the
+## Base for full-screen FE screens (game over, win, shop). While open it pauses the
 ## tree, runs with PROCESS_MODE_ALWAYS, and its root Control STOPs the mouse so
 ## clicks never reach the game. (The HUD stays mouse-ignore; screens are NOT
 ## under HudRoot, so hud.gd's ignore rules never touch them.)
@@ -137,3 +137,65 @@ static func coin_icon(slot: String, px: float = 28.0) -> Control:
 			holder.draw_circle(Vector2(px, px) * 0.5, px * 0.42, Color(1.0, 0.8, 0.25))
 			holder.draw_arc(Vector2(px, px) * 0.5, px * 0.42, 0, TAU, 24, Color(0.55, 0.38, 0.08), 2.0))
 	return holder
+
+
+## Shared game-over / win layout: first existing art slot in `slots` as the
+## backdrop (+ a shade on its dark right half), else a dim screen + a themed
+## PanelContainer. Either way the text column ("TextPanel" → "Column") sits on
+## the RIGHT half. Returns {has_art, slot, column}.
+static func right_half_layout(host: Control, slots: Array, dim: Color) -> Dictionary:
+	var art: TextureRect = null
+	var used := ""
+	for sl in slots:
+		art = backdrop(str(sl))
+		if art:
+			used = str(sl)
+			break
+	if art:
+		host.add_child(art)
+		var shade := ColorRect.new()
+		shade.name = "Shade"
+		shade.color = Color(0, 0, 0, 0.35)
+		shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		shade.anchor_left = 0.5
+		shade.anchor_right = 1.0
+		shade.anchor_bottom = 1.0
+		host.add_child(shade)
+	else:
+		var d := ColorRect.new()
+		d.name = "Dim"
+		d.color = dim
+		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		d.set_anchors_preset(Control.PRESET_FULL_RECT)
+		host.add_child(d)
+	var panel: Control = MarginContainer.new() if art else PanelContainer.new()
+	panel.name = "TextPanel"
+	panel.anchor_left = 0.5
+	panel.anchor_right = 1.0
+	panel.anchor_top = 0.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = 48
+	panel.offset_right = -48
+	panel.offset_top = 96
+	panel.offset_bottom = -96
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	host.add_child(panel)
+	var col := VBoxContainer.new()
+	col.name = "Column"
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override(&"separation", 14)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(col)
+	return {has_art = art != null, slot = used, column = col}
+
+
+## Centered "<coin> N gold" row. Returns [row, label].
+static func gold_row(coin_slot: String, color: Color, size: int = 26) -> Array:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(coin_icon(coin_slot, 28))
+	var l := label("", size, color)
+	l.name = "Gold"
+	row.add_child(l)
+	return [row, l]

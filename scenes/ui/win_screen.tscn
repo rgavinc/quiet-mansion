@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/win_screen.gd" id="1_win"]
+
+[node name="WinScreen" type="CanvasLayer"]
+process_mode = 3
+layer = 20
+script = ExtResource("1_win")

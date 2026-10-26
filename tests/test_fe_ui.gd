@@ -44,6 +44,11 @@ func run_all() -> Dictionary:
 		["game_over_retry_seed_fresh_stage1_same_run_seed", test_retry_seed],
 		["retry_seed_uses_run_seed_not_stage_seed", test_retry_uses_run_seed],
 		["next_stage_keeps_run_seed_and_stats", test_next_stage_keeps_run],
+		["exit_on_stage_5_opens_win_not_shop", test_win_on_last_stage],
+		["exit_on_stages_1_to_4_opens_shop", test_shop_on_stages_1_to_4],
+		["win_double_trigger_never_advances", test_win_double_trigger],
+		["win_new_run_resets_to_stage1_fresh", test_win_new_run],
+		["continue_drops_held_props_keeps_gold_hearts_items", test_continue_carry_over],
 	]
 	var passed := 0
 	for item in checks:
@@ -841,7 +846,7 @@ func test_main_screens() -> String:
 	var names := []
 	for i in st.get_node_count():
 		names.append(str(st.get_node_name(i)))
-	for n in ["HUD", "GameOver", "Shop", "AIWatermark"]:
+	for n in ["HUD", "GameOver", "Shop", "WinScreen", "AIWatermark"]:
 		if not names.has(n):
 			return "main.tscn missing %s" % n
 	var hud: CanvasLayer = (load("res://scenes/ui/hud.tscn") as PackedScene).instantiate()
@@ -1000,4 +1005,181 @@ func test_next_stage_keeps_run() -> String:
 	if err.is_empty() and b.get_run_seed() != 5151:
 		err = "run seed must persist across stages"
 	_end_run([b, ps])
+	return err
+
+
+# --- Win screen / run length / carry-over ----------------------------------------
+## A run on `at_stage` of run seed `rs` with screens mounted and the bus wired to
+## the real GameState. Returns [ps, bus, shop, win, gs].
+func _run_at(rs: int, at_stage: int) -> Array:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	b.swap_deferred = false
+	var gs := _root().get_node(^"GameState")
+	gs.reset()
+	b.wire_game_state(gs)
+	var lvl: Node = load(FAKE_LEVEL).instantiate()
+	lvl.set("level_seed", rs)
+	lvl.set("stage", at_stage)
+	_root().add_child(lvl)
+	_tree().current_scene = lvl
+	b.stage = at_stage
+	var shop := _mount("res://scripts/ui/shop.gd", b)
+	var win := _mount("res://scripts/ui/win_screen.gd", b)
+	return [ps, b, shop, win, gs]
+
+
+func test_win_on_last_stage() -> String:
+	var r := _run_at(7070, 5)
+	var b: Node = r[1]
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	var err := ""
+	if b.MAX_STAGES != 5:
+		err = "MAX_STAGES must be 5 (docs/PRODUCT.md)"
+	r[0].add_gold(40)
+	gs.on_reach_exit()
+	if err.is_empty() and not win.is_open():
+		err = "stage 5 exit must open the win screen"
+	if err.is_empty() and shop.is_open():
+		err = "stage 5 exit must NOT open the shop"
+	if err.is_empty() and not _tree().paused:
+		err = "win screen must pause the tree"
+	if err.is_empty() and (win.process_mode != Node.PROCESS_MODE_ALWAYS or (win.root as Control).mouse_filter != Control.MOUSE_FILTER_STOP):
+		err = "win screen must keep processing and capture the mouse"
+	if err.is_empty() and (win.seed_label.text != "Run seed 7070" or win.gold_label.text.strip_edges() != "40 gold"):
+		err = "win must show run seed + gold (got '%s' '%s')" % [win.seed_label.text, win.gold_label.text]
+	if err.is_empty() and (win.new_run_button == null or win.new_run_button.text != "New run"):
+		err = "win needs a New run button"
+	var panel: Control = win.root.find_child("TextPanel", true, false)
+	if err.is_empty() and (panel == null or panel.anchor_left < 0.5):
+		err = "win text must sit on the right half"
+	# Slot order: win_screen_art (not merged yet) → game_over_art styling → panel.
+	if err.is_empty():
+		var want := "win_screen_art" if UiArt.texture("win_screen_art") else ("game_over_art" if UiArt.texture("game_over_art") else "")
+		if win.art_slot != want:
+			err = "win art slot want '%s' got '%s'" % [want, win.art_slot]
+	win.close()
+	_end_run([win, shop, b, r[0]])
+	return err
+
+
+func test_shop_on_stages_1_to_4() -> String:
+	var r := _run_at(3131, 1)
+	var b: Node = r[1]
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	var err := ""
+	# Play the whole run through the real Continue button: 1 → 2 → 3 → 4 → 5.
+	for s in range(1, 5):
+		if int(_tree().current_scene.get("stage")) != s:
+			err = "expected stage %d, level is on %s" % [s, _tree().current_scene.get("stage")]
+			break
+		gs.on_reach_exit()
+		if not shop.is_open() or win.is_open():
+			err = "stage %d exit must open the shop, not the win screen" % s
+			break
+		shop.continue_button.pressed.emit()
+		if int(_tree().current_scene.get("level_seed")) != 3131:
+			err = "stage %d must keep the run seed" % (s + 1)
+			break
+	if err.is_empty():
+		gs.on_reach_exit()
+		if not win.is_open() or shop.is_open():
+			err = "after 4 shops, the stage 5 exit must open the win screen"
+	win.close()
+	_end_run([win, shop, b, r[0]])
+	return err
+
+
+func test_win_double_trigger() -> String:
+	var r := _run_at(4040, 5)
+	var b: Node = r[1]
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	var lvl: Node = _tree().current_scene
+	var opened := [0]
+	win.opened.connect(func(): opened[0] += 1)
+	gs.on_reach_exit()
+	gs.on_reach_exit()          # GameState guard
+	gs.reset()
+	gs.on_reach_exit()          # past GameState's guard → FE guard
+	b.on_reached_exit()
+	b.next_stage()              # e.g. a stale Continue
+	b._swap_scene(4040, 6, false)   # nothing may ever load stage 6
+	var err := ""
+	if _tree().current_scene != lvl or int(lvl.get("stage")) != 5 or b.get_stage() != 5:
+		err = "double trigger advanced the run (stage %d)" % b.get_stage()
+	if err.is_empty() and opened[0] != 1:
+		err = "win screen opened %d times" % opened[0]
+	if err.is_empty() and shop.is_open():
+		err = "shop opened after the win"
+	win.close()
+	_end_run([win, shop, b, r[0]])
+	return err
+
+
+func test_win_new_run() -> String:
+	var r := _run_at(5555, 5)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	ps.add_gold(60)
+	ps.add_modifier(&"max_health", 1.0, 1.0, "extra_heart")
+	ps.add_modifier(&"move_speed", 20.0, 1.0, "soft_shoes")
+	b.set_items([{id = "vase", slot = "vase", name = "Vase", throwable = true}])
+	gs.on_reach_exit()
+	var err := "" if win.is_open() else "win screen should be open"
+	if err.is_empty():
+		win.new_run_button.pressed.emit()
+		err = _fresh_run_err(ps, b)
+	if err.is_empty():
+		var s := int(_tree().current_scene.get("level_seed"))
+		if s < 0 or s == 5555 or b.get_run_seed() != s:
+			err = "New run must roll a new run seed (got %d, run %d)" % [s, b.get_run_seed()]
+	if err.is_empty() and (win.is_open() or b.is_run_won()):
+		err = "new run must close the win screen and clear the won state"
+	if err.is_empty():
+		gs.on_reach_exit()
+		if not shop.is_open() or win.is_open():
+			err = "stage 1 of the new run must go to the shop again"
+	shop.close()
+	_end_run([win, shop, b, ps])
+	return err
+
+
+func test_continue_carry_over() -> String:
+	var r := _run_at(2626, 2)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	ps.add_gold(30)
+	ps.add_modifier(&"max_health", 1.0, 1.0, "extra_heart")   # bought item: 4 max
+	ps.set("_invuln_left", 0.0)
+	ps.take_hit(1)                                            # 3 / 4
+	var inv: Node = _tree().current_scene.get_node(^"Player/Inventory")
+	inv.add({id = "vase", slot = "vase", name = "Vase", throwable = true})
+	b.set_items(inv.items)
+	gs.on_reach_exit()
+	shop.continue_button.pressed.emit()
+	var lvl: Node = _tree().current_scene
+	var err := ""
+	if int(lvl.get("stage")) != 3:
+		err = "Continue must load stage 3"
+	var new_inv: Node = lvl.get_node_or_null(^"Player/Inventory")
+	if err.is_empty() and (new_inv == null or new_inv == inv or not new_inv.items.is_empty() or not b.items.is_empty()):
+		err = "held props must be dropped on Continue"
+	if err.is_empty() and (ps.gold != 30 or b.gold != 30):
+		err = "gold must carry over (stats %d, hud %d)" % [ps.gold, b.gold]
+	if err.is_empty() and (ps.health != 3 or ps.max_health() != 4 or b.health != 3 or b.max_health != 4):
+		err = "hearts + bought max-heart item must carry over (stats %d/%d, hud %d/%d)" % [ps.health, ps.max_health(), b.health, b.max_health]
+	_end_run([win, shop, b, ps])
 	return err

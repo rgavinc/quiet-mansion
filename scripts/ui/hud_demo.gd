@@ -6,7 +6,7 @@ extends Node2D
 ## hold LMB `interact` near the vase = pickup · tap LMB = throw held vase at the
 ## ringed enemy · scroll inv_next/inv_prev.
 ## DEBUG-ONLY keys (demo only, not game controls): H hit, J heal, G +gold,
-## C make the far enemy chase, K die (game-over screen), E reach exit (shop), R reset.
+## C make the far enemy chase, K die (game-over screen), E reach exit (shop; win screen on the last stage), R reset.
 ## The shop here uses PLACEHOLDER_ITEMS via FESignals.shop_stub (demo only).
 
 const WORLD_W := 3200.0
@@ -313,7 +313,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_J: bus.set_health(bus.health + 1)
 			KEY_G: _give_gold(5)
 			KEY_K: bus.player_died.emit()
-			KEY_E: bus.stage_cleared.emit(bus.get_stage())
+			KEY_E: bus.on_reached_exit()   # shop, or the win screen on the last stage
 			KEY_C:
 				var far := enemies[enemies.size() - 1]
 				if is_instance_valid(far):
