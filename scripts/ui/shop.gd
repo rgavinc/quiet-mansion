@@ -125,7 +125,7 @@ func _build() -> void:
 	owned_strip.name = "OwnedItems"
 	owned_strip.skin = skin
 	owned_strip.stats = stats
-	owned_strip.make_compact(12)
+	owned_strip.make_compact(11, 1)   # one row of 11 (+N): fits OffersPanel's 460 px under 4 cards
 	owned_row.add_child(owned_strip)
 	lcol.add_child(owned_row)
 

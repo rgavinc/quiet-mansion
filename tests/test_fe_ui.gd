@@ -78,6 +78,10 @@ func run_all() -> Dictionary:
 		["owned_strip_stack_badge_is_dark_pill", test_strip_badge_pill],
 		["owned_strip_spent_pip_contrast", test_strip_pip_contrast],
 		["minimap_drops_freed_chaser_without_report", test_minimap_freed_chaser],
+		["shop_owned_row_qa_repro_x5_panel_fits", test_shop_owned_qa_x5],
+		["shop_owned_row_qa_repro_6_flash_bulbs_fits", test_shop_owned_qa_bulbs6],
+		["owned_strip_hud_columns_never_widen", test_strip_hud_no_widen],
+		["owned_strip_spent_tile_badge_full_opacity", test_strip_spent_badge],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -2590,3 +2594,204 @@ func test_minimap_freed_chaser() -> String:
 		err = "minimap out of the tree should stop watching chasers"
 	_cleanup([mm, c, b, ps])
 	return err
+
+
+## QA repro (#39): real main.tscn, stage 1 shop via GameState.on_reach_exit(), every ItemDb
+## id once, then `extra` ids topped up to `copies`. Returns [err, shop, main].
+func _qa_shop(extra: PackedStringArray, copies: int) -> Array:
+	var fs := _root().get_node(^"FESignals")
+	var gs := _root().get_node(^"GameState")
+	var ps := _root().get_node(^"PlayerStats")
+	ps.reset()
+	fs.swap_deferred = false
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	_root().add_child(main)
+	_tree().current_scene = main
+	var db := _item_db()
+	for id in db.ids():
+		ps.grant_item(db.make(id))
+	gs.on_reach_exit()
+	var shop: Node = main.get_node_or_null(^"Shop")
+	if shop == null or not shop.is_open():
+		return ["stage 1 exit should open the shop", shop, main]
+	for id in extra:   # live, while the shop is open
+		for i in copies - 1:
+			ps.grant_item(db.make(id))
+	_settle(shop)
+	return ["", shop, main]
+
+
+func _qa_end(main: Node) -> void:
+	var fs := _root().get_node(^"FESignals")
+	_tree().paused = false
+	_tree().current_scene = null
+	if is_instance_valid(main):
+		main.free()
+	fs.reset()
+	fs.stage = 1
+	fs.run_seed = -1
+	fs.swap_deferred = true
+	_root().get_node(^"PlayerStats").reset()
+	_reset_world()
+
+
+## Columns: all exactly one tile wide, evenly spaced, each row inside `bound`.
+func _uniform_columns(strip: Control, bound: Rect2) -> String:
+	var step: float = strip.tile_size + strip.sep
+	for row in strip.get_children():
+		var xs: Array = []
+		for col in row.get_children():
+			var r := (col as Control).get_global_rect()
+			if absf(r.size.x - strip.tile_size) > 0.5:
+				return "%s column is %.1f px wide, tile is %.0f" % [col.name, r.size.x, strip.tile_size]
+			if not bound.grow(0.5).encloses(r):
+				return "%s %s outside %s" % [col.name, r, bound]
+			xs.append(r.position.x)
+		for i in range(1, xs.size()):
+			if absf(xs[i] - xs[i - 1] - step) > 0.5:
+				return "uneven tile spacing in %s: %.1f vs %.1f" % [row.name, xs[i] - xs[i - 1], step]
+	if strip.size.x > strip.max_width() + 0.5:
+		return "strip %.0f px wider than max_width %.0f" % [strip.size.x, strip.max_width()]
+	return ""
+
+
+func _qa_panel_check(shop: Node) -> String:
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var pr := panel.get_global_rect()
+	if pr.size.x > 460.5:
+		return "OffersPanel grew to %.0f px (max 460)" % pr.size.x
+	if pr.end.x >= 560.0:
+		return "OffersPanel ends at x=%.0f, into the merchant art (560-816)" % pr.end.x
+	var err := _uniform_columns(shop.owned_strip, pr)
+	if err.is_empty() and not pr.grow(0.5).encloses(shop.owned_row.get_global_rect()):
+		err = "owned row %s outside OffersPanel %s" % [shop.owned_row.get_global_rect(), pr]
+	if err.is_empty() and shop.owned_row.get_global_rect().position.y < (shop.cards[-1] as Control).get_global_rect().end.y:
+		err = "owned row overlaps the offer cards"
+	return err
+
+
+func test_shop_owned_qa_x5() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		err = _qa_panel_check(shop)
+	if err.is_empty():   # also with the "Not enough gold" line showing
+		shop.message.text = "Not enough gold for Thick Sweater."
+		_settle(shop)
+		err = _qa_panel_check(shop)
+		var pr: Rect2 = shop.root.find_child("OffersPanel", true, false).get_global_rect()
+		if err.is_empty() and not pr.encloses(shop.message.get_global_rect()):
+			err = "message outside OffersPanel with 2 owned rows"
+	var strip: Control = shop.owned_strip if err.is_empty() else null
+	if err.is_empty():
+		var by := {}
+		for e in strip.entries:
+			by[e.id] = e.count
+		if by.get("flash_bulb") != 5 or by.get("music_box") != 5 or by.get("rabbits_foot") != 5:
+			err = "want ×5 stacks, got %s" % [by]
+	# spend every Flash Bulb (hidden in "+N" here): the row still fits
+	if err.is_empty():
+		for it in _root().get_node(^"PlayerStats").owned_items:
+			if it.id == "flash_bulb":
+				it.set_charges(0)
+		_settle(shop)
+		err = _qa_panel_check(shop)
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_owned_qa_bulbs6() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb"]), 6)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		err = _qa_panel_check(shop)
+	if err.is_empty() and shop.owned_strip.overflow <= 0:
+		err = "22 ids in an 11-slot shop row -> '+N' overflow"
+	_qa_end(r[2])
+	if not err.is_empty():
+		return err
+	# the 6-bulb tile itself, in the shop's compact layout: one pip + '6/6' inside 28 px
+	var ps := _fresh_stats()
+	var strip: Control = load("res://scripts/ui/owned_items_strip.gd").new()
+	strip.stats = ps
+	strip.make_compact(11, 1)
+	_root().add_child(strip)
+	for i in 6:
+		ps.grant_item(_item_db().make("flash_bulb"))
+	ps.grant_item(_item_db().make("music_box"))
+	_settle(strip)
+	var t: Control = strip.tiles[0]
+	var n := t.get_node_or_null(^"Charges/Count") as Label
+	var cr: Rect2 = (t.get_node(^"Charges") as Control).get_global_rect()
+	if n == null or n.text != "6/6":
+		err = "6 bulbs (> pip cap) -> one pip + '6/6'"
+	elif cr.size.x > strip.tile_size + 0.5:
+		err = "pip row %.0f px wider than the tile" % cr.size.x
+	elif n.get_theme_font_size(&"font_size") < 7:
+		err = "count text too small"
+	elif ThemeDB.fallback_font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, n.get_theme_font_size(&"font_size")).x > n.size.x + 2.5:
+		err = "'6/6' clipped: %.0f px text in a %.0f px label" % [ThemeDB.fallback_font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, n.get_theme_font_size(&"font_size")).x, n.size.x]
+	if err.is_empty():
+		err = _uniform_columns(strip, Rect2(0, 0, 1280, 720))
+	_cleanup([strip, ps])
+	return err
+
+
+func test_strip_hud_no_widen() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	for id in db.ids():
+		ps.grant_item(db.make(id))
+	for id in ["flash_bulb", "rabbits_foot", "music_box"]:
+		for i in 5:
+			ps.grant_item(db.make(id))
+	_settle(strip)
+	var err := _uniform_columns(strip, Rect2(0, 0, 1020, 720))
+	if err.is_empty():
+		for t in strip.tiles:
+			var p := t.get_node_or_null(^"Charges/Pips") as Control
+			if p and (p.get_combined_minimum_size().y < 11.0 or p.get_global_rect().size.x > strip.tile_size + 0.5):
+				err = "%s pips should be >= 11 px and inside the tile" % t.name
+				break
+	if err.is_empty() and strip.get_global_rect().end.x > 14.0 + strip.max_width() + 0.5 + strip.get_global_rect().position.x - 14.0:
+		err = "HUD strip wider than its max"
+	_cleanup([strip, ps])
+	return err
+
+
+func test_strip_spent_badge() -> String:
+	for compact in [false, true]:
+		var ps := _fresh_stats()
+		var strip: Control = load("res://scripts/ui/owned_items_strip.gd").new()
+		strip.stats = ps
+		if compact:
+			strip.make_compact(11, 1)
+		_root().add_child(strip)
+		var bulbs: Array = []
+		for i in 5:
+			bulbs.append(_item_db().make("flash_bulb"))
+			ps.grant_item(bulbs[-1])
+		for b in bulbs:
+			b.set_charges(0)
+		_settle(strip)
+		var t: Control = strip.tiles[0]
+		var badge := t.find_child("Badge", true, false) as Control
+		var tile := t.get_node(^"Tile") as CanvasItem
+		var art := tile.get_child(0) as CanvasItem
+		var a := badge.self_modulate.a
+		var n: Node = badge
+		while n != null and n != t:
+			a *= (n as CanvasItem).modulate.a
+			n = n.get_parent()
+		var err := ""
+		if a < 0.999:
+			err = "%s: ×5 badge on a spent tile should be full opacity, got %.2f" % ["shop" if compact else "HUD", a]
+		elif art.modulate.a > 0.6 or tile.self_modulate.a > 0.6:
+			err = "spent tile's icon and frame should fade"
+		_cleanup([strip, ps])
+		if not err.is_empty():
+			return err
+	return ""

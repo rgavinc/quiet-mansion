@@ -11,6 +11,10 @@ extends VBoxContainer
 ## `make_compact()` gives the shop's smaller one-row variant (same stacking / tiles).
 ## Wraps: PER_ROW tiles a row, MAX_ROWS rows; past that the last tile is "+N" (hidden ids),
 ## so the strip never reaches the minimap (right edge <= 14 + PER_ROW * 46 px).
+## No-widen guarantee: every column is exactly one tile wide (custom_minimum_size +
+## clip_contents). Pips wrap onto up to 2 lines inside the tile width (shrinking the dot if
+## needed); past what fits, one pip + a small "n/max" sized to fit the tile. So the strip
+## is always per_row * tile + gaps wide, whatever is owned (max_width()).
 ## Signals are connected to methods while in the tree only (no lambdas): a HUD that left
 ## the tree on a stage change never reacts.
 
@@ -52,14 +56,14 @@ var sep := SEP
 var compact := false
 
 
-## Shop variant: 28 px tiles, 8 px pips, one row of 14 (+N past that).
-func make_compact(row_tiles: int = 14) -> void:
+## Shop variant: 28 px tiles, smaller pips, `row_tiles` a row, `rows` rows (+N past that).
+func make_compact(row_tiles: int = 11, rows: int = 1) -> void:
 	compact = true
 	tile_size = 28.0
-	pip_r = 4.0
+	pip_r = 3.5
 	sep = 4
 	per_row = row_tiles
-	max_rows = 1
+	max_rows = rows
 	if is_node_ready():
 		refresh()
 
@@ -136,16 +140,16 @@ func refresh() -> void:
 			row.add_theme_constant_override("separation", sep)
 			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			add_child(row)
-		var t := _make_entry(entries[i]) if i < shown else _make_overflow(overflow)
+		var t := _make_entry(entries[i]) if i < shown else _make_overflow(overflow, entries.slice(shown))
 		row.add_child(t)
 		if i < shown:
 			tiles.append(t)
 	visible = not entries.is_empty()
 
 
-## Widest the strip can get (px): PER_ROW tiles + gaps.
-static func max_width() -> float:
-	return PER_ROW * TILE + (PER_ROW - 1) * SEP + 8.0   # + room for 3 pips under a tile
+## Widest the strip can get (px): per_row tiles + gaps (columns never widen).
+func max_width() -> float:
+	return per_row * tile_size + (per_row - 1) * sep
 
 
 func _rim(rarity: String) -> Color:
@@ -177,10 +181,12 @@ func _small_label(text: String, size: int) -> Label:
 	return l
 
 
-func _make_overflow(n: int) -> Control:
+func _make_overflow(n: int, hidden: Array = []) -> Control:
 	var col := VBoxContainer.new()
 	col.name = "Overflow"
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.tooltip_text = "\n".join(hidden.map(func(e): return e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]))
+	_fix_column(col)
 	var box := _tile_box(Color(0.6, 0.55, 0.65))
 	var l := _small_label("+%d" % n, 11 if compact else 15)
 	l.name = "More"
@@ -197,6 +203,7 @@ func _make_entry(e: Dictionary) -> Control:
 	col.add_theme_constant_override("separation", 3)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.tooltip_text = e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]
+	_fix_column(col)
 	var box := _tile_box(_rim(e.rarity))
 	col.add_child(box)
 	var tex: Texture2D = UiArt.first_frame(e.icon_slot) if not e.icon_slot.is_empty() else null
@@ -216,28 +223,55 @@ func _make_entry(e: Dictionary) -> Control:
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		l.add_theme_color_override("font_color", _rim(e.rarity))
 		box.add_child(l)
+	var art: Control = box.get_child(box.get_child_count() - 1)
 	if e.count > 1:
 		box.add_child(_badge(e.count))
 	if e.max_charges > 0:
 		var row := HBoxContainer.new()
 		row.name = "Charges"
 		row.alignment = BoxContainer.ALIGNMENT_CENTER
-		row.add_theme_constant_override("separation", 2)
+		row.add_theme_constant_override("separation", 1)
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.custom_minimum_size.x = tile_size
+		row.clip_contents = true
 		var pips := _Pips.new()
 		pips.name = "Pips"
 		pips.left = e.charges
 		pips.total = e.max_charges
-		pips.r = pip_r
+		pips.lines = 1 if compact else 2   # shop: keep its 2 tile rows short
+		pips.fit(pip_r, tile_size)
 		row.add_child(pips)
-		if e.max_charges > MAX_PIPS:
-			var n := _small_label("%d/%d" % [e.charges, e.max_charges], 10 if compact else 12)
+		if pips.numeric():
+			var txt := "%d/%d" % [e.charges, e.max_charges]
+			var room := tile_size - pips.get_combined_minimum_size().x - 1.0
+			var n := _small_label(txt, _fit_font(txt, room, 10 if compact else 12))
 			n.name = "Count"
+			n.add_theme_constant_override("outline_size", 2)
+			n.clip_text = true   # min width 0: can never widen the column
+			n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			row.add_child(n)
 		col.add_child(row)
 		if e.charges <= 0:
-			box.modulate = Color(1, 1, 1, 0.45)   # spent this stage
+			# spent this stage: fade the icon and tile, not the ×N badge
+			box.self_modulate = Color(1, 1, 1, 0.45)
+			art.modulate = Color(1, 1, 1, 0.45)
 	return col
+
+
+## Column = exactly one tile wide; children can never push it wider.
+func _fix_column(col: Control) -> void:
+	col.custom_minimum_size.x = tile_size
+	col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	col.clip_contents = true
+
+
+## Largest font size <= `want` (min 7) whose text fits `room` px.
+func _fit_font(txt: String, room: float, want: int) -> int:
+	var font := ThemeDB.fallback_font
+	var fs := want
+	while fs > 7 and font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 2.0 > room:
+		fs -= 1
+	return fs
 
 
 ## "×N" pill: a full-tile overlay (PanelContainer children fill it) with the pill
@@ -275,31 +309,63 @@ func _badge(count: int) -> Control:
 	return overlay
 
 
-## One 11 px dot per charge (filled = left this stage). Over MAX_PIPS: one dot (lit while any
-## is left) and the "n/max" label carries the number.
+## One dot per charge (filled = left this stage), wrapped onto up to `lines` (HUD 2, shop 1) lines inside the
+## tile width; the dot shrinks (to 60 % of its radius) before giving up. Past MAX_PIPS, or
+## if they still don't fit: one dot (lit while any is left) and the "n/max" label.
 class _Pips extends Control:
+	const GAP := 1.0
+	var lines := 2
 	var left := 0
 	var total := 0
 	var r := PIP_R
+	var max_w := INF
+	var per_line := 0
+
+	func cell() -> float:
+		return r * 2.0 + 1.5   # fill diameter + the dark edge
+
+	func _per_line(rr: float) -> int:
+		return maxi(int(floor((max_w + GAP) / (rr * 2.0 + 1.5 + GAP))), 1)
+
+	## Pick the radius / dots-per-line for a `width` px tile.
+	func fit(want_r: float, width: float) -> void:
+		max_w = width
+		r = want_r
+		var need := mini(total, MAX_PIPS)
+		while _per_line(r) * lines < need and r - 0.5 >= want_r * 0.6:
+			r -= 0.5
+		per_line = _per_line(r)
+		update_minimum_size()
+
+	func numeric() -> bool:
+		return total > MAX_PIPS or total > per_line * lines
 
 	func dots() -> int:
-		return total if total <= MAX_PIPS else 1
+		return 1 if numeric() else total
 
 	func lit(i: int) -> bool:
-		return i < left if total <= MAX_PIPS else left > 0
+		return left > 0 if numeric() else i < left
 
 	func _get_minimum_size() -> Vector2:
 		var n := dots()
-		var gap := PIP_GAP if r >= PIP_R else 2.0
-		return Vector2(n * (r * 2.0 + 2.0) + (n - 1) * gap, r * 2.0 + 2.0)
+		var pl := maxi(per_line, 1) if per_line > 0 else n
+		var cols := mini(n, pl)
+		var ln := int(ceil(float(n) / pl))
+		return Vector2(cols * cell() + (cols - 1) * GAP, ln * cell() + (ln - 1) * GAP)
 
 	func _draw() -> void:
-		var gap := PIP_GAP if r >= PIP_R else 2.0
-		for i in dots():
-			var c := Vector2(r + 1.0 + i * (r * 2.0 + 2.0 + gap), r + 1.0)
-			draw_circle(c, r + 1.0, PIP_EDGE)
+		var n := dots()
+		var pl := maxi(per_line, 1) if per_line > 0 else n
+		var w := size.x
+		for i in n:
+			var line := i / pl
+			var in_line := mini(n - line * pl, pl)
+			var lw := in_line * cell() + (in_line - 1) * GAP
+			var x0 := (w - lw) * 0.5 if not numeric() else 0.0
+			var c := Vector2(x0 + cell() * 0.5 + (i % pl) * (cell() + GAP), cell() * 0.5 + line * (cell() + GAP))
+			draw_circle(c, r + 0.75, PIP_EDGE)
 			if lit(i):
 				draw_circle(c, r, PIP_FULL)
 			else:
 				draw_circle(c, r, PIP_RING)
-				draw_circle(c, r - 1.5, PIP_EMPTY)
+				draw_circle(c, maxf(r - 1.5, 1.0), PIP_EMPTY)
