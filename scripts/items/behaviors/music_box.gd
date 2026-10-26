@@ -1,6 +1,6 @@
 extends Item
 ## Music Box: each stage start puts one Music Box lure in the boy's hands (charges = lures
-## in hand, 0 or 1). Throw it like any held prop (at the ringed enemy, or toward the aim
+## in hand, 0 or 1; each copy gives its own lure). Throw it like any held prop (at the ringed enemy, or toward the aim
 ## with no enemy ringed); where it lands it plays a loud tune (MusicBoxLure) that pulls
 ## enemies in range to it. Its cost is the hand slot it takes until thrown.
 
@@ -35,6 +35,14 @@ func on_stage_start(player: Node) -> void:
 		charges = 1
 
 
+## PlayerStats.dispatch_throw calls this on EVERY owned item, so with 2+ Music Boxes each
+## copy must only spend for its OWN lure (the id in lure_dict() is per instance): one throw
+## spends exactly one copy, the one whose lure flew.
 func on_throw(item: Dictionary, _target: Variant) -> void:
-	if item.get("lure", false) and charges > 0:
+	if item.get("lure", false) and owns_lure(item) and charges > 0:
 		use_charge()
+
+
+## True if `item` is the lure this copy put in the boy's hands.
+func owns_lure(item: Dictionary) -> bool:
+	return str(item.get("id", "")) == str(lure_dict().id)
