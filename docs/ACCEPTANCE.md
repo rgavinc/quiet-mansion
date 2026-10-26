@@ -52,3 +52,15 @@ Nothing ships (Pages showcase included) until this bar is green. AI art/audio ma
 **Run:** `godot --headless --path . -s res://tests/run_tests.gd`
 
 **Status:** Automated suite landed by QA. Play smoke + Lead review still required before QA signs round 1.
+
+## 11. Art quality and human-replaceability (added 2026-10-25 from Gavin)
+
+Art must look great AND be trivially swappable by a human artist.
+
+- [ ] Every sprite/animation lives as a labeled file in `assets/replace_me/` (e.g. `boy_pickup_strip_8f_32x48.png`), one horizontal strip per animation.
+- [ ] Frame size, frame count, FPS, pivot/feet point, and loop flag are declared in one data file (no magic numbers in scenes or scripts).
+- [ ] `assets/replace_me/README.md` lists every slot: what it is, size, frames, palette notes, and a reference still.
+- [ ] Replacing a file with a same-size PNG requires zero code or scene edits. Test: swap every slot for a generated placeholder; game boots, all animations play, no errors.
+- [ ] Wrong-size replacement fails loudly with a clear message naming the file, never a silent crash.
+- [ ] Each entry is tracked in `assets/ASSETS_MANIFEST.toml`; watermark disappears only when all are `human`.
+- [ ] Look pass: animations read clearly (pickup looks vulnerable, enemy tiers distinguishable by silhouette), judged in a QA play pass before Gavin sees it.
