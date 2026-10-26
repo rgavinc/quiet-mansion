@@ -11,9 +11,9 @@ Moving from top-down to a **side-scroller with multiple floors**, like Home Alon
 ## Core rules
 
 ### Flashlight and targeting
-- Mouse aims, **Space** toggles the light.
+- Mouse aims, **right mouse button** toggles the light. **Space = jump.**
 - Hovering the beam over an enemy **selects** it: ring around it plus a slight camera nudge toward it. Hovering another enemy moves the selection; only one at a time.
-- The selected enemy keeps its ring and stays **faintly visible with the light off**.
+- The selected enemy keeps its ring and stays **faintly visible with the light off**. The selected enemy is also the throw target.
 - Holding the beam on an enemy for **1.0 s** startles it and it chases. Show build-up both with a small gauge and with the puppet visibly twitching/opening.
 - The light affects **on-screen only**.
 
@@ -93,3 +93,30 @@ Every player action carries a cost or risk: light can startle, touching objects 
 ### Ownership calls
 - **Foundation code** (`PlayerStats`, `Item`, `WorldObject`, `Enemy` state machine, `NoiseBus`, level generator plus validator): **Back End builds it, Lead reviews it.** Lead does not write a second copy.
 - Branching: all work lands on `development` (Pages `/development/`). It merges to `main` only after QA and Product sign off.
+
+## Controls (locked, Oct 25)
+
+| Input | Action |
+|------|--------|
+| A / D (or arrows) | Move |
+| W / S at stairs or ladders | Climb up or down between floors |
+| Space | Jump |
+| Mouse | Aim the flashlight |
+| Right mouse button | Toggle the flashlight |
+| Hold left mouse button | Pick up (about a 1 s channel) |
+| Scroll wheel | Cycle held items and objects |
+| Left mouse click (with something held and an enemy selected) | Throw or use the held thing |
+
+### Picking up
+- Hold LMB on a pickup in range. A gauge fills over about **1.0 s**, and while it fills the player is **locked into the pickup action**.
+- Moving out of range or releasing LMB cancels it. This is meant to be risky: you're exposed while channeling.
+- You can pick up **objects** (like a vase) and **usable items**. Both go into a small held inventory, and the scroll wheel cycles through it.
+
+### Throwing (vase first)
+- A held vase can be thrown at the **currently selected enemy** (the one with the ring).
+- Walls and props can block the throw. A blocked throw or a miss breaks the vase where it lands, which makes noise there.
+- A hit can stun or kill, depending on the object and enemy stats. A miss can startle the target or pull in nearby enemies.
+- Throw values (damage, arc, accuracy, noise on impact) live in the object's `WorldObject` data and default from the base.
+
+### Final ownership (generator)
+- **Level generator, validator, seed sweep CI, and `docs/LEVELGEN.md`: Lead.** Back End owns the foundation (stats, items, objects, enemies, `NoiseBus`) plus the pickup, inventory, and throw systems. FE owns the pickup gauge, inventory strip and scroll UI, and the throw aim and arc preview.
