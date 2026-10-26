@@ -7,6 +7,9 @@ extends RefCounted
 ##  - float type drifts straight through a slab to the next floor
 ##  - startle -> chase waits for the scream animation (manifest frames / fps), real frames
 ##  - ledge backstop: a walker never walks off a floor edge into a gap; a floater crosses it
+##  - QA B1: feet come from the real collider, so all of the above holds for a shape centred
+##    on the origin AND for one offset to (0,-14) with the origin at the feet (Lead's generator):
+##    flat-floor chase actually moves, gap holds, stair climb ends with feet on the upper floor
 
 var _holder: Node2D
 
@@ -20,6 +23,12 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["float_crosses_floors_without_stairs", _floater],
 		["startle_chase_when_scream_anim_ends", _startle_real],
 		["walker_turns_at_gap_floater_crosses", _ledge_gap],
+		["b1_flat_chase_moves_centred", _flat_chase.bind(0.0)],
+		["b1_flat_chase_moves_origin_at_feet", _flat_chase.bind(-14.0)],
+		["b1_gap_holds_centred", _gap_feet.bind(0.0)],
+		["b1_gap_holds_origin_at_feet", _gap_feet.bind(-14.0)],
+		["b1_stair_feet_on_upper_floor_centred", _stair_feet.bind(0.0)],
+		["b1_stair_feet_on_upper_floor_origin_at_feet", _stair_feet.bind(-14.0)],
 	]
 	for c in checks:
 		PlayerStats.reset(); GameState.reset(); FESignals.reset()
@@ -230,3 +239,102 @@ func _ledge_gap(tree: SceneTree) -> Variant:
 		if e.global_position.y > 386.0 + 3.0: return "chasing walker fell into the gap (%s)" % e.global_position
 	if e.global_position.x >= 300.0: return "chasing walker over the gap (x %.0f)" % e.global_position.x
 	return "" if p.global_position.x > 400.0 else "boy moved?"
+
+
+## Walker whose r=14 circle sits at (0, off): off 0 = centred (old map), off -14 = origin at
+## the feet (LevelGenerator._circle). Placed so its collider bottom (feet) is at `feet`.
+func _walker_feet(feet: Vector2, off: float) -> CharacterBody2D:
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	var cs := CollisionShape2D.new(); var c := CircleShape2D.new(); c.radius = 14; cs.shape = c
+	cs.position = Vector2(0, off); cs.name = "Body"
+	e.add_child(cs)
+	_holder.add_child(e); e.global_position = feet - Vector2(0, off + 14.0)
+	e.side_scroll = true
+	return e
+
+
+## Collider bottom, measured independently of enemy_base's own _feet().
+func _bottom(e: CharacterBody2D) -> Vector2:
+	var cs: CollisionShape2D = e.get_node("Body")
+	return cs.global_position + Vector2(0, 14)
+
+
+## QA B1 repro: walker on a flat floor, _enter_chase toward a boy 300px away. It must move
+## (> 150px in 600 frames) and the ledge backstop must not fire on most frames.
+func _flat_chase(tree: SceneTree, off: float) -> Variant:
+	_slab(-400, 1600, 400)
+	var e := _walker_feet(Vector2(200, 400), off)
+	e.sight_override = 1
+	e.chase_speed = 120.0
+	await tree.physics_frame
+	await tree.physics_frame
+	var p := _boy(Vector2(500, 388), true)
+	var x0 := e.global_position.x
+	e._enter_chase(9999)
+	var stopped := 0
+	var moved := 0.0
+	for i in 600:
+		await tree.physics_frame
+		if e.ledge_stopped: stopped += 1
+		moved = maxf(moved, absf(e.global_position.x - x0))
+		if absf(_bottom(e).y - 400.0) > 3.0 and i > 10: return "left the floor (feet y %.1f)" % _bottom(e).y
+	if moved <= 150.0: return "moved only %.1fpx toward the boy (ledge_stopped %d/600 frames)" % [moved, stopped]
+	if stopped * 2 >= 600: return "ledge_stopped on %d/600 frames" % stopped
+	return "" if p != null else "no boy"
+
+
+## The gap test with feet measured from the collider: never falls in, turns back, and the
+## chase across the gap stops at the edge.
+func _gap_feet(tree: SceneTree, off: float) -> Variant:
+	_slab(-400, 300, 400)
+	_slab(400, 1200, 400)
+	var e := _walker_feet(Vector2(200, 400), off)
+	e.sight_override = 0
+	e.patrol_radius = 200.0
+	var max_x := -INF
+	var turned := false
+	for i in 600:
+		await tree.physics_frame
+		if _bottom(e).y > 403.0: return "walker fell into the gap at frame %d (feet %s)" % [i, _bottom(e)]
+		max_x = maxf(max_x, e.global_position.x)
+		if max_x > 280.0 and e.global_position.x < max_x - 30.0: turned = true
+	if max_x >= 300.0: return "walker stood over the gap (x %.0f)" % max_x
+	if max_x < 250.0: return "walker barely patrolled toward the edge (max x %.0f)" % max_x
+	if not turned: return "did not turn back at the edge (max x %.0f)" % max_x
+	_boy(Vector2(520, 388), true)
+	e.sight_override = 1
+	e._enter_chase(9999)
+	for i in 300:
+		await tree.physics_frame
+		if _bottom(e).y > 403.0: return "chasing walker fell into the gap (feet %s)" % _bottom(e)
+	if e.global_position.x >= 300.0: return "chasing walker over the gap (x %.0f)" % e.global_position.x
+	return ""
+
+
+## Ground slab y=400, upper slab y=240, stair 300->396. The walker climbs and its collider
+## bottom ends on the upper floor surface within 1px.
+func _stair_feet(tree: SceneTree, off: float) -> Variant:
+	_slab(-200, 1000, 400)
+	_slab(380, 1000, 240)
+	_stair(Vector2(300, 400), Vector2(396, 240))
+	var e := _walker_feet(Vector2(100, 400), off)
+	e.sight_override = 1
+	e.chase_speed = 120.0
+	await tree.physics_frame
+	await tree.physics_frame
+	var p := _boy(Vector2(700, 228), true)
+	e._enter_chase(9999)
+	var climbed := false
+	for i in 900:
+		await tree.physics_frame
+		if e.climbing: climbed = true
+		if climbed and not e.climbing and e.is_on_floor() and _bottom(e).y < 300.0 \
+				and e.global_position.x > 420.0:
+			var dy := _bottom(e).y - 240.0
+			# a few settle frames, then measure again
+			for k in 10: await tree.physics_frame
+			dy = _bottom(e).y - 240.0
+			if absf(dy) > 1.0: return "feet %.2fpx off the upper floor (feet y %.2f)" % [dy, _bottom(e).y]
+			return "" if p != null else "no boy"
+	if not climbed: return "never climbed (at %s, feet %s)" % [e.global_position, _bottom(e)]
+	return "did not land on the upper floor (feet %s, climbing %s)" % [_bottom(e), e.climbing]
