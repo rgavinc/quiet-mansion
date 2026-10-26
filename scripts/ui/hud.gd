@@ -1,7 +1,8 @@
 extends CanvasLayer
 ## Screen-space FE HUD root: hearts + gold (top-left), alert counter (top-right),
-## inventory strip (bottom-centre), off-screen chaser arrows (full screen), and
-## the "Stage N" intro banner. Game-over / shop screens are separate layers.
+## inventory strip (bottom-centre) with the "tap: throw lure" hint above it, owned items
+## (under hearts + gold), minimap (top-right, Minimap item only), off-screen chaser arrows
+## (full screen), and the "Stage N" intro banner. Game-over / shop screens are separate layers.
 ## Instance `scenes/ui/hud.tscn` once per level. All data via FESignals.
 
 const HealthGoldHud := preload("res://scripts/ui/health_gold_hud.gd")
@@ -9,6 +10,9 @@ const InventoryStrip := preload("res://scripts/ui/inventory_strip.gd")
 const OffscreenArrows := preload("res://scripts/ui/offscreen_arrows.gd")
 const AlertHud := preload("res://scripts/ui/alert_hud.gd")
 const StageBanner := preload("res://scripts/ui/stage_banner.gd")
+const OwnedItemsStrip := preload("res://scripts/ui/owned_items_strip.gd")
+const Minimap := preload("res://scripts/ui/minimap.gd")
+const LureHint := preload("res://scripts/ui/lure_hint.gd")
 
 var skin: HudSkin
 var health_gold: Control
@@ -16,6 +20,9 @@ var inventory: Control
 var arrows: Control
 var alert: Control
 var banner: Control
+var owned_items: Control
+var minimap: Control
+var lure_hint: Control
 
 
 func _ready() -> void:
@@ -54,6 +61,31 @@ func _ready() -> void:
 	root.add_child(alert)
 	alert.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE)
 	alert.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
+	owned_items = OwnedItemsStrip.new()
+	owned_items.name = "OwnedItems"
+	owned_items.skin = skin
+	root.add_child(owned_items)
+	owned_items.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE)
+	owned_items.position = Vector2(14, 64)
+
+	lure_hint = LureHint.new()
+	lure_hint.name = "LureHint"
+	lure_hint.skin = skin
+	root.add_child(lure_hint)
+	lure_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE)
+	lure_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	lure_hint.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	lure_hint.offset_bottom = -(skin.slot_size + 48.0)   # above the strip's name label
+
+	minimap = Minimap.new()
+	minimap.name = "Minimap"
+	minimap.skin = skin
+	root.add_child(minimap)
+	minimap.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE)
+	minimap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	minimap.offset_top = 64.0
+	minimap.offset_right = -8.0
 
 	banner = StageBanner.new()
 	banner.name = "StageBanner"

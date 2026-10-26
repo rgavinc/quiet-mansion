@@ -5,10 +5,14 @@ extends Control
 ##   BE chase memory (report_chase_memory, PR #26: sent on chase start and every
 ##   hunting frame; 1 while tracking, drains in SEARCH). Full until the first report.
 ## Which enemies get arrows = FESignals.chasing (BE report_chase), never `enraged`.
+## Cracked Mirror: an arrow shows only while its chaser is within
+## PlayerStats.arrow_reveal_distance() of the boy (INF without it; has_method guard).
 ## Lives in a CanvasLayer (screen space).
 
 var skin: HudSkin
 var bus: Node
+## PlayerStats (default: the autoload). Only arrow_reveal_distance() is read.
+var stats: Node
 ## Last frame's arrows: Array of {enemy, pos, angle, ratio} (read by tests/debug).
 var arrows: Array = []
 
@@ -18,6 +22,8 @@ func _ready() -> void:
 		skin = HudSkin.load_default()
 	if bus == null:
 		bus = UiArt.bus()
+	if stats == null:
+		stats = get_node_or_null(^"/root/PlayerStats")
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
@@ -29,6 +35,8 @@ func _process(_delta: float) -> void:
 		return
 	var vp := get_viewport_rect()
 	var xf := get_viewport().get_canvas_transform()
+	var reveal := reveal_distance()
+	var boy := boy_position(xf, vp)
 	for raw in bus.chasing:   # untyped: a chaser may have been freed this frame
 		if raw == null or not is_instance_valid(raw):
 			continue
@@ -36,6 +44,8 @@ func _process(_delta: float) -> void:
 		var sp: Vector2 = xf * e.global_position
 		if vp.grow(-4.0).has_point(sp):
 			continue
+		if reveal < INF and e.global_position.distance_to(boy) > reveal:
+			continue   # Cracked Mirror: too far to reveal yet
 		var ratio: float = bus.get_chase_memory(e)
 		if ratio < 0.0:
 			ratio = 1.0   # chase just started; BE's first memory report is on its way
@@ -44,6 +54,22 @@ func _process(_delta: float) -> void:
 			"color": skin.ring_color_for(bus.enemy_type_id(e))})
 	_spread(vp)
 	queue_redraw()
+
+
+## Max boy→chaser distance (px) for an arrow. INF = always (no item / no PlayerStats).
+func reveal_distance() -> float:
+	if stats != null and is_instance_valid(stats) and stats.has_method(&"arrow_reveal_distance"):
+		return float(stats.arrow_reveal_distance())
+	return INF
+
+
+## The boy's world position (first node in group "player"), else the world point at the
+## screen centre (the camera follows him).
+func boy_position(xf: Transform2D, vp: Rect2) -> Vector2:
+	for p in get_tree().get_nodes_in_group(&"player"):
+		if p is Node2D and is_instance_valid(p):
+			return (p as Node2D).global_position
+	return xf.affine_inverse() * vp.get_center()
 
 
 ## Side-scroller chasers often share an edge point; stack them along the edge.
