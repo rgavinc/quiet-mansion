@@ -53,3 +53,171 @@ path = "assets/art/ui/light_blob.png"
 slot = "flashlight_blob"
 status = "ai"
 notes = "Soft falloff texture for mouse flashlight"
+
+# --- Animated sprite strips (checkpoint 1). One horizontal PNG strip per slot, frames left->right, no padding,
+# transparent bg. frame_size/frames/fps/loop/pivot here are the single source of truth; pivot is in frame pixels.
+
+[[asset]]
+path = "assets/art/characters/boy_idle.png"
+slot = "boy_idle"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 8
+loop = true
+pivot = [32, 63]
+notes = "64x64 boy idle, breathing + nervous glance + blink, flashlight in front hand"
+
+[[asset]]
+path = "assets/art/characters/boy_run.png"
+slot = "boy_run"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 12
+loop = true
+pivot = [32, 63]
+notes = "64x64 boy run cycle (contact/down/pass/up x2), flashlight in front hand"
+
+[[asset]]
+path = "assets/art/characters/boy_jump.png"
+slot = "boy_jump"
+status = "ai"
+frame_size = [64, 64]
+frames = 4
+fps = 10
+loop = false
+pivot = [32, 63]
+notes = "64x64 jump: 0 takeoff, 1 rise, 2 apex, 3 fall. Pick frame by vertical velocity or play once; hold 3 while falling"
+
+[[asset]]
+path = "assets/art/characters/boy_pickup.png"
+slot = "boy_pickup"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 10
+loop = true
+pivot = [32, 63]
+notes = "64x64 hold-to-pick-up crouch-and-reach loop (glances back, sweats). Hand point per frame (front hand): 46,56 46,57 46,57 46,58 46,56 46,56"
+
+[[asset]]
+path = "assets/art/characters/boy_carry.png"
+slot = "boy_carry"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 10
+loop = true
+pivot = [32, 63]
+notes = "64x64 walk holding object overhead (object not baked in: draw held item with its bottom-center at the hand point). Hand point per frame: 31,21 30,20 31,20 31,21 30,20 31,20"
+
+[[asset]]
+path = "assets/art/characters/boy_throw.png"
+slot = "boy_throw"
+status = "ai"
+frame_size = [64, 64]
+frames = 4
+fps = 12
+loop = false
+pivot = [32, 63]
+notes = "64x64 overhead throw: 0 wind-up, 1 forward, 2 release (spawn projectile at hand point), 3 follow-through. Hand point per frame: 23,23 32,22 49,40 43,46"
+
+[[asset]]
+path = "assets/art/characters/boy_climb_stairs.png"
+slot = "boy_climb_stairs"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 10
+loop = true
+pivot = [32, 60]
+notes = "64x64 climbing stairs that rise to the right (step 6px run / 4px rise, ~34 deg). Pivot sits on the stair slope under the hip (y=60), not the frame bottom; mirror for descending-left"
+
+[[asset]]
+path = "assets/art/characters/boy_hurt.png"
+slot = "boy_hurt"
+status = "ai"
+frame_size = [64, 64]
+frames = 3
+fps = 12
+loop = false
+pivot = [32, 63]
+notes = "64x64 hit reaction: 0 white hit-flash squash, 1 knock-back, 2 recover. Play once then return to idle/run"
+
+[[asset]]
+path = "assets/art/characters/puppet_calm.png"
+slot = "puppet_calm"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 8
+loop = true
+pivot = [32, 63]
+notes = "64x64 puppet hand enemy #1 calm float: bob, finger wave, sleeve hem ripple, blink"
+
+[[asset]]
+path = "assets/art/characters/puppet_startle.png"
+slot = "puppet_startle"
+status = "ai"
+frame_size = [64, 64]
+frames = 5
+fps = 12
+loop = false
+pivot = [32, 63]
+notes = "64x64 puppet startled by flashlight: 0 anticipation, 1 recoil, 2 overshoot, 3 tremble, 4 stunned hold (stay on 4 while stunned)"
+
+[[asset]]
+path = "assets/art/characters/puppet_chase.png"
+slot = "puppet_chase"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 12
+loop = true
+pivot = [32, 63]
+notes = "64x64 enraged chase loop: lean in, chomping jaws with teeth, red eyes, clawed twitching fingers, sleeve streams behind"
+
+[[asset]]
+path = "assets/art/props/vase_idle.png"
+slot = "vase_idle"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 31]
+notes = "32x32 breakable porcelain vase, standing"
+
+[[asset]]
+path = "assets/art/props/vase_thrown.png"
+slot = "vase_thrown"
+status = "ai"
+frame_size = [32, 32]
+frames = 4
+fps = 16
+loop = true
+pivot = [16, 16]
+notes = "32x32 vase in flight, clockwise spin (travelling right; flip_h when thrown left). Pivot is the centre: it is a projectile"
+
+[[asset]]
+path = "assets/art/props/vase_shatter_enemy.png"
+slot = "vase_shatter_enemy"
+status = "ai"
+frame_size = [32, 32]
+frames = 6
+fps = 14
+loop = false
+pivot = [16, 31]
+notes = "32x32 vase breaks on an enemy (enemy to the right): impact flash, radial burst, shards arc and fall. Free the node after the last frame"
+
+[[asset]]
+path = "assets/art/props/vase_shatter_wall.png"
+slot = "vase_shatter_wall"
+status = "ai"
+frame_size = [32, 32]
+frames = 6
+fps = 14
+loop = false
+pivot = [16, 31]
+notes = "32x32 vase breaks on a wall (wall on the right, x=29): flat spray along the wall, dust billows, shards settle in a pile. Flip_h for walls on the left"

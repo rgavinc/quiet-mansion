@@ -106,6 +106,7 @@ Every player action carries a cost or risk: light can startle, touching objects 
 | Hold left mouse button | Pick up (about a 1 s channel) |
 | Scroll wheel | Cycle held items and objects |
 | Left mouse click (with something held and an enemy selected) | Throw or use the held thing |
+| Left mouse click on a knockable prop in range (nothing held) | Knock it over in the facing direction. If it lands on an enemy it can kill it; a miss makes noise and can startle the enemy |
 
 ### Picking up
 - Hold LMB on a pickup in range. A gauge fills over about **1.0 s**, and while it fills the player is **locked into the pickup action**.
