@@ -73,7 +73,14 @@ Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()
 | Cracked Mirror `cracked_mirror` | uncommon | 9 | off-screen SEARCH memory drains ×1.4 | arrows hidden beyond 1280 px | offscreen_drain_mult 1.4, arrow_reveal_distance 1280 |
 | Greedy Sack `greedy_sack` | legendary | 22 | empty vases roll 1–3 gold | vase-break noise ×1.5 | gold_min 1, gold_max 3, noise_mult 1.5 |
 
-Removed (weaker) items: spring_socks, strong_arm, gold_magnet, night_eyes, grandfather_watch, shadow_cloak. Extra Heart's cost changed from noise ×1.15 to climb ×0.85. Noise budget: only lucky_coin, sneakers and greedy_sack pay with louder noise (test enforces ≤3).
+Removed (PD's binding decision): dim_filter, lucky_coin, strong_arm, wide_lens, spring_socks, golden_heart. Their icons stay in the manifest as spares. Pool mix is exactly 6 common / 7 uncommon / 5 rare / 2 legendary (`ItemDb.MIX`, asserted in `test_items`); no kept item changed rarity. Extra Heart's cost changed from noise ×1.15 to climb ×0.85. Noise budget: only sneakers, grandfather_watch and greedy_sack pay with louder noise, and it is their only downside (test enforces ≤3 noise-cost items).
+
+| Rarity | Items (base price) |
+|---|---|
+| common (6) | bright_bulb 7, soft_shoes 7, quick_hands 6, sneakers 6, banister_gloves 5, heavy_vases 6 |
+| uncommon (7) | extra_heart 10, minimap 12, big_pockets 10, thick_sweater 9, gold_magnet 11, music_box 9, cracked_mirror 9 |
+| rare (5) | night_eyes 15, ghost_slippers 16, grandfather_watch 15, rabbits_foot 14, flash_bulb 14 |
+| legendary (2) | shadow_cloak 26, greedy_sack 22 |
 
 Art: the Music Box uses ONE slot, `music_box_world` (Designer PR #30), in flight and landed (`MusicBoxLure.add_visual`: AnimatedSprite2D via AnimLibrary with the manifest pivot, or an amber 12×10 ColorRect when the slot is missing). Icons are `item_icon_<id>`; FE's letter tile covers missing ones.
 
@@ -90,16 +97,16 @@ Everything collected:
 | 4 | 24.7 | 22.2 | 27.0 | 49.2 | 40 | 59 | 121.1 |
 | 5 | 33.0 | 29.6 | 42.0 | 71.6 | 60 | 84 | 192.7 |
 
-Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`), `PRICE_SCALE = [1.2, 1.8, 2.5, 3.3]` for the shops after stages 1–4 (stage 5 is the win; no shop). Retune that one array (or row prices) when real numbers land. Check with "realistic" income = all piles + ~50% of vase gold, 4-offer stock rolled with the real weights:
+Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`), `PRICE_SCALE = [1.1, 1.6, 2.2, 2.9]` for the shops after stages 1–4 (stage 5 is the win; no shop). Retune that one array (or row prices) when real numbers land. Check with "realistic" income = all piles + ~50% of vase gold, 4-offer stock rolled with the real weights:
 
 | Shop | Realistic income mean (p10–p90) | Mean offer | Mean cheapest of 4 | P(afford ≥1 from this stage's gold) | P(≥1 with carry, buying the cheapest each shop) |
 |---|---|---|---|---|---|
-| 1 | 10.1 (7–14) | 8.3 | 6.5 | 0.93 | 0.93 |
-| 2 | 17.6 (13–22) | 13.6 | 10.0 | 0.99 | 1.0 |
-| 3 | 26.0 (20–32) | 18.6 | 13.5 | 1.0 | 1.0 |
-| 4 | 38.1 (32–45) | 25.6 | 18.0 | 1.0 | 1.0 |
+| 1 | 10.1 (7–14) | 8.7 | 6.7 | 0.92 | 0.92 |
+| 2 | 17.6 (13–22) | 13.6 | 9.5 | 1.0 | 1.0 |
+| 3 | 26.1 (20–32) | 18.6 | 12.7 | 1.0 | 1.0 |
+| 4 | 38.1 (32–45) | 25.4 | 16.5 | 1.0 | 1.0 |
 
-So ≈1 item per shop; a rare (shop 2+: 25–29 g) or legendary (shop 4: 73–79 g) needs saving across shops. Greedy Sack adds ≈1.1 g per vase (≈+27 g on stage 4, +36 on stage 5) but can only be bought at shop 4, where little is left to spend on — flag for Designer. Script: re-run the Monte Carlo with the real per-stage numbers and adjust `PRICE_SCALE` so income/mean offer ≈ 1.2–1.5.
+So ≈1 item per shop (income / mean offer 1.16, 1.29, 1.40, 1.50); a rare (shop 2: 22–26 g, shop 3: 31–35 g) or legendary (shop 4: 64–75 g) needs saving across shops. (Scale was lowered from [1.2, 1.8, 2.5, 3.3] when the 6/7/5/2 mix made the average offer pricier.) Greedy Sack adds ≈1.1 g per vase (≈+27 g on stage 4, +36 on stage 5) but can only be bought at shop 4, where little is left to spend on — flag for Designer. Script: re-run the Monte Carlo with the real per-stage numbers and adjust `PRICE_SCALE` so income/mean offer ≈ 1.2–1.5.
 
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.

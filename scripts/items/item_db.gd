@@ -16,6 +16,9 @@ const RARITY := {
 	"legendary": {weight = 6.0, min_stage = 4},
 }
 
+## Exact rarity mix of ITEMS (PD's binding decision).
+const MIX := {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}
+
 ## Offers per shop visit.
 const STOCK_SIZE := 4
 
@@ -23,7 +26,7 @@ const STOCK_SIZE := 4
 ## multiplier for the shop after stage N (index N-1). Offer price =
 ## round(row price * PRICE_SCALE[N-1]); see docs/BACKEND.md "Gold economy" for the math.
 ## Retune here (one array) once real numbers land; row prices are relative values.
-const PRICE_SCALE: Array[float] = [1.2, 1.8, 2.5, 3.3]
+const PRICE_SCALE: Array[float] = [1.1, 1.6, 2.2, 2.9]
 
 ## Price of `id` in the shop after `stage` (clamps past the table's ends).
 static func shop_price(id: String, stage: int) -> int:
@@ -42,7 +45,9 @@ static func shop_price(id: String, stage: int) -> int:
 ## Icon slots are `item_icon_<id>` (Designer; behaviour icons in PR #30). FE falls back
 ## to its letter tile when a slot isn't in the manifest.
 ## Noise budget: at most 3 items may use "noise carries farther" as their cost
-## (lucky_coin, sneakers, greedy_sack); tests/test_item_behaviors.gd enforces it.
+## (sneakers, grandfather_watch, greedy_sack); tests/test_item_behaviors.gd enforces it.
+## Pool mix (PD decision): exactly 6 common / 7 uncommon / 5 rare / 2 legendary = 20
+## (ItemDb.MIX; tests/test_items.gd asserts it).
 const ITEMS: Array[Dictionary] = [
 	# --- common ------------------------------------------------------------
 	{id = "bright_bulb", name = "Bright Bulb", icon = "item_icon_bright_bulb", price = 7, rarity = "common",
@@ -51,18 +56,9 @@ const ITEMS: Array[Dictionary] = [
 	{id = "soft_shoes", name = "Soft Shoes", icon = "item_icon_soft_shoes", price = 7, rarity = "common",
 		desc = "Your noise carries 25% less far. You move 8% slower.",
 		mods = [{stat = &"noise_mult", mul = 0.75}, {stat = &"move_speed", mul = 0.92}]},
-	{id = "lucky_coin", name = "Lucky Coin", icon = "item_icon_lucky_coin", price = 6, rarity = "common",
-		desc = "+40% gold found. It jingles: your noise carries 10% farther.",
-		mods = [{stat = &"gold_find_mult", add = 0.4}, {stat = &"noise_mult", mul = 1.1}]},
 	{id = "quick_hands", name = "Quick Hands", icon = "item_icon_quick_hands", price = 6, rarity = "common",
 		desc = "Pick things up 30% faster, but you must stand 15% closer.",
 		mods = [{stat = &"pickup_time", mul = 0.7}, {stat = &"pickup_range", mul = 0.85}]},
-	{id = "dim_filter", name = "Dim Filter", icon = "item_icon_dim_filter", price = 6, rarity = "common",
-		desc = "A softer beam: puppets take 40% longer to notice it. Light reaches 20% less far.",
-		mods = [{stat = &"light_detect_mult", mul = 0.7}, {stat = &"light_range", mul = 0.8}]},
-	{id = "wide_lens", name = "Wide Lens", icon = "item_icon_wide_lens", price = 5, rarity = "common",
-		desc = "Beam is 12 degrees wider but 15% shorter.",
-		mods = [{stat = &"light_angle_deg", add = 12.0}, {stat = &"light_range", mul = 0.85}]},
 	{id = "sneakers", name = "Sneakers", icon = "item_icon_sneakers", price = 6, rarity = "common",
 		desc = "Move 15% faster. Squeaky: your noise carries 15% farther.",
 		mods = [{stat = &"move_speed", mul = 1.15}, {stat = &"noise_mult", mul = 1.15}]},
@@ -95,6 +91,9 @@ const ITEMS: Array[Dictionary] = [
 		desc = "Puppets searching for you off screen give up 40% sooner. You only see a chaser's arrow once it is about a screen away.",
 		script = "res://scripts/items/behaviors/cracked_mirror.gd", downside_behavior = true,
 		params = {offscreen_drain_mult = 1.4, arrow_reveal_distance = 1280.0}, mods = []},
+	{id = "gold_magnet", name = "Gold Magnet", icon = "item_icon_gold_magnet", price = 11, rarity = "uncommon",
+		desc = "+60% gold found. Heavy: you climb 20% slower.",
+		mods = [{stat = &"gold_find_mult", add = 0.6}, {stat = &"climb_speed", mul = 0.8}]},
 	# --- rare (stage 2+) ---------------------------------------------------
 	{id = "ghost_slippers", name = "Ghost Slippers", icon = "item_icon_ghost_slippers", price = 16, rarity = "rare",
 		desc = "Your noise carries 45% less far. -1 max heart.",
@@ -107,10 +106,16 @@ const ITEMS: Array[Dictionary] = [
 		desc = "Once per floor, a puppet you startle with light is stunned for 2.5 s instead of chasing. Light reaches 10% less far.",
 		script = "res://scripts/items/behaviors/flash_bulb.gd", charges = 1, params = {stun_time = 2.5},
 		mods = [{stat = &"light_range", mul = 0.9}]},
+	{id = "night_eyes", name = "Night Eyes", icon = "item_icon_night_eyes", price = 15, rarity = "rare",
+		desc = "Puppets take much longer to notice your light (x0.6). Beam 10 degrees narrower.",
+		mods = [{stat = &"light_detect_mult", mul = 0.6}, {stat = &"light_angle_deg", add = -10.0}]},
+	{id = "grandfather_watch", name = "Grandfather's Watch", icon = "item_icon_grandfather_watch", price = 15, rarity = "rare",
+		desc = "Puppets need +0.5 s of light to startle. Ticks loudly: noise carries 10% farther.",
+		mods = [{stat = &"light_startle_time", add = 0.5}, {stat = &"noise_mult", mul = 1.1}]},
 	# --- legendary (stage 4+) ----------------------------------------------
-	{id = "golden_heart", name = "Golden Heart", icon = "item_icon_golden_heart", price = 24, rarity = "legendary",
-		desc = "+2 max hearts (and heals them). -30% gold found.",
-		mods = [{stat = &"max_health", add = 2.0}, {stat = &"gold_find_mult", add = -0.3}]},
+	{id = "shadow_cloak", name = "Shadow Cloak", icon = "item_icon_shadow_cloak", price = 26, rarity = "legendary",
+		desc = "Noise carries 40% less far and light is noticed 40% slower. Light reaches 25% less far.",
+		mods = [{stat = &"noise_mult", mul = 0.6}, {stat = &"light_detect_mult", mul = 0.6}, {stat = &"light_range", mul = 0.75}]},
 	{id = "greedy_sack", name = "Greedy Sack", icon = "item_icon_greedy_sack", price = 22, rarity = "legendary",
 		desc = "Every vase holds gold. Breaking a vase is 50% louder.",
 		script = "res://scripts/items/behaviors/greedy_sack.gd", downside_behavior = true,

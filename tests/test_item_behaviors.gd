@@ -339,7 +339,8 @@ func test_charges_signal() -> Variant:
 
 
 # --- rules -------------------------------------------------------------------------
-## Noise budget: only 3 items may pay with "noise carries farther".
+## Noise budget: at most 3 items may pay with "noise carries farther" (any noise cost
+## counts, which is stricter than "noise as the only downside").
 func test_noise_budget() -> Variant:
 	var louder: PackedStringArray = []
 	for r in ItemDb.ITEMS:

@@ -98,10 +98,20 @@ func test_db_valid() -> String:
 			if not PlayerStats.BASE.has(m.stat): return "%s: unknown stat %s" % [id, m.stat]
 	# The icons Designer already drew are used by the matching items.
 	for pair in [["extra_heart", "item_icon_extra_heart"], ["minimap", "item_icon_minimap"],
-			["bright_bulb", "item_icon_bright_bulb"], ["soft_shoes", "item_icon_soft_shoes"],
-			["lucky_coin", "item_icon_lucky_coin"]]:
+			["bright_bulb", "item_icon_bright_bulb"], ["soft_shoes", "item_icon_soft_shoes"]]:
 		if ItemDb.make(pair[0]).icon_slot != pair[1]: return pair[0] + " icon slot"
 		if not AnimLibrary.has_slot(pair[1]): return "manifest missing " + pair[1]
+	# PD's binding mix: exactly 6 common / 7 uncommon / 5 rare / 2 legendary.
+	var mix := {}
+	for r in ItemDb.ITEMS:
+		mix[r.rarity] = int(mix.get(r.rarity, 0)) + 1
+	for k in {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}.merged(mix):
+		var want: int = {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}.get(k, 0)
+		if int(mix.get(k, 0)) != want: return "rarity mix %s, want 6/7/5/2" % [mix]
+	if ItemDb.MIX != {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}: return "ItemDb.MIX changed"
+	# PD's removals stay removed (their icons are manifest spares).
+	for gone in ["dim_filter", "lucky_coin", "strong_arm", "wide_lens", "spring_socks", "golden_heart"]:
+		if not ItemDb.row(gone).is_empty(): return "removed item back: " + gone
 	return ""
 
 
@@ -140,12 +150,12 @@ func test_apply_changes() -> String:
 	ItemDb.make("soft_shoes").apply(s)
 	var n: float = s.get_stat(&"noise_mult")
 	var sp: float = s.get_stat(&"move_speed")
-	ItemDb.make("lucky_coin").apply(s)
+	ItemDb.make("gold_magnet").apply(s)
 	var g: float = s.get_stat(&"gold_find_mult")
 	s.free()
 	if not is_equal_approx(n, 0.75): return "soft_shoes noise_mult want 0.75 got %s" % n
 	if not is_equal_approx(sp, 140.0 * 0.92): return "soft_shoes move_speed got %s" % sp
-	return "" if is_equal_approx(g, 1.4) else "lucky_coin gold_find_mult want 1.4 got %s" % g
+	return "" if is_equal_approx(g, 1.6) else "gold_magnet gold_find_mult want 1.6 got %s" % g
 
 
 func test_round_trip() -> String:
@@ -299,10 +309,11 @@ func test_max_health() -> String:
 	if s.max_health() != 4 or s.health != 3: var m: String = "extra heart want 3/4 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
 	heart.remove(s)
 	if s.max_health() != 3 or s.health != 3: var m: String = "remove want 3/3 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
-	var gold := ItemDb.make("golden_heart")
-	gold.apply(s)
-	if s.max_health() != 5 or s.health != 5: var m: String = "golden heart want 5/5 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
-	gold.remove(s)
+	var h1 := ItemDb.make("extra_heart")
+	var h2 := ItemDb.make("extra_heart")
+	h1.apply(s); h2.apply(s)
+	if s.max_health() != 5 or s.health != 5: var m: String = "two extra hearts want 5/5 got %d/%d" % [s.health, s.max_health()]; s.free(); return m
+	h1.remove(s); h2.remove(s)
 	s.take_hit(1, true); s._invuln_left = 0.0; s.take_hit(1, true)   # 1/3
 	var slip := ItemDb.make("ghost_slippers")   # -1 max heart
 	slip.apply(s)
