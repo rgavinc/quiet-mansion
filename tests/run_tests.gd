@@ -23,6 +23,15 @@ func _run() -> void:
 		for f in result["failures"]:
 			all_fail.append(f)
 			printerr("FAIL: ", f)
+	# Scene suites: real physics frames (await).
+	for path in ["res://tests/scene_catch.gd"]:
+		var ss: RefCounted = load(path).new()
+		var r: Dictionary = await ss.run_async(self)
+		total_passed += int(r["passed"])
+		total_checks += int(r["total"])
+		for f in r["failures"]:
+			all_fail.append(f)
+			printerr("FAIL: ", f)
 	print("Result: %d / %d passed" % [total_passed, total_checks])
 	if all_fail.size() > 0:
 		quit(1)

@@ -3,10 +3,13 @@ extends CharacterBody2D
 
 @export var hear_radius: float = 160.0
 @export var chase_speed: float = 95.0
-@export var catch_distance: float = 22.0
+## Catch = the player's body overlapping this hit Area2D. Independent of the movement
+## collider and the art, so neither can silently remove the danger again.
+@export var hit_radius: float = 18.0
 
 var enraged: bool = false
 var _spr: AnimatedSprite2D
+var hitbox: Area2D
 
 func _ready() -> void:
 	add_to_group("puppets")
@@ -16,6 +19,17 @@ func _ready() -> void:
 	add_child(_spr)
 	_set_calm_tex()
 	NoiseBus.noise.connect(_on_bus_noise)
+	hitbox = Area2D.new()
+	hitbox.name = "Hitbox"
+	hitbox.collision_layer = 0
+	hitbox.collision_mask = PlayerStats.LAYER_PLAYER
+	hitbox.monitorable = false
+	var hs := CollisionShape2D.new()
+	var hc := CircleShape2D.new()
+	hc.radius = hit_radius
+	hs.shape = hc
+	hitbox.add_child(hs)
+	add_child(hitbox)
 
 func _set_calm_tex() -> void:
 	_play("puppet_calm")
@@ -75,12 +89,17 @@ func _physics_process(_delta: float) -> void:
 	var dir := (player.global_position - global_position).normalized()
 	velocity = dir * chase_speed
 	move_and_slide()
-	if global_position.distance_to(player.global_position) <= catch_distance:
+	if _touching_player(player):
 		# A touch costs one heart (3 = game over via PlayerStats); invuln_time stops repeat hits.
 		if PlayerStats.take_hit(1):
 			# Shove with collision so a hit can never push the boy through a wall or off the map.
 			if player is PhysicsBody2D:
 				(player as PhysicsBody2D).move_and_collide(dir * 48.0)
+
+func _touching_player(player: Node2D) -> bool:
+	# Polled every frame (not body_entered) so a boy who stays in contact after invuln ends is hit again.
+	return hitbox != null and hitbox.overlaps_body(player)
+
 
 ## Knock while calm can kill; while enraged or miss → noise risk (caller emits noise).
 func try_knock_kill() -> bool:

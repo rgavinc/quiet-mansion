@@ -24,7 +24,6 @@ func run_all() -> Dictionary:
 		["knock_noise_once", test_knock_noise_once],
 		["knocked_prop_hits_enemy_where_it_lands", test_knock_lands_on_enemy],
 		["player_and_puppet_never_block_each_other", test_layers],
-		["puppet_catch_costs_heart_in_scene", test_catch_in_scene],
 		["full_pickup_is_pickup_time_from_press", test_pickup_total_time],
 	]
 	var passed := 0
@@ -231,20 +230,6 @@ func test_layers() -> String:
 	if p.collision_mask & e.collision_layer: return "player collides with puppet"
 	if e.collision_mask & p.collision_layer: return "puppet collides with player"
 	return ""
-
-
-## Real colliders (main.gd sizes: player r12, puppet r14), real move_and_slide.
-func test_catch_in_scene() -> String:
-	var p := _player(Vector2(100, 100))
-	var pc := CollisionShape2D.new(); var c1 := CircleShape2D.new(); c1.radius = 12; pc.shape = c1; p.add_child(pc)
-	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
-	var ec := CollisionShape2D.new(); var c2 := CircleShape2D.new(); c2.radius = 14; ec.shape = c2; e.add_child(ec)
-	_add(e, Vector2(160, 100))
-	e._alert()
-	for i in 120:
-		e._physics_process(1.0 / 60.0)
-		if PlayerStats.health < 3: break
-	return "" if PlayerStats.health == 2 else "puppet never caught (hp %d, gap %.1f)" % [PlayerStats.health, e.global_position.distance_to(p.global_position)]
 
 
 func test_pickup_total_time() -> String:
