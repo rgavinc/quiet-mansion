@@ -170,7 +170,7 @@ frames = 7
 fps = 14
 loop = false
 pivot = [32, 63]
-notes = "64x64 puppet startled by flashlight (hero moment): 0 notice, 1 anticipation squash, 2 impact (white flash, smear, jaw splits, red eye glint), 3 overshoot scream (rows of teeth), 4 rebound, 5 finger wobble, 6 stunned hold. Play once and hold the last frame (6) while stunned"
+notes = "64x64 puppet startled by flashlight (hero moment): 0 notice, 1 anticipation squash, 2 impact (white flash, smear, mouth splits, red eye glint), 3 overshoot scream (mouth ~half the face height, red inner mouth, big teeth readable at 1x), 4 rebound, 5 finger wobble, 6 stunned hold. Play once and hold the last frame (6) while stunned"
 
 [[asset]]
 path = "assets/art/characters/puppet_chase.png"
@@ -181,7 +181,18 @@ frames = 8
 fps = 14
 loop = true
 pivot = [32, 63]
-notes = "64x64 enraged chase loop: jaws open wide over 0-3, snap shut on 4 (lunge + smear), finger-claw twitch, red eye glint on 3-4, red rim light"
+notes = "64x64 enraged SCUTTLE chase loop (moving right; flip_h for left): the fingers walk like legs on the floor in alternating pairs (feet planted on y=62-63 during stance), body leans forward and bobs on each contact (frames 0 and 4), sleeve trails behind, red scream mouth opens over 0-3 and snaps shut on 4 (lunge + smear), red eye glint on 3-4, red rim light"
+
+[[asset]]
+path = "assets/art/characters/puppet_chase_float.png"
+slot = "puppet_chase_float"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 14
+loop = true
+pivot = [32, 63]
+notes = "64x64 FLOATING enraged chase loop for the stage 4-5 float tier (the previous puppet_chase): jaws open wide over 0-3, snap shut on 4 (lunge + smear), finger-claw twitch, red eye glint on 3-4, red rim light"
 
 [[asset]]
 path = "assets/art/props/vase_idle.png"
