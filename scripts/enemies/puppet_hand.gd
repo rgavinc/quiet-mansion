@@ -13,7 +13,7 @@ func _ready() -> void:
 	_spr = Sprite2D.new()
 	_set_calm_tex()
 	add_child(_spr)
-	GameState.noise_made.connect(_on_noise)
+	NoiseBus.noise.connect(_on_bus_noise)
 
 func _set_calm_tex() -> void:
 	var tex := load("res://assets/art/characters/puppet_hand_calm.png")
@@ -24,6 +24,23 @@ func _set_enraged_tex() -> void:
 	var tex := load("res://assets/art/characters/puppet_hand_enraged.png")
 	if tex and _spr:
 		_spr.texture = tex
+
+## Hears any noise whose radius reaches it, on screen or not.
+func _on_bus_noise(at: Vector2, radius: float, _loudness: float, _source: Node) -> void:
+	if enraged or GameState.game_over:
+		return
+	if NoiseBus.can_hear(global_position, at, radius):
+		_alert()
+
+
+## Thrown object hit: calm puppet is destroyed, an enraged one is stunned briefly.
+var _stun_left: float = 0.0
+func on_hit_by_throw(_item: Dictionary) -> void:
+	if not enraged:
+		queue_free()
+	else:
+		_stun_left = 1.5
+
 
 func _on_noise(level: float, at: Vector2) -> void:
 	if enraged or GameState.game_over:
@@ -38,6 +55,10 @@ func _alert() -> void:
 
 func _physics_process(_delta: float) -> void:
 	if GameState.game_over or not enraged:
+		velocity = Vector2.ZERO
+		return
+	if _stun_left > 0.0:
+		_stun_left -= _delta
 		velocity = Vector2.ZERO
 		return
 	var player := get_tree().get_first_node_in_group("player") as Node2D
