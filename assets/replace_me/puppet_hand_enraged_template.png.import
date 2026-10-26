@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bbj3bvmfnbpqq"
-path="res://.godot/imported/exit_door.png-48dc296ce2d4ee598474bf7ecd4d01e0.ctex"
+uid="uid://d2ox25o0dfioi"
+path="res://.godot/imported/puppet_hand_enraged_template.png-37a1d70198f5ebe87cf713dad5b0abed.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/replace_me/exit_door.png"
-dest_files=["res://.godot/imported/exit_door.png-48dc296ce2d4ee598474bf7ecd4d01e0.ctex"]
+source_file="res://assets/replace_me/puppet_hand_enraged_template.png"
+dest_files=["res://.godot/imported/puppet_hand_enraged_template.png-37a1d70198f5ebe87cf713dad5b0abed.ctex"]
 
 [params]
 
