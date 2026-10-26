@@ -22,50 +22,9 @@ var _seed := -1
 
 
 func _build() -> void:
-	var art := UiScreen.backdrop(skin.game_over_slot)
-	has_art = art != null
-	if has_art:
-		root.add_child(art)
-		# Keep the dark right half readable even if the art is brighter than expected.
-		var shade := ColorRect.new()
-		shade.color = Color(0, 0, 0, 0.35)
-		shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		shade.anchor_left = 0.5
-		shade.anchor_right = 1.0
-		shade.anchor_bottom = 1.0
-		root.add_child(shade)
-	else:
-		var dim := ColorRect.new()
-		dim.name = "Dim"
-		dim.color = skin.screen_dim
-		dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-		root.add_child(dim)
-
-	# Right half column.
-	var col_host: Control
-	if has_art:
-		col_host = MarginContainer.new()
-	else:
-		col_host = PanelContainer.new()   # themed panel fallback
-	col_host.name = "TextPanel"
-	col_host.anchor_left = 0.5
-	col_host.anchor_right = 1.0
-	col_host.anchor_top = 0.0
-	col_host.anchor_bottom = 1.0
-	col_host.offset_left = 48
-	col_host.offset_right = -48
-	col_host.offset_top = 96
-	col_host.offset_bottom = -96
-	col_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(col_host)
-
-	var col := VBoxContainer.new()
-	col.name = "Column"
-	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_theme_constant_override(&"separation", 14)
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col_host.add_child(col)
+	var lay := UiScreen.right_half_layout(root, [skin.game_over_slot], skin.screen_dim)
+	has_art = lay.has_art
+	var col: VBoxContainer = lay.column
 
 	title = UiScreen.label("GAME OVER", 56, skin.title_color)
 	title.name = "Title"
@@ -77,14 +36,9 @@ func _build() -> void:
 	stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(stage_label)
 
-	var gold_row := HBoxContainer.new()
-	gold_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	gold_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	gold_row.add_child(UiScreen.coin_icon(skin.coin_slot, 28))
-	gold_label = UiScreen.label("", 26, skin.gold_color)
-	gold_label.name = "Gold"
-	gold_row.add_child(gold_label)
-	col.add_child(gold_row)
+	var gr := UiScreen.gold_row(skin.coin_slot, skin.gold_color)
+	gold_label = gr[1]
+	col.add_child(gr[0])
 
 	seed_label = UiScreen.label("", 18, Color(0.7, 0.68, 0.64))
 	seed_label.name = "Seed"

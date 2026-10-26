@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/map/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/ui/ai_watermark.gd" id="2_wm"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/world_overlay.tscn" id="4_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/ui/game_over.tscn" id="10_gameover"]
 [ext_resource type="PackedScene" path="res://scenes/ui/shop.tscn" id="11_shop"]
+[ext_resource type="PackedScene" path="res://scenes/ui/win_screen.tscn" id="12_win"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -29,6 +30,8 @@ script = ExtResource("1_main")
 [node name="GameOver" parent="." instance=ExtResource("10_gameover")]
 
 [node name="Shop" parent="." instance=ExtResource("11_shop")]
+
+[node name="WinScreen" parent="." instance=ExtResource("12_win")]
 
 [node name="AIWatermark" type="CanvasLayer" parent="."]
 layer = 100

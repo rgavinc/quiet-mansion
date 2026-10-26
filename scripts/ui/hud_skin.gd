@@ -88,6 +88,9 @@ static func load_default() -> HudSkin:
 @export var shop_backdrop_slot: String = "shop_backdrop"
 @export var merchant_slot: String = "merchant_idle"
 @export var game_over_slot: String = "game_over_art"
+## Win screen art (Designer, not merged yet); missing → game_over_slot styling → panel.
+@export var win_slot: String = "win_screen_art"
+@export var win_title_color: Color = Color(1.0, 0.8, 0.3)
 @export var coin_slot: String = "gold_coin"
 @export var sparkle_slot: String = "gold_pickup_sparkle"
 ## Merchant x / counter-top y in shop_backdrop pixels (320x180 still).

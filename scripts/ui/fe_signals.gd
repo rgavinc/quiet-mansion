@@ -53,12 +53,19 @@ signal player_died
 ## REAL: GameState.reached_exit → stage cleared → shop (Lead: no separate
 ## stage-complete signal is coming; reached_exit is the hook).
 signal stage_cleared(stage: int)
+## Stage MAX_STAGES' exit reached: the run is won. Win screen listens (no shop).
+signal run_won(stage: int)
 ## Level start (scene swap here, or BE/generator calls announce_stage). Banner listens.
 signal stage_started(stage: int)
 ## Shop purchase went through (offer dict, see get_shop_offer).
 signal item_purchased(offer: Dictionary)
 
 # --- Stat defaults (TODO(BE-wire): read from PlayerStats) -----------------
+## Stages per run (docs/PRODUCT.md: 5 stages; clearing stage 5 = win screen, not the
+## shop). The ONE place FE caps the run: no stage above this ever loads.
+## TODO(Lead): point at Lead's difficulty/stage table (PR #13 StageTable.stage_count())
+## once it is on development; nothing on development defines a stage count yet.
+const MAX_STAGES := 5
 ## Fresh-run hearts when no PlayerStats is wired (PlayerStats.BASE max_health).
 const DEFAULT_MAX_HEALTH := 3
 var max_health: int = 3
@@ -95,6 +102,12 @@ var run_seed: int = -1
 var swap_deferred := true
 ## Stage counter when the level scene has no `stage` property (pre PR #13).
 var stage: int = 1
+## Seconds of unpaused play this run (win screen). Reset by restart_run().
+var run_time: float = 0.0
+## The current level's exit was already handled (guards double triggers).
+var _exit_handled := false
+## Stage MAX_STAGES was cleared; nothing advances until a new run.
+var _run_won := false
 ## Demo-only shop stock: Callable(count: int, stage: int, seed: int) -> Array[Dictionary].
 ## Never set in the real game; real stock comes from BE's Shop (see get_shop_offer).
 var shop_stub: Callable = Callable()
@@ -135,7 +148,31 @@ func wire_game_state(gs: Node) -> void:
 		return
 	_gs = gs
 	if gs.has_signal(&"reached_exit"):
-		gs.reached_exit.connect(func(): stage_cleared.emit(get_stage()))
+		gs.reached_exit.connect(on_reached_exit)
+
+
+## GameState.reached_exit → shop on stages 1..MAX_STAGES-1, win screen on the last.
+## Repeat triggers for the same level (or after the win) are ignored.
+func on_reached_exit() -> void:
+	if _exit_handled or _run_won:
+		return
+	_exit_handled = true
+	var s := get_stage()
+	if s >= MAX_STAGES:
+		_win(s)
+	else:
+		stage_cleared.emit(s)
+
+
+func is_run_won() -> bool:
+	return _run_won
+
+
+func _win(s: int) -> void:
+	if _run_won:
+		return
+	_run_won = true
+	run_won.emit(s)
 
 
 ## Explicit PlayerStats → HUD connection (also used by tests with a fresh instance).
@@ -427,6 +464,7 @@ func enemy_type_id(enemy: Node) -> String:
 
 
 func _process(delta: float) -> void:
+	run_time += delta   # pauses with the tree (screens / shop)
 	# Placeholder startle integration (remove once BE emits startle progress).
 	_prune()
 	if _lit.is_empty():
@@ -634,6 +672,8 @@ func restart_run(new_seed: int = -1, _at_stage: int = 1) -> void:
 		set_gold(0)
 	run_seed = new_seed if new_seed >= 0 else -1
 	stage = 1
+	run_time = 0.0
+	_run_won = false
 	_request_swap(run_seed, 1, true)
 
 
@@ -650,9 +690,21 @@ func get_run_seed() -> int:
 	return s
 
 
-## Shop Continue: keep hearts/gold/items, load the next stage of the SAME run seed.
+## Shop Continue → stage + 1 of the SAME run seed (docs/PRODUCT.md carry-over):
+##   kept   — hearts (incl. max), gold, bought/chest items (PlayerStats modifiers are
+##            NOT reset);
+##   dropped — held props (vases etc.): they belong to the level. The player's
+##            Inventory lives in the level scene, so re-instancing empties it, and the
+##            FE inventory mirror is cleared too.
+## Hard cap: at MAX_STAGES this never loads a stage; it ends the run (win) instead.
 func next_stage() -> void:
-	stage = get_stage() + 1
+	if _run_won:
+		return
+	var cur := get_stage()
+	if cur >= MAX_STAGES:
+		_win(cur)
+		return
+	stage = cur + 1
 	_request_swap(get_run_seed(), stage, false)
 
 
@@ -664,8 +716,8 @@ func _request_swap(level_seed: int, at_stage: int, fresh: bool) -> void:
 
 
 func _swap_scene(level_seed: int, at_stage: int, fresh: bool = false) -> void:
-	if not is_inside_tree():
-		return
+	if not is_inside_tree() or at_stage < 1 or at_stage > MAX_STAGES:
+		return   # hard cap: no stage outside 1..MAX_STAGES ever loads
 	var tree := get_tree()
 	tree.paused = false
 	var gs := get_node_or_null(^"/root/GameState")
@@ -683,7 +735,8 @@ func _swap_scene(level_seed: int, at_stage: int, fresh: bool = false) -> void:
 	var keep_h := health
 	var keep_max := max_health
 	var keep_g := gold
-	reset()   # FE state incl. inventory items
+	reset()   # FE state incl. the inventory mirror (held props are dropped)
+	_exit_handled = false
 	stage = at_stage
 	if fresh:
 		set_health(health, max_health)   # values already fresh from PlayerStats.reset()
@@ -714,3 +767,5 @@ func reset() -> void:
 	items.clear()
 	selected_index = -1
 	_chase_reported = false
+	_exit_handled = false
+	_run_won = false
