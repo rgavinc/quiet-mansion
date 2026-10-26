@@ -6,6 +6,8 @@ extends Area2D
 @export var bottom: Vector2 = Vector2(-48, 0)
 @export var top: Vector2 = Vector2(48, -160)
 @export var width: float = 20.0
+@export var from_floor: int = 0   # LEVELGEN.md: lower floor index
+@export var to_floor: int = 1     # upper floor index
 
 
 func _ready() -> void:
