@@ -6,7 +6,8 @@ extends Node2D
 ## hold LMB `interact` near the vase = pickup · tap LMB = throw held vase at the
 ## ringed enemy · scroll inv_next/inv_prev.
 ## DEBUG-ONLY keys (demo only, not game controls): H hit, J heal, G +gold,
-## C make the far enemy chase, R reset.
+## C make the far enemy chase, K die (game-over screen), E reach exit (shop), R reset.
+## The shop here uses PLACEHOLDER_ITEMS via FESignals.shop_stub (demo only).
 
 const WORLD_W := 3200.0
 const FLOOR_Y := 560.0
@@ -27,6 +28,28 @@ var _pickup_target: Node2D = null
 var _pickup_t: float = 0.0
 var _help: Label
 
+## DEMO-ONLY shop stock, shaped exactly like BE's Item (id, display_name,
+## description, icon_slot, price, rarity). Icon slots are PR #14's item icons.
+const PLACEHOLDER_ITEMS := [
+	{"id": "extra_heart", "display_name": "Extra Heart", "description": "+1 max health.", "icon_slot": "item_icon_extra_heart", "price": 8, "rarity": "uncommon"},
+	{"id": "soft_shoes", "display_name": "Soft Shoes", "description": "Quieter footsteps.", "icon_slot": "item_icon_soft_shoes", "price": 6, "rarity": "common"},
+	{"id": "bright_bulb", "display_name": "Bright Bulb", "description": "Flashlight startles faster.", "icon_slot": "item_icon_bright_bulb", "price": 10, "rarity": "rare"},
+	{"id": "minimap", "display_name": "Minimap", "description": "Shows the floor layout.", "icon_slot": "item_icon_minimap", "price": 12, "rarity": "rare"},
+	{"id": "lucky_coin", "display_name": "Lucky Coin", "description": "More gold from vases.", "icon_slot": "item_icon_lucky_coin", "price": 15, "rarity": "epic"},
+]
+
+
+func demo_stock(count: int, stage: int, run_seed: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([stage, run_seed])
+	var pool := PLACEHOLDER_ITEMS.duplicate()
+	for i in range(pool.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t = pool[i]
+		pool[i] = pool[j]
+		pool[j] = t
+	return pool.slice(0, mini(count, pool.size()))
+
 
 func _ready() -> void:
 	bus = get_node_or_null("/root/FESignals")
@@ -36,7 +59,8 @@ func _ready() -> void:
 	bus.flashlight_toggled.connect(_on_flashlight)
 	_build_world()
 	bus.set_health(3, 3)
-	bus.set_gold(12)
+	_give_gold(12)
+	bus.shop_stub = demo_stock
 	bus.set_items([])   # empty hands: tap knocks, hold picks up
 	_on_flashlight(bus.flashlight_on)
 
@@ -44,6 +68,16 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if bus:
 		bus.placeholder_input_enabled = false
+		bus.shop_stub = Callable()
+
+
+## Demo gold goes through PlayerStats when it's there, so shop try_spend sees it.
+func _give_gold(n: int) -> void:
+	var ps := get_node_or_null(^"/root/PlayerStats")
+	if ps and ps.has_method(&"add_gold"):
+		ps.add_gold(n)
+	else:
+		bus.set_gold(bus.gold + n)
 
 
 func _build_world() -> void:
@@ -107,6 +141,7 @@ func _build_world() -> void:
 		hand.color = Color(0.75, 0.6, 0.65) if sp[1] == "puppet_hand" else Color(0.55, 0.7, 0.55)
 		hand.polygon = PackedVector2Array([Vector2(-16, 26), Vector2(-18, -6), Vector2(-10, -26), Vector2(-3, -10), Vector2(2, -28), Vector2(8, -10), Vector2(16, -22), Vector2(18, 26)])
 		e.add_child(hand)
+		e.add_to_group(&"enemies")   # FE alert HUD counts this group
 		$World.add_child(e)
 		enemies.append(e)
 		homes[e.get_instance_id()] = e.position
@@ -276,7 +311,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		match (event as InputEventKey).physical_keycode:   # DEBUG ONLY
 			KEY_H: bus.set_health(bus.health - 1)
 			KEY_J: bus.set_health(bus.health + 1)
-			KEY_G: bus.set_gold(bus.gold + 5)
+			KEY_G: _give_gold(5)
+			KEY_K: bus.player_died.emit()
+			KEY_E: bus.stage_cleared.emit(bus.get_stage())
 			KEY_C:
 				var far := enemies[enemies.size() - 1]
 				if is_instance_valid(far):

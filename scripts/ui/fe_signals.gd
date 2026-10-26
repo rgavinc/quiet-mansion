@@ -47,6 +47,17 @@ signal inventory_changed(items: Array)
 ## TODO(BE-wire): Inventory.selected_changed.
 signal inventory_selected(index: int)
 
+# --- Run flow: screens / banner / alerts -----------------------------------
+## REAL: PlayerStats.died (hearts hit 0). Game-over screen listens.
+signal player_died
+## REAL: GameState.reached_exit → stage cleared → shop. TODO(BE-wire): switch to the
+## generator's stage-complete signal if PR #13 (level generator) adds one.
+signal stage_cleared(stage: int)
+## Level start (scene swap here, or BE/generator calls announce_stage). Banner listens.
+signal stage_started(stage: int)
+## Shop purchase went through (offer dict, see get_shop_offer).
+signal item_purchased(offer: Dictionary)
+
 # --- Stat defaults (TODO(BE-wire): read from PlayerStats) -----------------
 var max_health: int = 3
 var startle_time: float = 1.0
@@ -75,6 +86,16 @@ var selected_index: int = -1
 ## flashlight_toggle itself. Keep false in the real game (BE owns input).
 var placeholder_input_enabled: bool = false
 
+## Stage counter when the level scene has no `stage` property (pre PR #13).
+var stage: int = 1
+## Demo-only shop stock: Callable(count: int, stage: int, seed: int) -> Array[Dictionary].
+## Never set in the real game; real stock comes from BE's Shop (see get_shop_offer).
+var shop_stub: Callable = Callable()
+## True once any report_chase() arrives; until then chase count is polled from enemies.
+var _chase_reported: bool = false
+var _gs: Node = null
+var _shop: Object = null
+
 ## Placeholder startle integration: enemies currently in the beam.
 var _lit: Dictionary = {}           # instance_id -> enemy
 
@@ -96,6 +117,18 @@ func _wire_backend() -> void:
 		push_warning("FESignals: /root/PlayerStats missing; hearts/gold stay on placeholder values")
 		return
 	wire_player_stats(ps)
+	var gs := get_node_or_null(^"/root/GameState")
+	if gs:
+		wire_game_state(gs)
+
+
+## GameState.reached_exit → stage_cleared(stage). Explicit so tests can wire a fake.
+func wire_game_state(gs: Node) -> void:
+	if _gs != null:
+		return
+	_gs = gs
+	if gs.has_signal(&"reached_exit"):
+		gs.reached_exit.connect(func(): stage_cleared.emit(get_stage()))
 
 
 ## Explicit PlayerStats → HUD connection (also used by tests with a fresh instance).
@@ -103,6 +136,8 @@ func wire_player_stats(ps: Node) -> void:
 	if _stats != null:
 		return
 	_stats = ps
+	if ps.has_signal(&"died"):
+		ps.died.connect(func(): player_died.emit())
 	ps.health_changed.connect(_on_ps_health)
 	ps.gold_changed.connect(_on_ps_gold)
 	startle_time = ps.get_stat(&"light_startle_time")
@@ -279,6 +314,7 @@ func report_chase(enemy: Node2D, is_chasing: bool) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
 	var idx := chasing.find(enemy)
+	_chase_reported = true
 	if is_chasing and idx == -1:
 		chasing.append(enemy)
 		_track(enemy)
@@ -408,6 +444,219 @@ func _unhandled_input(event: InputEvent) -> void:
 		toggle_flashlight()
 
 
+# --- Enemy registry / alert count ------------------------------------------
+## Every live enemy on the stage: groups `enemies` and `puppets` (deduped).
+## TODO(BE-wire): BE enemy registry if one lands.
+func get_enemies() -> Array:
+	var out: Array = []
+	if not is_inside_tree():
+		return out
+	for g in [&"enemies", &"puppets"]:
+		for e in get_tree().get_nodes_in_group(g):
+			if is_instance_valid(e) and not e.is_queued_for_deletion() and not out.has(e):
+				out.append(e)
+	return out
+
+
+## Enemies chasing right now. Uses report_chase() once BE sends it; until then polls
+## each enemy's `is_chasing()` / `enraged`. TODO(BE-wire): Enemy CHASE state signal.
+func chasing_count() -> int:
+	if _chase_reported:
+		var n := 0
+		for raw in chasing:
+			if is_instance_valid(raw):
+				n += 1
+		return n
+	var n := 0
+	for e in get_enemies():
+		if e.has_method(&"is_chasing"):
+			n += 1 if e.is_chasing() else 0
+		elif "enraged" in e and e.get("enraged"):
+			n += 1
+	return n
+
+
+func enemy_total() -> int:
+	return get_enemies().size()
+
+
+# --- Run info (stage / seed) -------------------------------------------------
+## Stage from the level scene's `stage` (PR #13 main.gd), else the FE counter.
+func get_stage() -> int:
+	var s := _scene()
+	if s and "stage" in s and int(s.get("stage")) > 0:
+		return int(s.get("stage"))
+	return stage
+
+
+## Level seed from the scene's `level_seed` (PR #13), else -1 = no seed (hide it).
+func get_seed() -> int:
+	var s := _scene()
+	if s and "level_seed" in s:
+		return int(s.get("level_seed"))
+	return -1
+
+
+func _scene() -> Node:
+	if not is_inside_tree():
+		return null
+	return get_tree().current_scene
+
+
+## BE / generator can call this at level start; the banner shows "Stage N".
+func announce_stage(n: int = -1) -> void:
+	if n > 0:
+		stage = n
+	stage_started.emit(get_stage())
+
+
+# --- Shop adapter --------------------------------------------------------------
+## Offer dicts mirror BE's Item exactly: {id, display_name, description, icon_slot,
+## price, rarity, item}. `item` is the real Item (or null for stubs).
+## Source order: BE `Shop.roll_stock(stage, seed) -> Array[Item]` if a global class
+## `Shop` exists, else `shop_stub` (demo only), else []. TODO(BE-wire): drop the
+## class lookup once Shop is an autoload / known class on development.
+func get_shop_offer(count: int = 3, for_stage: int = -1, for_seed: int = -1) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if count <= 0:
+		return out
+	var st := for_stage if for_stage > 0 else get_stage()
+	var sd := for_seed if for_seed >= 0 else get_seed()
+	var raw: Array = []
+	var shop := _get_shop()
+	if shop and shop.has_method(&"roll_stock"):
+		var r = shop.roll_stock(st, sd)
+		if r is Array:
+			raw = r
+	elif shop_stub.is_valid():
+		var r = shop_stub.call(count, st, sd)
+		if r is Array:
+			raw = r
+	for it in raw:
+		var d := item_to_offer(it)
+		if not d.is_empty():
+			out.append(d)
+		if out.size() >= count:
+			break
+	return out
+
+
+## Item (BE resource) or Dictionary → offer dict. Missing fields get safe defaults.
+static func item_to_offer(it) -> Dictionary:
+	if it == null:
+		return {}
+	var get_f := func(k: String, def):
+		if it is Dictionary:
+			return it.get(k, def)
+		if it is Object and is_instance_valid(it) and k in it:
+			var v = it.get(k)
+			return def if v == null else v
+		return def
+	var d := {
+		"id": str(get_f.call("id", "")),
+		"display_name": str(get_f.call("display_name", get_f.call("id", "?"))),
+		"description": str(get_f.call("description", "")),
+		"icon_slot": str(get_f.call("icon_slot", "")),
+		"price": maxi(int(get_f.call("price", 0)), 0),
+		"rarity": str(get_f.call("rarity", "common")),
+		"item": it if it is Object else null,
+	}
+	return d
+
+
+## Buy one offer. BE `Shop.buy(item)` when available (it spends via PlayerStats.try_spend
+## and applies the item); otherwise spend via try_spend() and call item.apply() if any.
+func buy_offer(offer: Dictionary) -> bool:
+	if offer.is_empty():
+		return false
+	var item = offer.get("item", null)
+	var shop := _get_shop()
+	var ok := false
+	if shop and item != null and shop.has_method(&"buy"):
+		ok = bool(shop.buy(item))
+	else:
+		ok = try_spend(int(offer.get("price", 0)))
+		if ok and item is Object and is_instance_valid(item) and item.has_method(&"apply"):
+			item.apply()
+	if ok:
+		item_purchased.emit(offer)
+	return ok
+
+
+## Gold spend: PlayerStats.try_spend when wired, else the placeholder gold.
+func try_spend(cost: int) -> bool:
+	if _stats != null and is_instance_valid(_stats):
+		return bool(_stats.try_spend(cost))
+	if cost < 0 or cost > gold:
+		return false
+	set_gold(gold - cost)
+	return true
+
+
+func _get_shop() -> Object:
+	if _shop != null and is_instance_valid(_shop):
+		return _shop
+	var root := get_node_or_null(^"/root/Shop") if is_inside_tree() else null
+	if root:
+		_shop = root
+		return _shop
+	for c in ProjectSettings.get_global_class_list():
+		if str(c.get("class", "")) == "Shop":
+			var scr = load(str(c.get("path", "")))
+			if scr is Script and scr.can_instantiate():
+				_shop = scr.new()
+				if _shop is Node:
+					add_child(_shop)
+			break
+	return _shop
+
+
+# --- Run flow ---------------------------------------------------------------------
+## Retry / New run: fresh stats, same (or new) seed, stage 1 (or given).
+## seed -1 = let the level roll a new one.
+func restart_run(run_seed: int = -1, at_stage: int = 1) -> void:
+	if _stats != null and is_instance_valid(_stats) and _stats.has_method(&"reset"):
+		_stats.reset()
+	stage = maxi(at_stage, 1)
+	_swap_scene.call_deferred(run_seed, stage)
+
+
+## Shop Continue: keep hearts/gold/items, load the next stage with the same run seed.
+func next_stage() -> void:
+	stage = get_stage() + 1
+	_swap_scene.call_deferred(get_seed(), stage)
+
+
+func _swap_scene(run_seed: int, at_stage: int) -> void:
+	if not is_inside_tree():
+		return
+	var tree := get_tree()
+	tree.paused = false
+	var gs := get_node_or_null(^"/root/GameState")
+	if gs and gs.has_method(&"reset"):
+		gs.reset()
+	var cur := tree.current_scene
+	if cur == null or cur.scene_file_path.is_empty():
+		return
+	var packed: PackedScene = load(cur.scene_file_path)
+	var inst := packed.instantiate()
+	if "level_seed" in inst:
+		inst.set("level_seed", run_seed)
+	if "stage" in inst:
+		inst.set("stage", at_stage)
+	var keep_h := health
+	var keep_max := max_health
+	var keep_g := gold
+	reset()
+	stage = at_stage
+	set_health(keep_h, keep_max)
+	set_gold(keep_g)
+	tree.root.remove_child(cur)
+	cur.queue_free()
+	tree.root.add_child(inst)
+	tree.current_scene = inst
+
+
 ## Clears all state (tests / scene reloads).
 func reset() -> void:
 	health = max_health
@@ -422,3 +671,4 @@ func reset() -> void:
 	pickup_value = 0.0
 	items.clear()
 	selected_index = -1
+	_chase_reported = false

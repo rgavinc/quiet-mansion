@@ -1,16 +1,21 @@
 extends CanvasLayer
-## Screen-space FE HUD root: hearts + gold (top-left), inventory strip
-## (bottom-centre), off-screen chaser arrows (full screen).
+## Screen-space FE HUD root: hearts + gold (top-left), alert counter (top-right),
+## inventory strip (bottom-centre), off-screen chaser arrows (full screen), and
+## the "Stage N" intro banner. Game-over / shop screens are separate layers.
 ## Instance `scenes/ui/hud.tscn` once per level. All data via FESignals.
 
 const HealthGoldHud := preload("res://scripts/ui/health_gold_hud.gd")
 const InventoryStrip := preload("res://scripts/ui/inventory_strip.gd")
 const OffscreenArrows := preload("res://scripts/ui/offscreen_arrows.gd")
+const AlertHud := preload("res://scripts/ui/alert_hud.gd")
+const StageBanner := preload("res://scripts/ui/stage_banner.gd")
 
 var skin: HudSkin
 var health_gold: Control
 var inventory: Control
 var arrows: Control
+var alert: Control
+var banner: Control
 
 
 func _ready() -> void:
@@ -43,6 +48,17 @@ func _ready() -> void:
 	inventory.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE)
 	inventory.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	inventory.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	alert = AlertHud.new()
+	alert.name = "AlertHud"
+	alert.skin = skin
+	root.add_child(alert)
+	alert.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE)
+	alert.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
+	banner = StageBanner.new()
+	banner.name = "StageBanner"
+	banner.skin = skin
+	root.add_child(banner)
 	# Display-only HUD: never eat clicks meant for the game (LMB pickup/throw).
 	_ignore_mouse(root)
 	child_entered_tree.connect(_ignore_mouse)

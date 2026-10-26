@@ -80,3 +80,35 @@ static func load_default() -> HudSkin:
 		if r is HudSkin:
 			return r
 	return HudSkin.new()
+
+@export_group("Screens")
+## Merchant shop: offers rolled per visit.
+@export var shop_offer_count: int = 3
+## Art slots (PR #14 names). Missing slot → themed panel / placeholder shapes.
+@export var shop_backdrop_slot: String = "shop_backdrop"
+@export var merchant_slot: String = "merchant_idle"
+@export var game_over_slot: String = "game_over_art"
+@export var coin_slot: String = "gold_coin"
+@export var sparkle_slot: String = "gold_pickup_sparkle"
+## Merchant x / counter-top y in shop_backdrop pixels (320x180 still).
+@export var merchant_x: float = 172.0
+@export var counter_y: float = 110.0
+@export var screen_dim: Color = Color(0.02, 0.01, 0.03, 0.82)
+@export var title_color: Color = Color(0.85, 0.2, 0.2)
+@export var rarity_colors: Dictionary = {
+	"common": Color(0.8, 0.78, 0.72),
+	"uncommon": Color(0.45, 0.85, 0.45),
+	"rare": Color(0.4, 0.65, 1.0),
+	"epic": Color(0.8, 0.45, 1.0),
+	"legendary": Color(1.0, 0.7, 0.2),
+}
+
+@export_group("Alert HUD")
+@export var alert_calm: Color = Color(0.75, 0.72, 0.68)
+@export var alert_hot: Color = Color(1.0, 0.25, 0.2)
+## Pips drawn up to this many enemies; beyond it the numbers carry it.
+@export var alert_max_pips: int = 16
+
+@export_group("Stage banner")
+@export var banner_hold: float = 1.2
+@export var banner_fade: float = 0.6
