@@ -1,6 +1,6 @@
 extends Node2D
-## Dashed aim line from the boy to the selected (ringed) enemy, shown while the
-## selected inventory item is throwable. Turns red when a physics ray hits a
+## Dashed aim line from the boy to the selected (ringed) enemy. Shown exactly
+## when the boy is holding something AND an enemy is ringed (FESignals.can_throw). Turns red when a physics ray hits a
 ## wall/prop (anything but the boy and the target) first, and marks the hit.
 ## Listens to FESignals.enemy_selected / inventory_selected / inventory_changed.
 
@@ -31,11 +31,7 @@ func _ready() -> void:
 func should_show() -> bool:
 	if bus == null:
 		return false
-	var e: Node2D = bus.selected_enemy
-	if e == null or not is_instance_valid(e):
-		return false
-	var it: Dictionary = bus.selected_item()
-	return bool(it.get("throwable", false))
+	return bus.can_throw()
 
 
 func _physics_process(_delta: float) -> void:

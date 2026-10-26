@@ -43,3 +43,19 @@ func _ready() -> void:
 	inventory.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE)
 	inventory.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	inventory.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# Display-only HUD: never eat clicks meant for the game (LMB pickup/throw).
+	_ignore_mouse(root)
+	child_entered_tree.connect(_ignore_mouse)
+	get_tree().node_added.connect(_on_node_added)
+
+
+func _on_node_added(n: Node) -> void:
+	if n is Control and is_ancestor_of(n):
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+static func _ignore_mouse(n: Node) -> void:
+	if n is Control:
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for c in n.get_children():
+		_ignore_mouse(c)
