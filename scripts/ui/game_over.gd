@@ -74,6 +74,9 @@ func _connect_bus(b: Node) -> void:
 
 ## Snapshot the run and open. Safe to call more than once.
 func show_for_run() -> void:
+	# End-of-run latch: never open while the other end screen owns the run.
+	if bus and bus.has_method(&"claim_run_end") and not bus.claim_run_end(&"died"):
+		return
 	_stage = int(bus.get_stage()) if bus and bus.has_method(&"get_stage") else 1
 	# The RUN seed (stage-1 seed), not a per-stage seed.
 	_seed = int(bus.get_run_seed()) if bus and bus.has_method(&"get_run_seed") else -1

@@ -108,6 +108,10 @@ var run_time: float = 0.0
 var _exit_handled := false
 ## Stage MAX_STAGES was cleared; nothing advances until a new run.
 var _run_won := false
+## Single end-of-run latch: &"" while playing, &"won" or &"died" once ONE end screen
+## owns the run. Every other end-of-run event (died, reached_exit, win) is ignored
+## until New run / Retry seed (restart_run → reset) clears it.
+var _run_end: StringName = &""
 ## Demo-only shop stock: Callable(count: int, stage: int, seed: int) -> Array[Dictionary].
 ## Never set in the real game; real stock comes from BE's Shop (see get_shop_offer).
 var shop_stub: Callable = Callable()
@@ -154,7 +158,7 @@ func wire_game_state(gs: Node) -> void:
 ## GameState.reached_exit → shop on stages 1..MAX_STAGES-1, win screen on the last.
 ## Repeat triggers for the same level (or after the win) are ignored.
 func on_reached_exit() -> void:
-	if _exit_handled or _run_won:
+	if _exit_handled or _run_won or is_run_over():
 		return
 	_exit_handled = true
 	var s := get_stage()
@@ -169,10 +173,51 @@ func is_run_won() -> bool:
 
 
 func _win(s: int) -> void:
-	if _run_won:
+	if _run_won or not claim_run_end(&"won"):
 		return
 	_run_won = true
 	run_won.emit(s)
+
+
+## True once the run has ended (win or death) and an end screen owns it.
+func is_run_over() -> bool:
+	return _run_end != &""
+
+
+## &"", &"won" or &"died".
+func run_end_kind() -> StringName:
+	return _run_end
+
+
+## Claims the end of the run for `kind`. True if it is free or already `kind` (the
+## same screen re-checking); false if the OTHER end already owns it. Both end
+## screens call this before opening, so at most one is ever open.
+func claim_run_end(kind: StringName) -> bool:
+	if _run_end == &"":
+		_run_end = kind
+		return true
+	return _run_end == kind
+
+
+## BE's own run-over flag on the wired GameState, if it has one (existence check, so
+## this works before and after BE PR #21). PR #21 uses `GameState.game_over` (no
+## separate `run_over`): set on
+## reached_exit (every stage, incl. the win) and on_caught, cleared by reset() when
+## the next stage / new run loads. PlayerStats emits `died` BEFORE it calls
+## on_caught(), so a set flag at death time means the exit/win came first.
+func _be_run_over() -> bool:
+	if _gs == null or not is_instance_valid(_gs):
+		return false
+	return &"game_over" in _gs and bool(_gs.get(&"game_over"))
+
+
+## PlayerStats.died → player_died, unless the run already ended (win screen open, a
+## second death) or BE says the run is over (exit/win reached first).
+func on_player_died() -> void:
+	if is_run_over() or _be_run_over():
+		return
+	if claim_run_end(&"died"):
+		player_died.emit()
 
 
 ## Explicit PlayerStats → HUD connection (also used by tests with a fresh instance).
@@ -181,7 +226,7 @@ func wire_player_stats(ps: Node) -> void:
 		return
 	_stats = ps
 	if ps.has_signal(&"died"):
-		ps.died.connect(func(): player_died.emit())
+		ps.died.connect(on_player_died)
 	ps.health_changed.connect(_on_ps_health)
 	ps.gold_changed.connect(_on_ps_gold)
 	startle_time = ps.get_stat(&"light_startle_time")
@@ -674,6 +719,7 @@ func restart_run(new_seed: int = -1, _at_stage: int = 1) -> void:
 	stage = 1
 	run_time = 0.0
 	_run_won = false
+	_run_end = &""
 	_request_swap(run_seed, 1, true)
 
 
@@ -698,8 +744,8 @@ func get_run_seed() -> int:
 ##            FE inventory mirror is cleared too.
 ## Hard cap: at MAX_STAGES this never loads a stage; it ends the run (win) instead.
 func next_stage() -> void:
-	if _run_won:
-		return
+	if _run_won or is_run_over():
+		return   # the run ended (win / death): only New run / Retry seed restart it
 	var cur := get_stage()
 	if cur >= MAX_STAGES:
 		_win(cur)
@@ -769,3 +815,4 @@ func reset() -> void:
 	_chase_reported = false
 	_exit_handled = false
 	_run_won = false
+	_run_end = &""
