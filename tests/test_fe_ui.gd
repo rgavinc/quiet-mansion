@@ -49,6 +49,11 @@ func run_all() -> Dictionary:
 		["win_double_trigger_never_advances", test_win_double_trigger],
 		["win_new_run_resets_to_stage1_fresh", test_win_new_run],
 		["continue_drops_held_props_keeps_gold_hearts_items", test_continue_carry_over],
+		["end_latch_win_then_died_only_win", test_latch_win_then_died],
+		["end_latch_died_then_exit_only_game_over", test_latch_died_then_exit],
+		["end_latch_same_frame_both_orders", test_latch_same_frame],
+		["end_latch_cleared_by_new_run_and_retry", test_latch_cleared],
+		["win_calls_gamestate_end_run_won_and_respects_run_over", test_win_end_run_won],
 	]
 	var passed := 0
 	for item in checks:
@@ -1182,4 +1187,224 @@ func test_continue_carry_over() -> String:
 	if err.is_empty() and (ps.health != 3 or ps.max_health() != 4 or b.health != 3 or b.max_health != 4):
 		err = "hearts + bought max-heart item must carry over (stats %d/%d, hud %d/%d)" % [ps.health, ps.max_health(), b.health, b.max_health]
 	_end_run([win, shop, b, ps])
+	return err
+
+
+# --- Single end-of-run latch (QA blocker on 0ed2324) -----------------------------
+## _run_at + a mounted game-over screen. Returns [ps, bus, shop, win, gs, go].
+func _end_run_at(rs: int, at_stage: int) -> Array:
+	var r := _run_at(rs, at_stage)
+	r.append(_mount("res://scripts/ui/game_over.gd", r[1]))
+	return r
+
+
+func _kill(ps: Node) -> void:
+	if ps.health > 0:
+		ps.take_hit(ps.health, true)
+
+
+## "" when exactly `want` ("win" / "go") is the only open end screen and the shop is shut.
+func _only_open(r: Array, want: String) -> String:
+	var shop: Node = r[2]
+	var win: Node = r[3]
+	var go: Node = r[5]
+	if shop.is_open():
+		return "shop must stay closed after the run ended"
+	if want == "win" and (not win.is_open() or go.is_open()):
+		return "want only the win screen (win %s, game over %s)" % [win.is_open(), go.is_open()]
+	if want == "go" and (not go.is_open() or win.is_open()):
+		return "want only game over (game over %s, win %s)" % [go.is_open(), win.is_open()]
+	return ""
+
+
+func _close_all(r: Array) -> void:
+	for i in [2, 3, 5]:
+		if r[i].is_open():
+			r[i].close()
+	_end_run([r[5], r[3], r[2], r[1], r[0]])
+
+
+func test_latch_win_then_died() -> String:
+	var r := _end_run_at(9191, 5)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var gs: Node = r[4]
+	gs.on_reach_exit()
+	var err := _only_open(r, "win")
+	if err.is_empty():
+		# A hit lands after the win (pre-#21 take_hit still kills): hearts irrelevant.
+		_kill(ps)
+		err = _only_open(r, "win")
+	if err.is_empty():
+		# Even with BE's flag cleared, the FE latch alone blocks every other end event.
+		gs.reset()
+		b.on_player_died()
+		b.player_died.emit()          # direct emit (demo K key path)
+		gs.on_reach_exit()
+		err = _only_open(r, "win")
+	if err.is_empty() and b.run_end_kind() != &"won":
+		err = "latch should be 'won', got '%s'" % b.run_end_kind()
+	_close_all(r)
+	return err
+
+
+func test_latch_died_then_exit() -> String:
+	var err := ""
+	for at in [2, 5]:   # shop stage and the last (win) stage
+		var r := _end_run_at(8181, at)
+		var ps: Node = r[0]
+		var b: Node = r[1]
+		var gs: Node = r[4]
+		_kill(ps)
+		err = _only_open(r, "go")
+		if err.is_empty():
+			gs.reset()                # past GameState's own guard
+			gs.on_reach_exit()
+			b.on_reached_exit()
+			b.next_stage()
+			err = _only_open(r, "go")
+		if err.is_empty() and int(_tree().current_scene.get("stage")) != at:
+			err = "run advanced after death"
+		_close_all(r)
+		if not err.is_empty():
+			return "stage %d: %s" % [at, err]
+	return err
+
+
+func test_latch_same_frame() -> String:
+	# Death then exit in the same frame → only game over.
+	var r := _end_run_at(7171, 5)
+	r[1].on_player_died()
+	r[4].on_reach_exit()
+	var err := _only_open(r, "go")
+	_close_all(r)
+	if not err.is_empty():
+		return "died→exit: " + err
+	# Exit then death in the same frame → only win (BE flag set, and FE latch).
+	r = _end_run_at(7171, 5)
+	r[4].on_reach_exit()
+	_kill(r[0])
+	r[1].on_player_died()
+	err = _only_open(r, "win")
+	_close_all(r)
+	if not err.is_empty():
+		return "exit→died: " + err
+	# Direct screen calls in both orders: the screens themselves respect the latch.
+	r = _end_run_at(7171, 5)
+	r[5].show_for_run()
+	r[3].show_for_run()
+	err = _only_open(r, "go")
+	_close_all(r)
+	if not err.is_empty():
+		return "screens go→win: " + err
+	r = _end_run_at(7171, 5)
+	r[3].show_for_run()
+	r[5].show_for_run()
+	err = _only_open(r, "win")
+	_close_all(r)
+	return "" if err.is_empty() else "screens win→go: " + err
+
+
+func test_latch_cleared() -> String:
+	var r := _end_run_at(6161, 5)
+	var ps: Node = r[0]
+	var b: Node = r[1]
+	var win: Node = r[3]
+	var gs: Node = r[4]
+	var go: Node = r[5]
+	var err := ""
+	gs.on_reach_exit()
+	win.new_run_button.pressed.emit()          # win → New run
+	if b.is_run_over() or win.is_open():
+		err = "New run must clear the latch"
+	if err.is_empty():
+		_kill(ps)                               # a later death works again
+		err = _only_open(r, "go")
+	if err.is_empty():
+		go.retry_button.pressed.emit()          # game over → Retry seed
+		if b.is_run_over() or go.is_open():
+			err = "Retry seed must clear the latch"
+	if err.is_empty():
+		_tree().current_scene.set("stage", 5)   # jump to the last stage of the retry
+		gs.on_reach_exit()                      # a later win works again
+		err = _only_open(r, "win")
+	if err.is_empty():
+		win.new_run_button.pressed.emit()
+		_kill(ps)
+		err = _only_open(r, "go")
+	_close_all(r)
+	return err
+
+
+## A PR #22-shaped GameState (run_over + end_run_won) without touching the BE file.
+func _fake_gs22() -> Node:
+	var src := GDScript.new()
+	src.source_code = """extends Node
+signal reached_exit
+var game_over := false
+var run_over := false
+var won_calls := 0
+func on_reach_exit() -> void:
+	if game_over:
+		return
+	game_over = true
+	reached_exit.emit()
+func end_run_won() -> void:
+	won_calls += 1
+	game_over = true
+	run_over = true
+func reset() -> void:
+	game_over = false
+	run_over = false
+"""
+	src.reload()
+	var gs: Node = src.new()
+	_root().add_child(gs)
+	return gs
+
+
+func test_win_end_run_won() -> String:
+	var err := ""
+	# 1) Stage 5 win → the win screen opens AND tells BE (end_run_won, once).
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	b.swap_deferred = false
+	var gs := _fake_gs22()
+	b.wire_game_state(gs)
+	var lvl: Node = load(FAKE_LEVEL).instantiate()
+	lvl.set("stage", 5)
+	_root().add_child(lvl)
+	_tree().current_scene = lvl
+	var win := _mount("res://scripts/ui/win_screen.gd", b)
+	var go := _mount("res://scripts/ui/game_over.gd", b)
+	gs.on_reach_exit()
+	if not win.is_open():
+		err = "win screen should open"
+	if err.is_empty() and (gs.won_calls != 1 or not gs.run_over):
+		err = "win must call GameState.end_run_won() once (calls %d)" % gs.won_calls
+	if err.is_empty():
+		win.show_for_run()           # re-show: no second call
+		b.on_player_died()
+		if gs.won_calls != 1 or go.is_open():
+			err = "re-show / late death must not re-notify or open game over"
+	# 2) Stage 1–4 exits never call it (a normal exit is not a run end).
+	if err.is_empty():
+		win.new_run_button.pressed.emit()
+		gs.on_reach_exit()           # stage 1 of the new run
+		if gs.won_calls != 1 or win.is_open() or gs.run_over:
+			err = "a stage 1 exit must not end the run (calls %d)" % gs.won_calls
+	# 3) BE run_over (e.g. a BE-side death) with the FE latch free → exit + death ignored.
+	if err.is_empty():
+		b.reset()
+		gs.reset()
+		gs.run_over = true
+		b.on_reached_exit()
+		b.on_player_died()
+		if win.is_open() or go.is_open() or b.is_run_over():
+			err = "FE must respect GameState.run_over"
+	for n in [win, go]:
+		if n.is_open():
+			n.close()
+	_end_run([go, win, b, ps, gs])
 	return err
