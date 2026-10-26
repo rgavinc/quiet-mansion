@@ -1,7 +1,6 @@
 extends CharacterBody2D
 ## WASD move + mouse flashlight child. Back End owns motion/noise API.
 
-@export var move_speed: float = 140.0
 @export var knock_range: float = 36.0
 
 func _ready() -> void:
@@ -20,25 +19,20 @@ func _physics_process(_delta: float) -> void:
 	if GameState.game_over:
 		velocity = Vector2.ZERO
 		return
-	var dir := Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		dir.y -= 1
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		dir.y += 1
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		dir.x -= 1
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		dir.x += 1
-	velocity = dir.normalized() * move_speed if dir != Vector2.ZERO else Vector2.ZERO
+	var dir := Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down")
+	velocity = dir * PlayerStats.get_stat(&"move_speed")
 	move_and_slide()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if GameState.game_over:
 		return
-	# Space / left-click near obstacle = try knock (noise + maybe kill calm puppet)
-	if event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
-		_try_knock()
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+	# Input-map actions only (see project.godot). Space = jump, RMB = light toggle.
+	if event.is_action_pressed(&"flashlight_toggle"):
+		var light := get_node_or_null(^"Flashlight")
+		if light:
+			light.visible = not light.visible
+	# Interim: LMB knocks nearby things until the hold-to-pickup / tap-to-throw state lands.
+	elif event.is_action_pressed(&"interact"):
 		_try_knock()
 
 func _try_knock() -> void:
