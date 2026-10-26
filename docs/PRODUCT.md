@@ -146,7 +146,8 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Pickup timing:** measured from button-down; `pickup_time` = 1.0s; a tap (<0.2s) never shows the gauge.
 - **No continues:** death ends the run. *New run* (primary) = stage 1, 3 hearts, 0 gold, no items, new seed. *Retry seed* = same run seed, same fresh start at stage 1.
 - **Carry-over between stages:** hearts, gold, and bought/chest items carry over. Held props (vases etc.) belong to the level and are dropped.
-- **Run end:** clearing stage 5's exit shows a win screen (seed, gold, New run), not the shop.
+- **Run end:** clearing stage 5's exit shows a win screen (stages cleared, time, seed, gold, New run), not the shop.
+- **Pause (after the Wednesday checklist):** Esc pauses and shows the run seed, Resume and New run; mouse released.
 - **Stairs:** 15 tiles (240px) diagonal per floor (~34°) plus a 3-tile landing at each end (21 tiles total). Landings are kept clear.
 - **Stage 1 size:** at least 3 floors, ~3 screens wide; exit on a different floor than the start; no puppet within one screen of the start.
 - **Seed sweep:** 1,000 seeds per stage.
