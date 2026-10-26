@@ -671,7 +671,7 @@ func test_reject_loot_on_landing() -> String:
 
 ## Built enemies: exactly the table count, each a BE Enemy carrying a table EnemyDef.
 func test_enemy_defs() -> String:
-	var check: Callable = load("res://tests/seed_sweep.gd").enemy_check
+	var check: Callable = load("res://tests/seed_sweep_impl.gd").enemy_check
 	for st in [1, 4, 5]:
 		var w := Node2D.new()
 		w.set_meta(&"lg_test", true)
