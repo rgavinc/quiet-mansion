@@ -96,6 +96,9 @@ func remove_modifiers_from(source: Variant) -> void:
 func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 	if health <= 0 or amount <= 0:
 		return false
+	# Run already ended (exit reached / win / death): no more damage or end-of-run events.
+	if is_inside_tree() and (GameState.game_over or GameState.run_over):
+		return false
 	if not ignore_invuln and _invuln_left > 0.0:
 		return false
 	_invuln_left = get_stat(&"invuln_time")
