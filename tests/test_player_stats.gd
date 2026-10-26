@@ -16,6 +16,7 @@ func run_all() -> Dictionary:
 		["remove_by_source", test_remove_by_source],
 		["max_health_item", test_max_health_item],
 		["gold_spend", test_gold_spend],
+		["invuln_blocks_double_hit", test_invuln],
 		["input_actions", test_input_actions],
 	]
 	var passed := 0
@@ -32,9 +33,9 @@ func test_three_hits_dies() -> String:
 	var s := _make()
 	var dead := [false]
 	s.died.connect(func() -> void: dead[0] = true)
-	s.take_hit(); s.take_hit()
+	s.take_hit(1, true); s.take_hit(1, true)
 	if dead[0]: s.free(); return "died after 2 hits"
-	s.take_hit()
+	s.take_hit(1, true)
 	var ok: bool = dead[0] and s.health == 0
 	s.free()
 	return "" if ok else "did not die on 3rd hit"
@@ -80,3 +81,12 @@ func test_input_actions() -> String:
 		if not InputMap.has_action(a):
 			return "missing input action %s" % a
 	return ""
+
+
+func test_invuln() -> String:
+	var s := _make()
+	var first: bool = s.take_hit()
+	var second: bool = s.take_hit()
+	var ok: bool = first and not second and s.health == 2
+	s.free()
+	return "" if ok else "second hit inside invuln_time landed"
