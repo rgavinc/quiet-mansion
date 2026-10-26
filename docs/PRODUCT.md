@@ -163,4 +163,5 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Shop pace:** a careful player affords ~1 item per shop; greed (vases, chests) should earn a second. Tune after #13's gold sweep.
 - **Holds:** a hit or leaving range cancels a pickup/chest hold completely; a new press is required (first-look blocker).
 - **Stat caps:** every stat has a min and max in the central stats table (e.g. noise ×0.3–×3).
+- **Stacked behavior caps:** Heavy Vases' stun is capped at ×2.5 total, and every behavior effect that multiplies across copies gets a bound in the same central stats table.
 - **Item text:** description percentages are generated from the item's modifiers, never hand-written.
