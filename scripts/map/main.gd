@@ -18,7 +18,7 @@ func _ready() -> void:
 	GameState.reached_exit.connect(func(): _status.text = HINT + "\n" + "YOU ESCAPED")
 	GameState.died.connect(func(): _status.text = HINT + "\n" + "CAUGHT — you die")
 	GameState.noise_made.connect(func(_l, _at): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Noise! Nearby puppets may wake…")
-	GameState.puppet_alerted.connect(func(n): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Alerted puppets: %d / 3" % n)
+	GameState.puppet_alerted.connect(func(n): if _status and not GameState.game_over: _status.text = HINT + "\n" + "Alerted puppets: %d / %d" % [n, GameState.enemy_count()])
 
 func _build_floor_hint() -> void:
 	# Tiled dark floor + modulate so the mouse flashlight reads
@@ -76,7 +76,7 @@ func _spawn_puppets() -> void:
 		Vector2(920, 280),
 	]
 	spots.shuffle()
-	for i in GameState.PUPPET_COUNT:
+	for i in spots.size():   # one puppet per placement (no fixed count)
 		var puppet := CharacterBody2D.new()
 		puppet.set_script(load("res://scripts/enemies/puppet_hand.gd"))
 		var col := CollisionShape2D.new()
