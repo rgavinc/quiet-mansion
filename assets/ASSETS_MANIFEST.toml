@@ -157,29 +157,29 @@ frames = 6
 fps = 8
 loop = true
 pivot = [32, 63]
-notes = "64x64 puppet hand enemy #1 calm float: bob, finger wave, sleeve hem ripple, blink"
+notes = "64x64 puppet hand enemy #1 calm float: bob, lagging finger wave, sleeve hem ripple, eye drift, blink on 3"
 
 [[asset]]
 path = "assets/art/characters/puppet_startle.png"
 slot = "puppet_startle"
 status = "ai"
 frame_size = [64, 64]
-frames = 5
-fps = 12
+frames = 7
+fps = 14
 loop = false
 pivot = [32, 63]
-notes = "64x64 puppet startled by flashlight: 0 anticipation, 1 recoil, 2 overshoot, 3 tremble, 4 stunned hold (stay on 4 while stunned)"
+notes = "64x64 puppet startled by flashlight (hero moment): 0 notice, 1 anticipation squash, 2 impact (white flash, smear, jaw splits, red eye glint), 3 overshoot scream (rows of teeth), 4 rebound, 5 finger wobble, 6 stunned hold. Play once and hold the last frame (6) while stunned"
 
 [[asset]]
 path = "assets/art/characters/puppet_chase.png"
 slot = "puppet_chase"
 status = "ai"
 frame_size = [64, 64]
-frames = 6
-fps = 12
+frames = 8
+fps = 14
 loop = true
 pivot = [32, 63]
-notes = "64x64 enraged chase loop: lean in, chomping jaws with teeth, red eyes, clawed twitching fingers, sleeve streams behind"
+notes = "64x64 enraged chase loop: jaws open wide over 0-3, snap shut on 4 (lunge + smear), finger-claw twitch, red eye glint on 3-4, red rim light"
 
 [[asset]]
 path = "assets/art/props/vase_idle.png"
@@ -224,3 +224,124 @@ fps = 14
 loop = false
 pivot = [16, 31]
 notes = "32x32 vase breaks on a wall (wall on the right, x=29): flat spray along the wall, dust billows, shards settle in a pile. Flip_h for walls on the left"
+
+[[asset]]
+path = "assets/art/props/gold_coin.png"
+slot = "gold_coin"
+status = "ai"
+frame_size = [16, 16]
+frames = 6
+fps = 12
+loop = true
+pivot = [8, 8]
+notes = "16x16 gold coin spin loop (face, turning, edge-on, turning back). Centre pivot; bob it in code"
+
+[[asset]]
+path = "assets/art/props/gold_pickup_sparkle.png"
+slot = "gold_pickup_sparkle"
+status = "ai"
+frame_size = [32, 32]
+frames = 6
+fps = 14
+loop = false
+pivot = [16, 16]
+notes = "32x32 coin pickup burst: star flash, ring, rising twinkles. Play once at the coin position, free after the last frame"
+
+[[asset]]
+path = "assets/art/props/vase_gold_burst.png"
+slot = "vase_gold_burst"
+status = "ai"
+frame_size = [32, 32]
+frames = 6
+fps = 14
+loop = false
+pivot = [16, 31]
+notes = "32x32 vase breaks and spills gold: 0 cracked vase glowing, 1 flash, 2-3 shards + coins burst, 4-5 coins bounce and land on the floor. Spawn real gold_coin pickups after the last frame"
+
+[[asset]]
+path = "assets/art/characters/merchant_idle.png"
+slot = "merchant_idle"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 8
+loop = true
+pivot = [32, 63]
+notes = "64x64 shopkeeper (porcelain-mask merchant in top hat and tailcoat): breathing bob, swinging lantern, beckoning finger, one eye opens on frame 4"
+
+[[asset]]
+path = "assets/art/ui/shop_backdrop.png"
+slot = "shop_backdrop"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [160, 90]
+notes = "320x180 still: mansion shop interior (counter, shelves, moon window, clock). Merchant stands behind the counter at about x=172, feet hidden by the counter top (y~110)"
+
+[[asset]]
+path = "assets/art/ui/game_over_art.png"
+slot = "game_over_art"
+status = "ai"
+frame_size = [320, 180]
+frames = 1
+fps = 1
+loop = false
+pivot = [160, 90]
+notes = "320x180 still: the boy caught by puppet hands, dropped flashlight. Right half kept dark for GAME OVER text/buttons"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_extra_heart.png"
+slot = "item_icon_extra_heart"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon: extra heart (+1 max health)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_minimap.png"
+slot = "item_icon_minimap"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon: minimap (shows the floor layout)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_bright_bulb.png"
+slot = "item_icon_bright_bulb"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon: bright bulb (flashlight startles faster)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_soft_shoes.png"
+slot = "item_icon_soft_shoes"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon: soft shoes (quieter footsteps)"
+
+[[asset]]
+path = "assets/art/ui/icons/item_icon_lucky_coin.png"
+slot = "item_icon_lucky_coin"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 16]
+notes = "32x32 shop item icon: lucky coin (more gold)"
