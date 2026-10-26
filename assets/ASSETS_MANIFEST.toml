@@ -200,12 +200,12 @@ slot = "puppet_reach_up"
 status = "ai"
 frame_size = [64, 64]
 frames = 9
-fps = 14
+fps = 10
 loop = false
 pivot = [32, 63]
 hit_frame = 6
 reach_height_px = 44
-notes = "64x64 walker (scuttle form, same design as puppet_chase) under a boy perched on 1-2 tile furniture reaches straight UP and catches him. Play once (9f @14fps = 0.64s). Windup 0-5: 0 stops and looks up, 1 crouches with a red eye glint, 2 coils, 3-4 rises on thumb + pinky while index/middle/ring stretch straight up (speed dashes on 4-5), 5 max-stretch hold with claws fanned. 6 SNAP grab = catch frame (hit_frame), white flash + impact ticks, 7 clench, 8 settle. Claw tips reach reach_height_px = 44 px above the pivot on the catch frame (frame-local y 19; 45 px / y 18 at the frame 5 stretch): 12 px above a 2-tile (32 px) furniture top, so it grabs the perched boy by the shins, and 4 px short of a 3-tile (48 px) top, which stays out of reach. The speed dashes and impact ticks are FX above the claws, not reach. Symmetric: flip_h freely"
+notes = "64x64 walker (scuttle form, same design as puppet_chase) under a boy perched on 1-2 tile furniture reaches straight UP and catches him. Play once (9f @10fps = 0.9s; the catch on frame 6 lands 0.60s after the reach starts, so frames 0-5 are a ~0.6s telegraph and a hop-off before then escapes). Windup 0-5: 0 stops and looks up, 1 crouches with a red eye glint, 2 coils, 3-4 rises on thumb + pinky while index/middle/ring stretch straight up (speed dashes on 4-5), 5 max-stretch hold with claws fanned. 6 SNAP grab = catch frame (hit_frame), white flash + impact ticks, 7 clench, 8 settle. Claw tips reach reach_height_px = 44 px above the pivot on the catch frame (frame-local y 19; 45 px / y 18 at the frame 5 stretch): 12 px above a 2-tile (32 px) furniture top, so it grabs the perched boy by the shins, and 4 px short of a 3-tile (48 px) top, which stays out of reach. The claws carry a 1px light rim on frames 4-7 so they read against the boy and dark wallpaper unlit. The speed dashes and impact ticks are FX above the claws, not reach. Symmetric: flip_h freely"
 
 [[asset]]
 path = "assets/art/props/vfx_creak.png"
