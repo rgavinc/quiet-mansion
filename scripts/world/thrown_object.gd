@@ -11,18 +11,22 @@ var _travel_left: float = 600.0
 var shooter: Node2D = null
 
 
-func setup(from: Vector2, it: Dictionary, tgt: Node2D, who: Node2D) -> void:
+## `aim_point` is used when there is no target (a lure thrown toward the aim).
+func setup(from: Vector2, it: Dictionary, tgt: Node2D, who: Node2D, aim_point: Vector2 = Vector2.INF) -> void:
 	global_position = from
 	item = it
 	target = tgt
 	shooter = who
-	var aim := tgt.global_position if is_instance_valid(tgt) else from + Vector2(300, 0)
+	var aim := tgt.global_position if is_instance_valid(tgt) else (aim_point if aim_point.is_finite() else from + Vector2(300, 0))
 	velocity = (aim - from).normalized() * PlayerStats.get_stat(&"throw_speed")
 	_travel_left = from.distance_to(aim) + MAX_OVERSHOOT
 
 
 func _ready() -> void:
 	add_to_group("thrown")
+	if item.get("lure", false):
+		MusicBoxLure.add_visual(self)   # music_box_world slot, or its placeholder
+		return
 	var r := ColorRect.new()
 	r.size = Vector2(10, 12)
 	r.position = Vector2(-5, -6)
@@ -69,8 +73,22 @@ static func _seg_dist(a: Vector2, b: Vector2, p: Vector2) -> float:
 
 
 func _shatter(at: Vector2, enemy: Node) -> void:
-	if enemy and enemy.has_method("on_hit_by_throw"):
-		enemy.on_hit_by_throw(item)
+	if enemy and enemy.has_method("on_hit_by_throw") and not item.get("lure", false):
+		enemy.on_hit_by_throw(item)   # a Music Box lure bounces off: no kill / stun
+	if item.get("lure", false):
+		# Music Box: doesn't shatter; it lands and plays (MusicBoxLure makes the noise).
+		var lure := MusicBoxLure.new()
+		lure.setup(item)
+		var parent := get_parent()
+		if parent:
+			parent.add_child(lure)
+			lure.global_position = at
+			lure.settle()
+		queue_free()
+		return
 	NoiseBus.emit_noise(at, float(item.get("noise_radius", NoiseBus.DEFAULT_RADIUS)) * PlayerStats.get_stat(&"noise_mult"), 1.0, self)
-	WorldObject._drop_gold(at, int(item.get("gold_inside", 0)))
+	var g := int(item.get("gold_inside", 0))
+	if Item.is_vase(item):
+		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
+	WorldObject._drop_gold(at, g)
 	queue_free()

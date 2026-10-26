@@ -7,6 +7,8 @@ signal health_changed(current: int, max_hp: int)
 signal gold_changed(current: int, delta: int)
 signal stat_changed(stat: StringName, value: float)
 signal died
+## Owned (bought / chest) items changed. `items` is PlayerStats.owned_items.
+signal items_changed(items: Array)
 
 ## Base values. Tune here; every class reads through get_stat().
 const BASE := {
@@ -27,25 +29,54 @@ const BASE := {
 	&"invuln_time": 1.0,         # s after a hit
 	&"inventory_slots": 3.0,
 	&"gold_find_mult": 1.0,
+	&"minimap": 0.0,             # >= 1 = the minimap item is owned (FE minimap reads has_minimap())
 }
 
-## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
 ## Physics layers (bits). Player and enemies never block each other, so a catch is a
 ## distance check on overlapping bodies instead of two colliders stalling 26px apart.
 const LAYER_WORLD := 1
 const LAYER_PLAYER := 2
 const LAYER_ENEMY := 4
 
+## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
+## Additive stats keep absolute floors here; multiplier stats are capped by STAT_BOUNDS.
 const MIN := {
 	&"max_health": 1.0,
 	&"pickup_time": 0.1,
 	&"tap_threshold": 0.05,
 	&"light_startle_time": 0.2,
 	&"inventory_slots": 1.0,
+	&"light_angle_deg": 10.0,
 }
+
+## Stat caps (PRODUCT.md "Stat caps"): every MULTIPLIER stat's effective value, all items
+## stacked, stays within [min, max] x its base. The ONE table for them. Keys in BASE clamp
+## in get_stat(); the hook-only multiplier (give_up_speed, no BASE row) clamps in its
+## dispatcher, and noise / move speed clamp the stat x hook product (Greedy Sack, Heavy Vases).
+const STAT_BOUNDS := {
+	&"noise_mult": [0.3, 3.0],          # PD: noise x0.3 .. x3 (stat x item noise hooks)
+	&"light_range": [0.5, 2.0],         # 130 .. 520 px
+	&"light_detect_mult": [0.3, 3.0],   # startle takes 3.3x .. 0.33x as long
+	&"move_speed": [0.5, 2.0],          # 70 .. 280 px/s (stat x carry hooks)
+	&"climb_speed": [0.4, 2.5],         # 36 .. 225 px/s
+	&"pickup_time": [0.3, 3.0],         # 0.3 .. 3 s
+	&"pickup_range": [0.5, 2.0],        # 20 .. 80 px
+	&"gold_find_mult": [0.25, 3.0],
+	&"give_up_speed": [0.3, 3.0],       # hook only: searching enemy memory drain (Cracked Mirror)
+}
+
+## `stat`'s effective multiplier `m` (vs base) clamped to STAT_BOUNDS (unchanged if unbounded).
+static func clamp_mult(stat: StringName, m: float) -> float:
+	var b: Array = STAT_BOUNDS.get(stat, [])
+	return clampf(m, b[0], b[1]) if b.size() == 2 else m
+
 
 var health: int = 3
 var gold: int = 0
+## Bought and chest items (Item resources) this run. Survives stage Continue (this
+## autoload is never re-created); cleared, with their modifiers, by reset().
+## Held props are NOT here — they live in the level's Inventory and are dropped.
+var owned_items: Array = []
 ## modifiers: Array of {stat, add, mul, source}
 var _mods: Array[Dictionary] = []
 var _invuln_left: float = 0.0  # counts down in _process, so it freezes while paused (shop)
@@ -63,7 +94,11 @@ func get_stat(stat: StringName) -> float:
 		if m.stat == stat:
 			add += m.add
 			mul *= m.mul
-	return maxf((float(BASE[stat]) + add) * mul, float(MIN.get(stat, 0.0)))
+	var base := float(BASE[stat])
+	var v := (base + add) * mul
+	if STAT_BOUNDS.has(stat) and base != 0.0:
+		v = base * clamp_mult(stat, v / base)
+	return maxf(v, float(MIN.get(stat, 0.0)))
 
 
 func max_health() -> int:
@@ -74,7 +109,8 @@ func add_modifier(stat: StringName, add: float = 0.0, mul: float = 1.0, source: 
 	assert(BASE.has(stat), "Unknown stat: %s" % stat)
 	_mods.append({stat = stat, add = add, mul = mul, source = source})
 	if stat == &"max_health":
-		health = clampi(health + int(add), 1, max_health())
+		# More max hearts heal by that much; fewer only clamp (never costs an extra heart).
+		health = clampi(health + maxi(int(add), 0), 1, max_health())
 		health_changed.emit(health, max_health())
 	stat_changed.emit(stat, get_stat(stat))
 
@@ -101,7 +137,18 @@ func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 		return false
 	if not ignore_invuln and _invuln_left > 0.0:
 		return false
+	# Item hooks: on_hit may change or cancel the damage; on_lethal_hit may save the boy.
+	for it in _live_items():
+		amount = int(it.on_hit(amount))
+	if amount <= 0:
+		return false
 	_invuln_left = get_stat(&"invuln_time")
+	if health - amount <= 0:
+		for it in _live_items():
+			if it.on_lethal_hit():
+				health = 1
+				health_changed.emit(health, max_health())
+				return true
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health())
 	if health == 0:
@@ -145,9 +192,128 @@ func try_spend(cost: int) -> bool:
 	return true
 
 
-## New run. Keeps nothing.
+## Applies `item` (its modifiers, source = item.source_key()) and adds it to
+## owned_items. Shop.buy() and Chest.open() both end here. Gold is NOT touched.
+func grant_item(item: Object) -> bool:
+	if item == null or not item.has_method(&"apply") or owned_items.has(item):
+		return false
+	item.apply(self)
+	owned_items.append(item)
+	items_changed.emit(owned_items)
+	return true
+
+
+func owns(item_id: String) -> bool:
+	for it in owned_items:
+		if is_instance_valid(it) and str(it.get("id")) == item_id:
+			return true
+	return false
+
+
+## FE minimap UI: show it when this is true (listen to stat_changed(&"minimap", v)).
+func has_minimap() -> bool:
+	return get_stat(&"minimap") >= 1.0
+
+
+# --- item behaviour dispatch (docs/BACKEND.md "Item behaviour hooks") ------------------
+## View size: an enemy farther than half of it from the boy (either axis) is off screen.
+const SCREEN_SIZE := Vector2(1280, 720)
+
+
+## Owned items that implement the hook API (live Item instances).
+func _live_items() -> Array:
+	var out: Array = []
+	for it in owned_items:
+		if is_instance_valid(it) and it is Item:
+			out.append(it)
+	return out
+
+
+## Re-emits items_changed (an item's charges changed).
+func notify_items_changed() -> void:
+	items_changed.emit(owned_items)
+
+
+## Stage start (PlayerController._ready: every stage builds a fresh player). Refills every
+## item's charges, runs on_stage_start, then emits items_changed once.
+func begin_stage(player: Node = null) -> void:
+	for it in _live_items():
+		it.charges = it.max_charges
+		it.on_stage_start(player)
+	items_changed.emit(owned_items)
+
+
+## NoiseBus.emit_noise: product of every item's on_noise multiplier.
+func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Variant) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.on_noise(at, radius, loudness, source))
+	# The cap is on the whole noise effect: stat (already in `radius`) x hooks.
+	var ns := get_stat(&"noise_mult")
+	return clamp_mult(&"noise_mult", ns * m) / ns
+
+
+## PlayerController throw / knock: items may write into `item` (the dict the enemy gets).
+func dispatch_throw(item: Dictionary, target: Variant) -> void:
+	for it in _live_items():
+		it.on_throw(item, target)
+
+
+## Enemy STARTLED -> about to chase. True if an item handled it (first one wins).
+func startle_handled(enemy: Node) -> bool:
+	for it in _live_items():
+		if it.on_startle(enemy):
+			return true
+	return false
+
+
+## Gold a breaking vase drops, after item hooks.
+func vase_gold(gold: int, vase: Variant = null) -> int:
+	for it in _live_items():
+		gold = int(it.on_vase_gold(gold, vase))
+	return gold
+
+
+## Move-speed multiplier for what the boy holds (Inventory.items).
+func carry_speed_mult(held: Array) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.carry_speed_mult(held))
+	var ms := get_stat(&"move_speed") / float(BASE[&"move_speed"])
+	return clamp_mult(&"move_speed", ms * m) / ms
+
+
+## Multiplier on a searching enemy's give-up drain.
+func memory_drain_mult(enemy: Node, off_screen: bool) -> float:
+	var m := 1.0
+	for it in _live_items():
+		m *= float(it.memory_drain_mult(enemy, off_screen))
+	return clamp_mult(&"give_up_speed", m)
+
+
+## FE off-screen arrows: show a chaser's arrow only within this many px of the boy.
+## INF without Cracked Mirror (always show). Listen to items_changed to re-read it.
+func arrow_reveal_distance() -> float:
+	var d := INF
+	for it in _live_items():
+		d = minf(d, float(it.arrow_reveal_distance()))
+	return d
+
+
+## True if world point `p` is outside the view around `center` (the boy).
+static func is_off_screen(p: Vector2, center: Vector2) -> bool:
+	var d := (p - center).abs()
+	return d.x > SCREEN_SIZE.x * 0.5 or d.y > SCREEN_SIZE.y * 0.5
+
+
+## New run. Keeps nothing: modifiers (all item effects) and owned items go.
 func reset() -> void:
 	_mods.clear()
+	for it in owned_items:
+		if is_instance_valid(it) and "_applied_to" in it:
+			it.set("_applied_to", null)
+	owned_items.clear()
+	items_changed.emit(owned_items)
 	_invuln_left = 0.0
 	health = max_health()
 	gold = 0

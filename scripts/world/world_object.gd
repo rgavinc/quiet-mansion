@@ -50,6 +50,12 @@ func _physics_process(_delta: float) -> void:
 		break_apart()
 
 
+## Called when the player's hold-LMB channel on this object completes. Return true if
+## the object handled it itself (e.g. Chest opens) and must NOT go into the Inventory.
+func on_hold_complete(_by: Node) -> bool:
+	return false
+
+
 ## Item dictionary that goes into Inventory when picked up.
 func to_item() -> Dictionary:
 	return {
@@ -68,7 +74,10 @@ func break_apart() -> void:
 		return
 	broken = true
 	NoiseBus.emit_noise(global_position, noise_radius * PlayerStats.get_stat(&"noise_mult"), noise_loudness, self)
-	_drop_gold(global_position, gold_inside)
+	var g := gold_inside
+	if Item.is_vase(self):
+		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
+	_drop_gold(global_position, g)
 	queue_free()
 
 

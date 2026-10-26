@@ -16,6 +16,12 @@ func emit_noise(at: Vector2, radius: float = DEFAULT_RADIUS, loudness: float = 1
 	var gs := get_node_or_null(^"/root/GameState")
 	if gs and gs.game_over:
 		return
+	# Item hooks (e.g. Greedy Sack: vase breaks are louder).
+	var ps := get_node_or_null(^"/root/PlayerStats")
+	if ps and ps.has_method(&"noise_hook_mult"):
+		var m: float = ps.noise_hook_mult(at, radius, loudness, source)
+		radius *= m
+		loudness *= m
 	noise.emit(at, radius, loudness, source)
 	if gs:
 		gs.noise_made.emit(loudness, at)  # legacy listeners (HUD status text)
