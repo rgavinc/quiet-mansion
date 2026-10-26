@@ -23,7 +23,7 @@ func run_all() -> Dictionary:
 		["tap_never_targets_puppet", test_tap_not_puppet],
 		["knock_noise_once", test_knock_noise_once],
 		["knocked_prop_hits_enemy_where_it_lands", test_knock_lands_on_enemy],
-		["player_and_puppet_never_block_each_other", test_layers],
+		["player_and_puppet_bodies_are_solid", test_layers],
 		["full_pickup_is_pickup_time_from_press", test_pickup_total_time],
 	]
 	var passed := 0
@@ -227,8 +227,9 @@ func test_layers() -> String:
 	var p := _player()
 	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
 	_add(e, Vector2(400, 400))
-	if p.collision_mask & e.collision_layer: return "player collides with puppet"
-	if e.collision_mask & p.collision_layer: return "puppet collides with player"
+	if not (p.collision_mask & e.collision_layer): return "player passes through puppet"
+	if not (e.collision_mask & p.collision_layer): return "puppet passes through player"
+	if e.hitbox == null or not (e.hitbox.collision_mask & p.collision_layer): return "puppet has no hit area for the player"
 	return ""
 
 
