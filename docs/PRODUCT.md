@@ -120,3 +120,30 @@ Every player action carries a cost or risk: light can startle, touching objects 
 
 ### Final ownership (generator)
 - **Level generator, validator, seed sweep CI, and `docs/LEVELGEN.md`: Lead.** Back End owns the foundation (stats, items, objects, enemies, `NoiseBus`) plus the pickup, inventory, and throw systems. FE owns the pickup gauge, inventory strip and scroll UI, and the throw aim and arc preview.
+
+## Input decisions (Product call, Oct 25)
+- **Flashlight:** right mouse **toggles** on and off (Gavin's original brief has the light turned off and the ring staying).
+- **Throw:** **tap** left mouse (under 0.2 s) throws the held item at the ringed enemy. **Holding** left mouse starts a pickup. With no enemy selected, a tap does nothing; it never errors and never auto-throws.
+- All of these are input-map actions (`flashlight_toggle`, `jump`, `interact`, `inv_next`, `inv_prev`) so they can be rebound later.
+
+## Art: looks great, easy to replace (required)
+
+Gavin's rule: art should look Dead Cells quality, but any human artist must be able to swap it in **without touching code or scenes**.
+
+**Folder convention:** one folder per character or prop, one subfolder per animation:
+```
+assets/art/<thing>/<animation>/
+    frame_00.png, frame_01.png, …     # the frames the game loads
+    REFERENCE.png                     # labeled still: pose, facing, pivot dot, canvas size
+    anim.toml                         # fps, loop, pivot, hitbox; artist-editable
+```
+Example: `assets/art/boy/run/`, `assets/art/boy/pickup_channel/`, `assets/art/puppet_hand/startled/`, `assets/art/vase/break_wall/`.
+
+**Rules:**
+- The game **builds animations from these folders at load**, so drop in new frames and it plays. No `.tscn` edits and no hand-built SpriteFrames.
+- Frame count is free, but the canvas size and pivot must match what `REFERENCE.png` shows (e.g. boy 64×64, feet pivot). Changing them means changing `anim.toml`, not code.
+- Each `REFERENCE.png` names the pose in plain words, e.g. "side view, facing right, mid-jump apex, feet pivot".
+- Source files (`.aseprite`/`.psd`/`.blend`) sit next to the frames as `source.*`.
+- Every animation folder has one `ASSETS_MANIFEST.toml` entry (`ai` or `human`). Swapping the frames and flipping the entry to `human` is the whole job.
+- `docs/ART_REPLACE.md` (Designer): a one-page walkthrough with a screenshot of one folder, how to preview in game (debug hotkey to reload art), and the full list of slots.
+- QA adds a test that every manifest slot has a folder, a `REFERENCE.png`, an `anim.toml`, and at least one frame, and that the canvas sizes match.
