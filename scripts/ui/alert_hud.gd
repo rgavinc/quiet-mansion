@@ -1,9 +1,10 @@
 extends MarginContainer
 ## Alert counter (top-right): "chasing N / M" for the stage, no cap. One pip per
 ## enemy up to skin.alert_max_pips (wraps to a second row past 8), numbers beyond.
-## Data: FESignals.chasing_count() / enemy_total() (report_chase once BE sends it,
-## else polls enemies' is_chasing()/enraged; registry = groups enemies ∪ puppets).
-## TODO(BE-wire): event-driven once BE emits chase state; polled at 10 Hz for now.
+## Data: FESignals.chasing_count() = BE report_chase (PR #26: true on chase start,
+## false on give-up and in _exit_tree) / enemy_total() = live enemies in groups
+## enemies ∪ puppets. Refreshes on chase_changed; the 10 Hz tick only recounts the
+## live registry (an enemy killed while calm changes the total, not the chase count).
 
 var skin: HudSkin
 var bus: Node

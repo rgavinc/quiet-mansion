@@ -115,8 +115,6 @@ var _run_end: StringName = &""
 ## Demo-only shop stock: Callable(count: int, stage: int, seed: int) -> Array[Dictionary].
 ## Never set in the real game; real stock comes from BE's Shop (see get_shop_offer).
 var shop_stub: Callable = Callable()
-## True once any report_chase() arrives; until then chase count is polled from enemies.
-var _chase_reported: bool = false
 var _gs: Node = null
 var _shop: Object = null
 
@@ -372,9 +370,9 @@ func _prune() -> void:
 				d.erase(id)
 
 
-## Placeholder: BE reports which enemy the beam is on; we integrate the
-## startle gauge over `startle_time`. When BE emits its own startle progress,
-## call `report_startle()` instead and stop calling this.
+## Lit = the beam is on this enemy (BE player_controller → report_lit). FE uses it
+## only to show / hide the startle meter. Startle VALUES come from BE alone
+## (Enemy._set_startle → report_startle, PR #26); FE never integrates startle itself.
 func report_lit(enemy: Node2D, lit: bool) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
@@ -382,9 +380,8 @@ func report_lit(enemy: Node2D, lit: bool) -> void:
 	if lit and flashlight_on:
 		_lit[id] = enemy
 		_track(enemy)
-	elif _lit.has(id):
-		_lit.erase(id)
-		_set_startle(enemy, 0.0)
+	else:
+		_lit.erase(id)   # BE reports the startle reset itself (beam left → 0)
 
 
 func report_startle(enemy: Node2D, progress: float) -> void:
@@ -415,7 +412,6 @@ func report_chase(enemy: Node2D, is_chasing: bool) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
 	var idx := chasing.find(enemy)
-	_chase_reported = true
 	if is_chasing and idx == -1:
 		chasing.append(enemy)
 		_track(enemy)
@@ -522,17 +518,7 @@ func enemy_type_id(enemy: Node) -> String:
 
 func _process(delta: float) -> void:
 	run_time += delta   # pauses with the tree (screens / shop)
-	# Placeholder startle integration (remove once BE emits startle progress).
-	_prune()
-	if _lit.is_empty():
-		return
-	var step := delta / maxf(startle_time, 0.01)
-	for id in _lit.keys():
-		var raw = _lit[id]   # untyped first: a freed enemy can't go in a typed var
-		if not is_instance_valid(raw):
-			forget_enemy(id)
-			continue
-		_set_startle(raw, float(startle.get(id, 0.0)) + step)
+	_prune()   # drop entries for enemies freed without a tree_exiting
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -560,24 +546,18 @@ func get_enemies() -> Array:
 	return out
 
 
-## Enemies chasing right now. Uses report_chase() once BE sends it; until then polls
-## each enemy's `is_chasing()` / `enraged`. TODO(BE-wire): Enemy CHASE state signal.
+## Enemies chasing right now = live enemies BE reported via report_chase(e, true)
+## and not yet report_chase(e, false) (give-up / RETURN) or freed (_exit_tree). No
+## polling of `enraged` / `is_chasing()`, no cap.
 func chasing_count() -> int:
-	if _chase_reported:
-		var n := 0
-		for raw in chasing:
-			if is_instance_valid(raw):
-				n += 1
-		return n
 	var n := 0
-	for e in get_enemies():
-		if e.has_method(&"is_chasing"):
-			n += 1 if e.is_chasing() else 0
-		elif "enraged" in e and e.get("enraged"):
+	for raw in chasing:
+		if is_instance_valid(raw) and not raw.is_queued_for_deletion():
 			n += 1
 	return n
 
 
+## Live enemies on the stage (groups enemies ∪ puppets), no cap.
 func enemy_total() -> int:
 	return get_enemies().size()
 
@@ -825,7 +805,6 @@ func reset() -> void:
 	pickup_value = 0.0
 	items.clear()
 	selected_index = -1
-	_chase_reported = false
 	_exit_handled = false
 	_run_won = false
 	_run_end = &""
