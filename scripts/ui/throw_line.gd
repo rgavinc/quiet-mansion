@@ -41,7 +41,12 @@ func _physics_process(_delta: float) -> void:
 	if not _active:
 		blocked = false
 		return
-	var enemy: Node2D = bus.selected_enemy
+	var enemy: Node2D = bus.get_selected_enemy()
+	if enemy == null:
+		visible = false
+		_active = false
+		blocked = false
+		return
 	_from = player.global_position
 	_to = enemy.global_position
 	var exclude: Array[RID] = []

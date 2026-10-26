@@ -29,9 +29,10 @@ func _process(_delta: float) -> void:
 	var vp := get_viewport_rect()
 	var xf := get_viewport().get_canvas_transform()
 	var player := get_tree().get_first_node_in_group("player") as Node2D
-	for e in bus.chasing:
-		if e == null or not is_instance_valid(e):
+	for raw in bus.chasing:   # untyped: a chaser may have been freed this frame
+		if raw == null or not is_instance_valid(raw):
 			continue
+		var e: Node2D = raw
 		var sp: Vector2 = xf * e.global_position
 		if vp.grow(-4.0).has_point(sp):
 			continue

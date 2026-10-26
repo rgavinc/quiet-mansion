@@ -32,7 +32,7 @@ func _process(delta: float) -> void:
 	if cam == null:
 		return
 	var goal := Vector2.ZERO
-	var e: Node2D = bus.selected_enemy if bus else null
-	if e != null and is_instance_valid(e):
+	var e: Node2D = bus.get_selected_enemy() if bus else null   # never a freed node
+	if e != null:
 		goal = target_offset(cam.global_position, e.global_position, skin.nudge_strength, skin.nudge_max)
 	cam.offset = cam.offset.lerp(goal, 1.0 - exp(-skin.nudge_speed * delta))

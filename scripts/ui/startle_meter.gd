@@ -31,7 +31,9 @@ func _on_flashlight(on: bool) -> void:
 
 
 func _process(_delta: float) -> void:
-	if target == null or not is_instance_valid(target):
+	var t = target   # untyped check first (QA #18)
+	if t == null or not is_instance_valid(t):
+		visible = false
 		queue_free()
 		return
 	global_position = target.global_position + Vector2(0, -skin.startle_head_offset)

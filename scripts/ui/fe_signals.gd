@@ -65,9 +65,6 @@ var chase_memory: Dictionary = {}   # enemy instance_id -> ratio
 var startle: Dictionary = {}        # enemy instance_id -> progress
 var pickup_active: bool = false
 var pickup_value: float = 0.0
-## Seconds LMB must be held before the pickup gauge appears (taps never flash it).
-## FE-owned UI constant; overridable from HudSkin.pickup_show_delay.
-var pickup_show_delay: float = 0.15
 ## LMB shorter than this = tap (throw / knock). Read from PlayerStats when wired.
 var tap_threshold: float = 0.2
 var _stats: Node = null
@@ -149,7 +146,9 @@ func set_flashlight(on: bool) -> void:
 	if not on:
 		# Light off: nothing is lit any more, so no startle builds.
 		for id in _lit.keys():
-			_set_startle(_lit[id], 0.0)
+			var raw = _lit[id]
+			if is_instance_valid(raw):
+				_set_startle(raw, 0.0)
 		_lit.clear()
 	flashlight_toggled.emit(on)
 
@@ -167,27 +166,86 @@ func is_holding() -> bool:
 
 ## Throw line / tap-throw rule: holding something AND an enemy is ringed.
 func can_throw() -> bool:
-	return is_holding() and selected_enemy != null and is_instance_valid(selected_enemy)
+	return is_holding() and get_selected_enemy() != null
 
 
 func select_enemy(enemy: Node2D) -> void:
 	if enemy != null and not is_instance_valid(enemy):
 		enemy = null
-	if enemy == selected_enemy:
+	if enemy == selected_enemy and (enemy == null or is_instance_valid(selected_enemy)):
 		return
 	selected_enemy = enemy
+	_track(enemy)
 	enemy_selected.emit(enemy)
+
+
+## Valid selected enemy, or null. Widgets should read this (never a freed node).
+func get_selected_enemy() -> Node2D:
+	var e = selected_enemy   # untyped: may hold a freed instance
+	return e if is_instance_valid(e) else null
+
+
+# --- Enemy lifetime (QA #18) -----------------------------------------------
+## Every enemy FE keeps a reference to is tracked: when it leaves the tree
+## (killed / freed / level unload) all its selection, startle, lit and chase
+## entries are dropped at once. _prune() in _process catches anything else.
+func _track(enemy: Node) -> void:
+	if enemy == null or not is_instance_valid(enemy):
+		return
+	var cb := _on_enemy_exiting.bind(enemy.get_instance_id())
+	if not enemy.tree_exiting.is_connected(cb):
+		enemy.tree_exiting.connect(cb, CONNECT_ONE_SHOT)
+
+
+func _on_enemy_exiting(id: int) -> void:
+	forget_enemy(id)
+
+
+## Drops every FE entry for enemy instance `id` and notifies widgets.
+func forget_enemy(id: int) -> void:
+	var sel = selected_enemy
+	if sel != null and (not is_instance_valid(sel) or sel.get_instance_id() == id):
+		selected_enemy = null
+		enemy_selected.emit(null)
+	for i in range(chasing.size() - 1, -1, -1):
+		var c = chasing[i]
+		if not is_instance_valid(c) or c.get_instance_id() == id:
+			chasing.remove_at(i)
+	_lit.erase(id)
+	startle.erase(id)
+	chase_memory.erase(id)
+
+
+## Removes entries whose enemy is already freed (no tree_exiting seen).
+func _prune() -> void:
+	var sel = selected_enemy
+	if sel != null and not is_instance_valid(sel):
+		selected_enemy = null
+		enemy_selected.emit(null)
+	for i in range(chasing.size() - 1, -1, -1):
+		var c = chasing[i]
+		if not is_instance_valid(c):
+			chasing.remove_at(i)
+	for id in _lit.keys():
+		var e = _lit[id]
+		if not is_instance_valid(e):
+			forget_enemy(id)
+	for d in [startle, chase_memory]:
+		for id in d.keys():
+			if not is_instance_valid(instance_from_id(id)):
+				d.erase(id)
 
 
 ## Placeholder: BE reports which enemy the beam is on; we integrate the
 ## startle gauge over `startle_time`. When BE emits its own startle progress,
 ## call `report_startle()` instead and stop calling this.
 func report_lit(enemy: Node2D, lit: bool) -> void:
-	if enemy == null:
+	if enemy == null or not is_instance_valid(enemy):
 		return
 	var id := enemy.get_instance_id()
 	if lit and flashlight_on:
 		_lit[id] = enemy
+		_track(enemy)
 	elif _lit.has(id):
 		_lit.erase(id)
 		_set_startle(enemy, 0.0)
@@ -211,17 +269,19 @@ func _set_startle(enemy: Node2D, p: float) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
 	p = clampf(p, 0.0, 1.0)
+	_track(enemy)
 	startle[enemy.get_instance_id()] = p
 	startle_progress.emit(enemy, p)
 
 
 # --- Chase -----------------------------------------------------------------
 func report_chase(enemy: Node2D, is_chasing: bool) -> void:
-	if enemy == null:
+	if enemy == null or not is_instance_valid(enemy):
 		return
 	var idx := chasing.find(enemy)
 	if is_chasing and idx == -1:
 		chasing.append(enemy)
+		_track(enemy)
 	elif not is_chasing and idx != -1:
 		chasing.remove_at(idx)
 		chase_memory.erase(enemy.get_instance_id())
@@ -229,8 +289,9 @@ func report_chase(enemy: Node2D, is_chasing: bool) -> void:
 
 
 func report_chase_memory(enemy: Node2D, ratio: float) -> void:
-	if enemy == null:
+	if enemy == null or not is_instance_valid(enemy):
 		return
+	_track(enemy)
 	chase_memory[enemy.get_instance_id()] = clampf(ratio, 0.0, 1.0)
 	chase_memory_changed.emit(enemy, clampf(ratio, 0.0, 1.0))
 
@@ -324,15 +385,16 @@ func enemy_type_id(enemy: Node) -> String:
 
 func _process(delta: float) -> void:
 	# Placeholder startle integration (remove once BE emits startle progress).
+	_prune()
 	if _lit.is_empty():
 		return
 	var step := delta / maxf(startle_time, 0.01)
 	for id in _lit.keys():
-		var e: Node2D = _lit[id]
-		if not is_instance_valid(e):
-			_lit.erase(id)
+		var raw = _lit[id]   # untyped first: a freed enemy can't go in a typed var
+		if not is_instance_valid(raw):
+			forget_enemy(id)
 			continue
-		_set_startle(e, float(startle.get(id, 0.0)) + step)
+		_set_startle(raw, float(startle.get(id, 0.0)) + step)
 
 
 func _unhandled_input(event: InputEvent) -> void:
