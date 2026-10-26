@@ -374,7 +374,7 @@ func on_hit_by_throw(_item: Dictionary) -> void:
 		queue_free()
 		return
 	_set_state(State.STUNNED)
-	_state_left = maxf(_state_left if _stun_calm else 0.0, stun_time * float(_item.get("stun_mult", 1.0)))   # Heavy Vases
+	_state_left = maxf(_state_left if _stun_calm else 0.0, stun_time * PlayerStats.clamp_mult(&"stun_mult", float(_item.get("stun_mult", 1.0))))   # Heavy Vases (capped)
 
 
 ## Knock while calm can kill; while enraged or a miss → it chases.

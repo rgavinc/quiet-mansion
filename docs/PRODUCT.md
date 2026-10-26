@@ -163,4 +163,9 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Shop pace:** a careful player affords ~1 item per shop; greed (vases, chests) should earn a second. Tune after #13's gold sweep.
 - **Holds:** a hit or leaving range cancels a pickup/chest hold completely; a new press is required (first-look blocker).
 - **Stat caps:** every stat has a min and max in the central stats table (e.g. noise ×0.3–×3).
+- **Stacked behavior caps:** Heavy Vases' stun is capped at ×2.5 total, and every behavior effect that multiplies across copies gets a bound in the same central stats table.
+- **Upper bounds for every stacking stat:** `max_health` ≤ 6 hearts, `invuln_time` 0.5–2.0s, `inventory_slots` ≤ 5, `light_startle_time` 0.4–1.5s, `light_angle_deg` ≤ 70°. All live in the central stats table.
+- **Honest item text:** all description numbers come from the effective, capped value, including what the next copy would add. No hand-typed numbers.
+- **Max useful copies:** each item gets a `max_copies` field. Shops and chests stop offering an item once another copy would add nothing. Music Box `max_copies` is 3.
+- **Music Box charges don't use hand slots:** lures are held in their own pocket, shown as pips, so owning boxes never blocks picking up vases.
 - **Item text:** description percentages are generated from the item's modifiers, never hand-written.
