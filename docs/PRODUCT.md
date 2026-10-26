@@ -151,5 +151,5 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Stairs:** 15 tiles (240px) diagonal per floor (~34°) plus a 3-tile landing at each end (21 tiles total). Landings are kept clear.
 - **Stage 1 size:** at least 3 floors, ~3 screens wide; exit on a different floor than the start; no puppet within one screen of the start.
 - **Seed sweep:** 1,000 seeds per stage.
-- **Merge rule:** an author's "ready" message ends with "frozen at `<sha>`"; Lead merges only that sha; follow-ups go on a new branch.
+- **Merge rule:** an author's "ready" message ends with "frozen at `<sha>`"; Lead merges only that sha; follow-ups go on a new branch. Nothing merges until QA posts a pass on that frozen sha (the pass is the go-ahead; no hold message needed).
 - **Wednesday first-look checklist:** generated multi-floor stage 1 start-to-exit; walking/stair-taking chasers; off-screen arrows that drain and give up; 1s light startle with visible twitch; vase noise pulling multiple chasers; vase gold and throws at the ringed puppet; styled game-over; merchant with a few working items.
