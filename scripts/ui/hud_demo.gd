@@ -13,7 +13,6 @@ const FLOOR_Y := 560.0
 const LIGHT_RANGE := 300.0
 const LIGHT_HALF_ANGLE := deg_to_rad(22.0)
 const PICKUP_RANGE := 70.0
-const TAP_TIME := 0.2
 const CHASE_SPEED := 90.0
 const MOVE_SPEED := 220.0
 
@@ -38,7 +37,7 @@ func _ready() -> void:
 	_build_world()
 	bus.set_health(3, 3)
 	bus.set_gold(12)
-	bus.set_items([{"id": "key_1", "slot": "brass_key", "name": "Brass Key", "throwable": false}])
+	bus.set_items([])   # empty hands: tap knocks, hold picks up
 	_on_flashlight(bus.flashlight_on)
 
 
@@ -53,6 +52,7 @@ func _build_world() -> void:
 	bg.size = Vector2(WORLD_W, 1400)
 	bg.position = Vector2(0, -400)
 	bg.z_index = -20
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	$World.add_child(bg)
 	var dark := CanvasModulate.new()
 	dark.color = Color(0.12, 0.11, 0.16)
@@ -126,7 +126,7 @@ func _build_world() -> void:
 		$World.add_child(v)
 		vases.append(v)
 	_help = Label.new()
-	_help.text = "A/D move · mouse aim · RMB light · hold LMB on vase = pickup · tap LMB = throw · wheel = items\n[debug] H hit · J heal · G +gold · C far enemy chases · R reset"
+	_help.text = "A/D move · mouse aim · RMB light on/off · hold LMB on vase = pickup · tap LMB = throw (held + ringed) / knock (empty hands) · wheel = items\n[debug] H hit · J heal · G +gold · C far enemy chases · R reset"
 	_help.position = Vector2(16, 70)
 	_help.add_theme_font_size_override("font_size", 14)
 	$HUD.add_child(_help)
@@ -143,6 +143,7 @@ func _wall(r: Rect2, c: Color) -> void:
 	vis.color = c
 	vis.size = r.size
 	vis.position = -r.size * 0.5
+	vis.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(vis)
 	$World.add_child(b)
 
@@ -230,7 +231,9 @@ func _update_pickup(delta: float) -> void:
 	if _press_time < 0.0:
 		return
 	_press_time += delta
-	if _pickup_target == null and _press_time >= TAP_TIME:
+	# Pickup channel starts on press (like BE will); the gauge itself waits
+	# pickup_show_delay before drawing, so taps never flash it.
+	if _pickup_target == null and _press_time <= delta:
 		var v := _nearest_vase()
 		if v:
 			_pickup_target = v
@@ -263,10 +266,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
 		_press_time = 0.0
 	elif event.is_action_released("interact"):
+		var was_tap: bool = _press_time >= 0.0 and _press_time < bus.tap_threshold
 		if _pickup_target != null:
 			_cancel_pickup()
-		elif _press_time >= 0.0 and _press_time < TAP_TIME:
-			_try_throw()
+		if was_tap:
+			_on_tap()
 		_press_time = -1.0
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match (event as InputEventKey).physical_keycode:   # DEBUG ONLY
@@ -281,11 +285,31 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R: get_tree().reload_current_scene()
 
 
+## Tap LMB: holding something → throw at the ringed enemy (nothing ringed → do
+## nothing); empty hands → knock over a prop in range.
+func _on_tap() -> void:
+	if bus.is_holding():
+		_try_throw()
+	else:
+		_try_knock()
+
+
+func _try_knock() -> void:
+	var v := _nearest_vase()
+	if v == null:
+		return
+	vases.erase(v)
+	v.queue_free()
+	# Placeholder NoiseBus: the crash wakes nearby enemies.
+	for e in enemies:
+		if is_instance_valid(e) and e.global_position.distance_to(v.global_position) < 260.0:
+			bus.report_chase(e, true)
+
+
 func _try_throw() -> void:
-	var it: Dictionary = bus.selected_item()
 	var e: Node2D = bus.selected_enemy
-	if it.is_empty() or not bool(it.get("throwable", false)) or e == null or not is_instance_valid(e):
-		return   # never errors, never auto-throws
+	if not bus.can_throw():
+		return   # nothing ringed: never errors, never auto-throws
 	var line = $World/WorldOverlay.throw_line
 	var items: Array = bus.items.duplicate()
 	items.remove_at(bus.selected_index)

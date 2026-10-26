@@ -22,7 +22,7 @@ signal health_changed(current: int, max_hp: int)
 signal gold_changed(amount: int, delta: int)
 
 # --- Flashlight / selection / startle -------------------------------------
-## TODO(BE-wire): flashlight toggle signal from BE player/flashlight.
+## REAL: emitted by set_flashlight(), which BE's player_controller calls on RMB toggle.
 signal flashlight_toggled(on: bool)
 ## `enemy` is null when nothing is selected. Only one at a time.
 ## TODO(BE-wire): BE flashlight hover → selection (or FE owns selection logic).
@@ -65,6 +65,12 @@ var chase_memory: Dictionary = {}   # enemy instance_id -> ratio
 var startle: Dictionary = {}        # enemy instance_id -> progress
 var pickup_active: bool = false
 var pickup_value: float = 0.0
+## Seconds LMB must be held before the pickup gauge appears (taps never flash it).
+## FE-owned UI constant; overridable from HudSkin.pickup_show_delay.
+var pickup_show_delay: float = 0.15
+## LMB shorter than this = tap (throw / knock). Read from PlayerStats when wired.
+var tap_threshold: float = 0.2
+var _stats: Node = null
 var items: Array = []
 var selected_index: int = -1
 
@@ -80,29 +86,45 @@ func _ready() -> void:
 	_wire_backend()
 
 
-## TODO(BE-wire): connect BE's real signals here when they land, e.g.
-##   PlayerStats.health_changed.connect(func(c, m): set_health(c, m))
-##   PlayerStats.gold_changed.connect(set_gold)
-##   Inventory.changed.connect(set_items); Inventory.selected_changed.connect(select_item)
-##   player.pickup_progress.connect(report_pickup_progress) ...
-## and set `max_health/startle_time/pickup_time` from PlayerStats.
+## Connects BE's real sources. REAL today: PlayerStats (hearts, gold, timings).
+## PlayerStats is listed BEFORE FESignals in [autoload], so it already exists.
+## TODO(BE-wire) still: Inventory.changed → set_items, Inventory.selected_changed
+## → select_item, player.pickup_* → report_pickup_*, Enemy startle/chase signals,
+## REAL: BE player_controller calls set_flashlight(on) on RMB toggle (PR #4).
 func _wire_backend() -> void:
-	# Deferred: PlayerStats is listed after FESignals in [autoload].
-	_wire_player_stats.call_deferred()
-
-
-## Real once BE PR "PlayerStats autoload" is merged; a no-op until then.
-func _wire_player_stats() -> void:
+	if not is_inside_tree() or get_path() != ^"/root/FESignals":
+		return   # only the autoload auto-wires; test instances call wire_player_stats()
 	var ps := get_node_or_null(^"/root/PlayerStats")
 	if ps == null:
+		push_warning("FESignals: /root/PlayerStats missing; hearts/gold stay on placeholder values")
 		return
-	ps.health_changed.connect(func(c: int, m: int) -> void: set_health(c, m))
-	ps.gold_changed.connect(func(c: int, _d: int) -> void: set_gold(c))
-	if ps.has_method(&"get_stat"):
-		startle_time = ps.get_stat(&"light_startle_time")
-		pickup_time = ps.get_stat(&"pickup_time")
+	wire_player_stats(ps)
+
+
+## Explicit PlayerStats → HUD connection (also used by tests with a fresh instance).
+func wire_player_stats(ps: Node) -> void:
+	if _stats != null:
+		return
+	_stats = ps
+	ps.health_changed.connect(_on_ps_health)
+	ps.gold_changed.connect(_on_ps_gold)
+	startle_time = ps.get_stat(&"light_startle_time")
+	pickup_time = ps.get_stat(&"pickup_time")
+	tap_threshold = ps.get_stat(&"tap_threshold")
 	set_health(ps.health, ps.max_health())
 	set_gold(ps.gold)
+
+
+func is_stats_wired() -> bool:
+	return _stats != null
+
+
+func _on_ps_health(current: int, max_hp: int) -> void:
+	set_health(current, max_hp)
+
+
+func _on_ps_gold(current: int, _delta: int) -> void:
+	set_gold(current)
 
 
 # --- Stats -----------------------------------------------------------------
@@ -130,6 +152,22 @@ func set_flashlight(on: bool) -> void:
 			_set_startle(_lit[id], 0.0)
 		_lit.clear()
 	flashlight_toggled.emit(on)
+
+
+## RMB is a toggle (click on, click off), never hold-to-light.
+func toggle_flashlight() -> void:
+	set_flashlight(not flashlight_on)
+
+
+## True when the boy has something in hand (the selected inventory item).
+## TODO(BE-wire): Inventory.held_item once BE adds hands vs. bag.
+func is_holding() -> bool:
+	return not selected_item().is_empty()
+
+
+## Throw line / tap-throw rule: holding something AND an enemy is ringed.
+func can_throw() -> bool:
+	return is_holding() and selected_enemy != null and is_instance_valid(selected_enemy)
 
 
 func select_enemy(enemy: Node2D) -> void:
@@ -305,7 +343,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("inv_prev"):
 		cycle_item(-1)
 	elif event.is_action_pressed("flashlight_toggle"):
-		set_flashlight(not flashlight_on)
+		toggle_flashlight()
 
 
 ## Clears all state (tests / scene reloads).

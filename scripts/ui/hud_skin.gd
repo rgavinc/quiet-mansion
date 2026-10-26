@@ -43,6 +43,8 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 @export var pickup_radius: float = 12.0
 @export var pickup_width: float = 4.0
 @export var pickup_head_offset: float = 48.0
+## Hold time before the pickup gauge appears, so a tap never flashes it.
+@export var pickup_show_delay: float = 0.15
 
 @export_group("Throw line")
 @export var throw_clear: Color = Color(1.0, 1.0, 1.0, 0.65)

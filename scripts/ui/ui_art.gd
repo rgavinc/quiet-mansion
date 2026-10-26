@@ -1,10 +1,9 @@
 class_name UiArt
 extends RefCounted
 ## Art lookups BY SLOT NAME for UI (never file paths in widgets).
-## Reads slot → path from AssetProvenance (assets/ASSETS_MANIFEST.toml).
-## Returns null when the slot isn't in the manifest yet, and widgets then
-## draw their placeholder shapes.
-## TODO(BE-wire): switch to Back End's shared manifest loader when it lands.
+## Slot → path comes from AnimLibrary (BE's single manifest loader over
+## assets/ASSETS_MANIFEST.toml). Returns null when the slot isn't in the manifest
+## yet (or its PNG is missing), and callers then draw their placeholder shapes.
 
 static var _cache: Dictionary = {}
 
@@ -31,16 +30,9 @@ static func clear_cache() -> void:
 
 
 static func _path_for(slot: String) -> String:
-	var loop := Engine.get_main_loop() as SceneTree
-	var prov: Node = null
-	if loop and loop.root:
-		prov = loop.root.get_node_or_null("AssetProvenance")
-	if prov == null or not ("entries" in prov):
+	if not AnimLibrary.has_slot(slot):
 		return ""
-	for e in prov.entries:
-		if str(e.get("slot", "")) == slot:
-			return str(e.get("path", ""))
-	return ""
+	return str(AnimLibrary.meta(slot).get("path", ""))
 
 
 ## The FESignals adapter, or null (e.g. in isolated tests before injection).

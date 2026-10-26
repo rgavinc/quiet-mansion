@@ -93,6 +93,7 @@ func _on_selected(index: int) -> void:
 func _make_slot(d: Dictionary) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.theme_type_variation = &"HudSlot"
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.custom_minimum_size = Vector2(skin.slot_size, skin.slot_size)
 	var icon := HudIcon.new()
 	icon.kind = HudIcon.Kind.ITEM

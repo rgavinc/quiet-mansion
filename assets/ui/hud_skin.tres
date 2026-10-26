@@ -8,3 +8,4 @@ ring_colors = {
 "puppet_hand": Color(0.95, 0.35, 0.35, 1)
 }
 ring_default = Color(0.95, 0.95, 0.85, 1)
+pickup_show_delay = 0.15

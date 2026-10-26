@@ -2,12 +2,16 @@ extends Node2D
 ## Radial gauge over the boy while the hold-LMB pickup channels.
 ## Listens to FESignals.pickup_started / pickup_progress(0..1) / pickup_cancelled /
 ## pickup_completed. Hides on cancel (with a quick shake-fade) and on complete.
+## It stays hidden until LMB has been held `skin.pickup_show_delay` (0.15 s), so
+## a tap (throw / knock) never flashes it; a cancel before then is silent.
 
 var skin: HudSkin
 var bus: Node
 var progress: float = 0.0
 var active: bool = false
 
+## Seconds since pickup_started.
+var held: float = 0.0
 var _fade: float = 0.0
 var _cancel_flash: float = 0.0
 
@@ -31,34 +35,60 @@ func _ready() -> void:
 func _start() -> void:
 	active = true
 	progress = 0.0
-	_fade = 1.0
+	held = 0.0
+	_fade = 0.0
 	_cancel_flash = 0.0
-	visible = true
+	visible = false
+
+
+func show_delay() -> float:
+	return skin.pickup_show_delay
+
+
+func past_threshold() -> bool:
+	return held >= show_delay() - 0.0001
 
 
 func _on_progress(p: float) -> void:
 	if not active:
 		_start()
 	progress = clampf(p, 0.0, 1.0)
+	if bus:
+		held = maxf(held, progress * float(bus.pickup_time))
+		if past_threshold():
+			_fade = 1.0
+			visible = true
 	queue_redraw()
 
 
 func _on_cancel() -> void:
 	active = false
-	_cancel_flash = 1.0
+	if past_threshold():
+		_cancel_flash = 1.0
+	else:
+		_fade = 0.0
+		visible = false
 
 
 func _on_complete() -> void:
 	active = false
 	progress = 1.0
 	_cancel_flash = 0.0
+	if not past_threshold():
+		_fade = 0.0
+		visible = false
 
 
 func _process(delta: float) -> void:
 	var p := get_tree().get_first_node_in_group("player") as Node2D if is_inside_tree() else null
 	if p:
 		global_position = p.global_position + Vector2(0, -skin.pickup_head_offset)
-	if not active:
+	if active:
+		held += delta
+		if past_threshold():
+			_fade = 1.0
+			visible = true
+	else:
 		_fade = move_toward(_fade, 0.0, delta * 5.0)
 		_cancel_flash = move_toward(_cancel_flash, 0.0, delta * 4.0)
 		if _fade <= 0.0:

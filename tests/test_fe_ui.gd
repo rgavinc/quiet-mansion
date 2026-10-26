@@ -21,6 +21,15 @@ func run_all() -> Dictionary:
 		["camera_nudge_is_capped", test_nudge],
 		["throw_line_blocked_by_wall", test_throw_block],
 		["input_actions_exist", test_input_actions],
+		["throw_line_only_when_holding_and_ringed", test_throw_rule],
+		["pickup_gauge_waits_hold_threshold", test_pickup_threshold],
+		["pickup_tap_never_flashes_gauge", test_pickup_tap],
+		["flashlight_is_toggle_ring_persists", test_flashlight_toggle],
+		["startle_meter_hides_when_light_off", test_startle_meter_light],
+		["main_scene_has_new_hud_overlay_watermark", test_main_scene],
+		["ui_art_resolves_manifest_slots", test_ui_art_slots],
+		["fe_scripts_no_hardcoded_art_paths", test_no_art_paths],
+		["hearts_gold_wired_to_player_stats", test_player_stats_wiring],
 	]
 	var passed := 0
 	for item in checks:
@@ -242,4 +251,181 @@ func test_input_actions() -> String:
 	for a in ["jump", "flashlight_toggle", "interact", "inv_next", "inv_prev"]:
 		if not InputMap.has_action(a):
 			return "missing input action %s" % a
+	return ""
+
+
+func test_throw_rule() -> String:
+	var b := _bus()
+	var line := _mount("res://scripts/ui/throw_line.gd", b)
+	var e := Node2D.new(); _root().add_child(e)
+	var err := ""
+	# empty hands, nothing ringed
+	if line.should_show():
+		err = "hidden with empty hands and no ring"
+	b.select_enemy(e)
+	if err.is_empty() and line.should_show():
+		err = "hidden with empty hands even when ringed"
+	b.set_items([{"slot": "key", "name": "Key"}])   # holding (any item)
+	b.select_item(0)
+	if err.is_empty() and not line.should_show():
+		err = "shown when holding something and an enemy is ringed"
+	b.select_enemy(null)
+	if err.is_empty() and (line.should_show() or b.can_throw()):
+		err = "hidden when holding but nothing ringed (tap does nothing)"
+	b.select_enemy(e)
+	b.set_items([])
+	if err.is_empty() and line.should_show():
+		err = "hidden again once hands are empty"
+	_cleanup([line, e, b])
+	return err
+
+
+func test_pickup_threshold() -> String:
+	var b := _bus()
+	var g := _mount("res://scripts/ui/pickup_gauge.gd", b)
+	var err := ""
+	if absf(g.show_delay() - 0.15) > 0.0001:
+		err = "default show delay should be 0.15 s, got %f" % g.show_delay()
+	b.report_pickup_started(null)
+	g._process(0.1)
+	if err.is_empty() and g.visible:
+		err = "gauge must stay hidden before 0.15 s of hold"
+	g._process(0.06)
+	if err.is_empty() and not g.visible:
+		err = "gauge should appear after 0.15 s of hold"
+	b.report_pickup_cancelled()
+	g._process(1.0)
+	if err.is_empty() and g.visible:
+		err = "gauge should hide after a late cancel"
+	_cleanup([g, b])
+	return err
+
+
+func test_pickup_tap() -> String:
+	var b := _bus()
+	var g := _mount("res://scripts/ui/pickup_gauge.gd", b)
+	var err := ""
+	b.report_pickup_started(null)
+	b.report_pickup_progress(0.05)   # 0.05 s at pickup_time 1.0
+	g._process(0.05)
+	if g.visible:
+		err = "0.1 s tap must not show the gauge"
+	b.report_pickup_cancelled()      # released: it was a tap
+	if err.is_empty() and (g.visible or g._cancel_flash > 0.0):
+		err = "early cancel must be silent (no red shake)"
+	g._process(0.016)
+	if err.is_empty() and g.visible:
+		err = "still hidden after the tap"
+	_cleanup([g, b])
+	return err
+
+
+func test_flashlight_toggle() -> String:
+	var b := _bus()
+	var ring := _mount("res://scripts/ui/selection_ring.gd", b)
+	var e := Node2D.new(); _root().add_child(e)
+	b.select_enemy(e)
+	var seen: Array = []
+	b.flashlight_toggled.connect(func(on): seen.append(on))
+	var err := ""
+	b.toggle_flashlight()   # click → off
+	if b.flashlight_on or not ring.visible or ring.target != e:
+		err = "first click turns light off; ring stays"
+	b.toggle_flashlight()   # click → on
+	if err.is_empty() and (not b.flashlight_on or not ring.visible):
+		err = "second click turns light back on; ring stays"
+	if err.is_empty() and seen != [false, true]:
+		err = "toggled signal sequence %s" % [seen]
+	b.set_flashlight(true)  # same state again: no extra signal
+	if err.is_empty() and seen.size() != 2:
+		err = "setting the same state must not re-emit"
+	_cleanup([ring, e, b])
+	return err
+
+
+func test_player_stats_wiring() -> String:
+	var ps: Node = load("res://scripts/autoload/player_stats.gd").new()
+	_root().add_child(ps)
+	var b := _bus()
+	var hud := _mount("res://scripts/ui/health_gold_hud.gd", b)
+	b.wire_player_stats(ps)
+	var err := ""
+	if not b.is_stats_wired():
+		err = "wire_player_stats should connect"
+	ps.take_hit(1)
+	if err.is_empty() and (b.health != ps.health or hud.filled_hearts() != ps.health or hud.heart_count() != ps.max_health()):
+		err = "hearts should follow PlayerStats: %d/%d vs hud %d/%d" % [ps.health, ps.max_health(), hud.filled_hearts(), hud.heart_count()]
+	ps.add_gold(12)
+	if err.is_empty() and (b.gold != ps.gold or hud.gold_text() != str(ps.gold)):
+		err = "gold should follow PlayerStats (%d), hud '%s'" % [ps.gold, hud.gold_text()]
+	if err.is_empty() and absf(b.startle_time - ps.get_stat(&"light_startle_time")) > 0.0001:
+		err = "startle_time should come from PlayerStats"
+	_cleanup([hud, b, ps])
+	return err
+
+
+func test_startle_meter_light() -> String:
+	var b := _bus()
+	var e := Node2D.new(); _root().add_child(e)
+	var m: Node = load("res://scripts/ui/startle_meter.gd").new()
+	m.set("bus", b)
+	m.set("target", e)
+	_root().add_child(m)
+	b.startle_progress.connect(func(en, p): if en == e: m.set_progress(p))
+	b.report_lit(e, true)
+	b._process(0.4)
+	m._process(0.0)
+	var err := ""
+	if not m.visible or m.progress <= 0.0:
+		err = "meter should show while lit with the light on"
+	b.set_flashlight(false)   # what BE player_controller calls on RMB
+	if err.is_empty() and (m.visible or m.progress != 0.0):
+		err = "meter must hide and reset as soon as the light turns off"
+	m._process(0.0)
+	if err.is_empty() and m.visible:
+		err = "meter must stay hidden with the light off"
+	_cleanup([m, e, b])
+	return err
+
+
+func test_main_scene() -> String:
+	var ps: PackedScene = load("res://scenes/main.tscn")
+	if ps == null:
+		return "main.tscn failed to load"
+	var st := ps.get_state()
+	var names: PackedStringArray = []
+	for i in st.get_node_count():
+		names.append(str(st.get_node_path(i)))
+	for want in ["./HUD", "./World/WorldOverlay", "./AIWatermark", "./AIWatermark/WatermarkLabel"]:
+		if not want in names:
+			return "main.tscn missing %s (has %s)" % [want, names]
+	var src := FileAccess.get_file_as_string("res://scripts/map/main.gd")
+	if src.contains("knock nearby") or src.contains("Space/RMB") or src.contains("AlertHud"):
+		return "old text HUD / knock hint still in main.gd"
+	var want_hint := "Space jump · RMB flashlight on/off · hold LMB pick up · tap LMB throw/knock · scroll items"
+	if not src.contains(want_hint):
+		return "new hint text missing from main.gd"
+	return ""
+
+
+func test_ui_art_slots() -> String:
+	UiArt.clear_cache()
+	for slot in ["floor_dark", "flashlight_blob"]:
+		if UiArt.texture(slot) == null:
+			return "slot %s should resolve through the manifest" % slot
+	if UiArt.texture("no_such_slot_xyz") != null:
+		return "unknown slot must return null (placeholder path)"
+	return ""
+
+
+func test_no_art_paths() -> String:
+	var files := ["res://scripts/map/main.gd", "res://scripts/player/flashlight.gd"]
+	var d := DirAccess.open("res://scripts/ui")
+	for f in d.get_files():
+		if f.ends_with(".gd"):
+			files.append("res://scripts/ui/" + f)
+	for f in files:
+		var src := FileAccess.get_file_as_string(f)
+		if src.contains("res://assets/art/") or src.contains("res://assets/replace_me/"):
+			return "%s hard-codes an art path; use a manifest slot" % f
 	return ""
