@@ -18,6 +18,9 @@ func run_all() -> Dictionary:
 		["music_box_tap_throws_facing_not_last_aim", test_music_box_facing],
 		["heavy_vases_double_stun_and_carry_slow", test_heavy_vases],
 		["flash_bulb_stuns_startle_once_per_stage", test_flash_bulb],
+		["music_box_x2_one_throw_spends_one_copy", test_music_box_x2],
+		["rabbits_foot_x2_one_save_per_copy", test_rabbits_foot_x2],
+		["flash_bulb_x4_one_stun_per_copy", test_flash_bulb_x4],
 		["cracked_mirror_offscreen_drain_and_arrow_distance", test_cracked_mirror],
 		["greedy_sack_vase_gold_and_louder_break", test_greedy_sack],
 		["charges_and_items_changed_on_use_and_stage_start", test_charges_signal],
@@ -443,3 +446,83 @@ func test_hook_bounds() -> Variant:
 	var spd: float = p.move_speed() / float(PlayerStats.BASE[&"move_speed"])
 	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-4: return "carry speed x%.3f, want floor x%.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
 	return ""
+
+
+# --- Stacked charged items: one event spends exactly one copy -------------------------
+## [charges, max_charges] summed over owned copies of `id` (what the FE stacked tile shows).
+func _stack(id: String) -> Array:
+	var c := 0
+	var m := 0
+	for it in PlayerStats.owned_items:
+		if str(it.id) == id:
+			c += it.charges
+			m += it.max_charges
+	return [c, m]
+
+
+## QA repro: grant 2 Music Boxes, start a stage, throw once -> 1/2 and a lure still in hand.
+func test_music_box_x2() -> Variant:
+	var a := _grant("music_box")
+	var b := _grant("music_box")
+	var p := _player(Vector2(600, 100))   # stage start: each copy puts its own lure in hand
+	if _stack("music_box") != [2, 2]: return "stage start %s, want 2/2" % [_stack("music_box")]
+	var lures := 0
+	for d in p.inventory.items:
+		if d.get("lure", false): lures += 1
+	if lures != 2: return "%d lures in hand at stage start, want 2" % lures
+	_watch()
+	FESignals.selected_enemy = null
+	var first: Dictionary = p.inventory.current()
+	p._tap()
+	if _stack("music_box") != [1, 2]: return "after one throw %s, want 1/2" % [_stack("music_box")]
+	var spent: Item = a if a.owns_lure(first) else b
+	var kept: Item = b if spent == a else a
+	if spent.charges != 0 or kept.charges != 1: return "wrong copy spent (thrown lure's box %d, other %d)" % [spent.charges, kept.charges]
+	if _changed.is_empty(): return "items_changed not fired on the first throw"
+	var second: Dictionary = p.inventory.current()
+	if not second.get("lure", false): return "no lure in hand after the first throw (%s)" % [second]
+	if not kept.owns_lure(second): return "lure in hand isn't the unspent box's"
+	var n := _changed.size()
+	p._tap()
+	if _stack("music_box") != [0, 2]: return "after two throws %s, want 0/2" % [_stack("music_box")]
+	if _changed.size() <= n: return "items_changed not fired on the second throw"
+	return ""
+
+
+func test_rabbits_foot_x2() -> Variant:
+	_grant("rabbits_foot")
+	_grant("rabbits_foot")
+	_player()
+	if _stack("rabbits_foot") != [2, 2]: return "stage start %s, want 2/2" % [_stack("rabbits_foot")]
+	_watch()
+	for i in 2:
+		PlayerStats.health = 1
+		var n := _changed.size()
+		PlayerStats.take_hit(1, true)
+		if PlayerStats.health != 1: return "lethal hit %d not saved" % (i + 1)
+		if _stack("rabbits_foot") != [1 - i, 2]: return "after save %d: %s, want %d/2" % [i + 1, _stack("rabbits_foot"), 1 - i]
+		if _changed.size() <= n: return "items_changed not fired on save %d" % (i + 1)
+	PlayerStats.take_hit(1, true)
+	return "" if PlayerStats.health == 0 else "third lethal hit saved with 2 feet"
+
+
+func test_flash_bulb_x4() -> Variant:
+	for i in 4:
+		_grant("flash_bulb")
+	_player()
+	if _stack("flash_bulb") != [4, 4]: return "stage start %s, want 4/4" % [_stack("flash_bulb")]
+	var e := _puppet(Vector2(300, 100), 0)
+	_watch()
+	for i in 4:
+		var n := _changed.size()
+		e.lit_override = 1
+		_run(e, 3.0, func(): return e.state != e.State.CALM and e.state != e.State.STARTLED)
+		if e.state != e.State.STUNNED: return "startle %d not stunned (state %d)" % [i + 1, e.state]
+		if _stack("flash_bulb") != [3 - i, 4]: return "after stun %d: %s, want %d/4" % [i + 1, _stack("flash_bulb"), 3 - i]
+		if _changed.size() <= n: return "items_changed not fired on stun %d" % (i + 1)
+		e.lit_override = 0
+		_run(e, 2.6)
+		if e.state != e.State.CALM: return "not calm after stun %d (state %d)" % [i + 1, e.state]
+	e.lit_override = 1
+	_run(e, 3.0, func(): return e.state == e.State.CHASE or e.state == e.State.STUNNED)
+	return "" if e.state == e.State.CHASE else "fifth startle with 4 bulbs not a chase (state %d)" % e.state

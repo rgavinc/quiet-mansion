@@ -77,7 +77,7 @@ Hooks on `Item` (base = no-op) and where they are dispatched (all iterate `Playe
 | `memory_drain_mult(enemy, off_screen) -> mult` | `PlayerStats.memory_drain_mult` | `Enemy._tick_hunt` SEARCH drain (`Enemy.is_off_screen()`: \|dx\|>640 or \|dy\|>360 from the boy) |
 | `arrow_reveal_distance() -> float` | `PlayerStats.arrow_reveal_distance()` (min over items; `INF` with none) | FE off-screen arrows |
 
-Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()`). `use_charge()` / `set_charges()` re-emit `PlayerStats.items_changed(owned_items)`; so does `begin_stage`.
+Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()`). `use_charge()` / `set_charges()` re-emit `PlayerStats.items_changed(owned_items)`; so does `begin_stage`. Stacked copies: each copy has its own charges (the FE tile sums them, e.g. 1/2), and one event spends at most one copy. `on_lethal_hit` / `on_startle` stop at the first item that handles the event (Rabbit's Foot, Flash Bulb). `on_throw` goes to every item, so Music Box spends only when the thrown dict is its OWN lure (`owns_lure`: the lure id is per instance). Tests: Music Box ×2 (QA repro), Rabbit's Foot ×2, Flash Bulb ×4. Hooks without charges (on_noise, carry, give-up, vase gold, Heavy Vases' stun tag) stack as passive effects.
 
 | Item | Rarity | Base price | Upside | Cost | Tunables (`params`) |
 |---|---|---|---|---|---|
