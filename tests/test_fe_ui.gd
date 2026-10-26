@@ -72,6 +72,12 @@ func run_all() -> Dictionary:
 		["owned_items_strip_30_items_wraps_inside_1020", test_owned_strip_wraps],
 		["minimap_dots_clamped_and_chase_end_immediate", test_minimap_clamp_and_chase_end],
 		["hud_hidden_while_end_screen_open", test_hud_hidden_end_screen],
+		["shop_owned_row_and_hearts_live_after_buy", test_shop_owned_row],
+		["shop_disconnects_on_exit_no_orphans", test_shop_exit_tree],
+		["shop_gold_changed_one_connection_across_stage_changes", test_shop_gold_conns_stages],
+		["owned_strip_stack_badge_is_dark_pill", test_strip_badge_pill],
+		["owned_strip_spent_pip_contrast", test_strip_pip_contrast],
+		["minimap_drops_freed_chaser_without_report", test_minimap_freed_chaser],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -1941,13 +1947,23 @@ func test_owned_strip_charges() -> String:
 	ps.begin_stage(null)   # refill
 	if err.is_empty() and (_pips(strip, 0).left != 1 or _pips(strip, 1).left != 1):
 		err = "begin_stage refills -> pips full again"
-	# a multi-charge item shows the count too
-	foot.max_charges = 3
-	foot.set_charges(2)
+	# pips are the count: no "n/max" text up to the pip cap (5), the number only past it
+	for mx in [3, 5]:
+		foot.max_charges = mx
+		foot.set_charges(2)
+		strip.refresh()   # max changed with charges unchanged -> no items_changed
+		if err.is_empty():
+			var p := _pips(strip, 1)
+			if p.total != mx or p.dots() != mx or p.left != 2:
+				err = "max %d -> %d pips, 2 lit" % [mx, mx]
+			elif strip.tiles[1].get_node_or_null(^"Charges/Count") != null:
+				err = "max %d: pips already show the count -> no 'n/max' text" % mx
+	foot.max_charges = 7
+	foot.set_charges(4)
 	if err.is_empty():
 		var n := strip.tiles[1].get_node_or_null(^"Charges/Count") as Label
-		if n == null or n.text != "2/3" or _pips(strip, 1).total != 3:
-			err = "max 3 -> 3 pips + '2/3' count"
+		if n == null or n.text != "4/7" or _pips(strip, 1).dots() != 1:
+			err = "max 7 (> pip cap) -> one pip + '4/7'"
 	_cleanup([strip, ps])
 	return err
 
@@ -2190,19 +2206,18 @@ func test_owned_strip_stacks() -> String:
 	if err.is_empty() and strip.tiles.size() != 3:
 		err = "one tile per id, got %d" % strip.tiles.size()
 	if err.is_empty():
-		var s0 := strip.tiles[0].get_node_or_null(^"Tile/Stack") as Label
-		var s1 := strip.tiles[1].get_node_or_null(^"Tile/Stack") as Label
+		var s0 := strip.tiles[0].find_child("Stack", true, false) as Label
+		var s1 := strip.tiles[1].find_child("Stack", true, false) as Label
 		if s0 == null or s0.text != "×3" or s1 == null or s1.text != "×2":
 			err = "stack badges should read ×3 / ×2"
-		elif strip.tiles[2].get_node_or_null(^"Tile/Stack") != null:
+		elif strip.tiles[2].find_child("Stack", true, false) != null:
 			err = "single item -> no ×N badge"
 	if err.is_empty() and (_pips(strip, 0).total != 3 or _pips(strip, 0).left != 3):
 		err = "stacked charges sum: 3/3"
 	bulbs[1].use_charge()
 	if err.is_empty():
-		var n := strip.tiles[0].get_node_or_null(^"Charges/Count") as Label
-		if _pips(strip, 0).left != 2 or n == null or n.text != "2/3":
-			err = "one bulb spent -> 2/3"
+		if _pips(strip, 0).left != 2 or strip.tiles[0].get_node_or_null(^"Charges/Count") != null:
+			err = "one bulb spent -> 2 of 3 pips lit, no number"
 	if err.is_empty():
 		var pip := _pips(strip, 0)
 		if strip.PIP_R * 2.0 < 11.0 or pip.get_combined_minimum_size().y < 11.0:
@@ -2316,4 +2331,262 @@ func test_hud_hidden_end_screen() -> String:
 		err = "screen freed -> HUD back"
 	_cleanup([sc, hud, hud2])
 	_reset_world()
+	return err
+
+
+## BE-shaped shop that really grants: Shop.buy(item, ps) (try_spend + grant_item).
+class _GrantShop extends RefCounted:
+	var ps: Node
+	var items: Array = []
+	func roll_stock(_stage: int, _run_seed: int) -> Array:
+		return items
+	func buy(item) -> bool:
+		return bool(load("res://scripts/items/shop.gd").buy(item, ps))
+
+
+func _shop_with_stats(ps: Node, b: Node) -> Node:
+	var shop: Node = load("res://scripts/ui/shop.gd").new()
+	shop.bus = b
+	shop.stats = ps
+	_root().add_child(shop)
+	return shop
+
+
+func test_shop_owned_row() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var db := _item_db()
+	var gs := _GrantShop.new()
+	gs.ps = ps
+	gs.items = [db.make("flash_bulb"), db.make("sneakers"), db.make("music_box"), db.make("minimap")]
+	b._shop = gs
+	ps.add_gold(999)
+	ps.grant_item(db.make("flash_bulb"))   # owned before the shop
+	var shop := _shop_with_stats(ps, b)
+	shop.open_shop()
+	_settle(shop)
+	var strip: Control = shop.owned_strip
+	var err := ""
+	if strip == null or not strip.compact or strip.tile_size >= 40.0:
+		err = "shop owned row should be the compact OwnedItemsStrip"
+	elif strip.entries.map(func(e): return e.id) != ["flash_bulb"]:
+		err = "owned row should show what's owned on open, got %s" % [strip.entries.map(func(e): return e.id)]
+	# buy flash bulb (dup -> stacks) + sneakers: live, no reopen
+	if err.is_empty() and not (shop.buy_index(0) and shop.buy_index(1)):
+		err = "buys should succeed with 999 gold"
+	_settle(shop)
+	if err.is_empty() and strip.entries.map(func(e): return [e.id, e.count]) != [["flash_bulb", 2], ["sneakers", 1]]:
+		err = "after buys the row should update live with stacking, got %s" % [strip.entries.map(func(e): return [e.id, e.count])]
+	if err.is_empty():
+		var st := strip.tiles[0].find_child("Stack", true, false) as Label
+		if st == null or st.text != "×2":
+			err = "stacked buy -> ×2 badge in the shop row"
+	if err.is_empty() and (strip.tiles[0].get_node(^"Tile") as Control).size.x > 30.0:
+		err = "shop tiles should be compact (<= 30 px), got %.0f" % (strip.tiles[0].get_node(^"Tile") as Control).size.x
+	if err.is_empty() and shop.owned_label.text != "Owned":
+		err = "owned label '%s'" % shop.owned_label.text
+	# hearts next to gold, live
+	ps.take_hit(1, true)
+	_settle(shop)
+	var mx: int = ps.max_health()
+	if err.is_empty() and (shop.hearts.size() != mx or shop.filled_hearts() != mx - 1):
+		err = "hearts %d filled %d, want %d / %d" % [shop.hearts.size(), shop.filled_hearts(), mx, mx - 1]
+	var row: Control = shop.root.find_child("StatsRow", true, false)
+	if err.is_empty() and (row == null or not row.is_ancestor_of(shop.hearts_box) or not row.is_ancestor_of(shop.gold_label)):
+		err = "hearts should sit in the gold row"
+	# layout: owned row inside OffersPanel below the cards; everything inside its panel
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var info: Control = shop.root.find_child("InfoPanel", true, false)
+	var pr := panel.get_global_rect().grow(0.5)
+	var orow: Control = shop.owned_row
+	if err.is_empty() and not pr.encloses(orow.get_global_rect()):
+		err = "owned row %s outside OffersPanel %s" % [orow.get_global_rect(), pr]
+	if err.is_empty() and orow.get_global_rect().position.y < (shop.cards[-1] as Control).get_global_rect().end.y:
+		err = "owned row should be under the offer cards"
+	if err.is_empty() and not info.get_global_rect().grow(0.5).encloses(row.get_global_rect()):
+		err = "hearts + gold row %s outside InfoPanel" % row.get_global_rect()
+	_cleanup([shop, b, ps])
+	_reset_world()
+	return err
+
+
+func _shop_conns(src: Object, shop: Node) -> int:
+	var n := 0
+	for sig in [&"stage_cleared", &"gold_changed", &"health_changed", &"items_changed"]:
+		n += _conns_into(src, sig, [shop])
+	return n
+
+
+func test_shop_exit_tree() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var shop := _shop_with_stats(ps, b)
+	var err := ""
+	var on_b := _shop_conns(b, shop)
+	var on_ps := _shop_conns(ps, shop)
+	if on_b != 3 or on_ps != 2:   # bus: stage_cleared/gold/health; stats: shop + its owned row
+		err = "in the tree: want 3 bus + 2 stats connections, got %d + %d" % [on_b, on_ps]
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	_root().remove_child(shop)   # stage change
+	if err.is_empty() and _shop_conns(b, shop) + _shop_conns(ps, shop) != 0:
+		err = "%d orphan connections after the shop left the tree" % (_shop_conns(b, shop) + _shop_conns(ps, shop))
+	var poke := func() -> void:
+		ps.add_gold(5)
+		ps.take_hit(1, true)
+		ps.grant_item(_item_db().make("sneakers"))
+		b.stage_cleared.emit(2)
+	poke.call()
+	if err.is_empty() and shop.is_open():
+		err = "an out-of-tree shop must not open on stage_cleared"
+	_root().add_child(shop)
+	if err.is_empty() and (_shop_conns(b, shop) != 3 or _shop_conns(ps, shop) != 2):
+		err = "re-entering should reconnect exactly once (%d + %d)" % [_shop_conns(b, shop), _shop_conns(ps, shop)]
+	shop.free()
+	poke.call()
+	OS.remove_logger(log)
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors after the shop left / was freed: %s" % [log.errors.slice(0, 3)]
+	_cleanup([b, ps])
+	_reset_world()
+	return err
+
+
+## QA: across real stage changes (main.tscn swapped by FESignals.next_stage), exactly one
+## shop is ever connected to FESignals.gold_changed, and never one outside the tree.
+func test_shop_gold_conns_stages() -> String:
+	var fs := _root().get_node_or_null(^"FESignals")
+	if fs == null:
+		return "no FESignals autoload"
+	var shop_script: Script = load("res://scripts/ui/shop.gd")
+	var count := func() -> Vector2i:   # (connected shops, of which outside the tree)
+		var v := Vector2i.ZERO
+		for c in fs.get_signal_connection_list(&"gold_changed"):
+			var o: Object = (c.callable as Callable).get_object()
+			if o != null and is_instance_valid(o) and o.get_script() == shop_script:
+				v.x += 1
+				if not (o as Node).is_inside_tree():
+					v.y += 1
+		return v
+	var keep_deferred: bool = fs.swap_deferred
+	fs.swap_deferred = false
+	var base: Vector2i = count.call()
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	_root().add_child(main)
+	_tree().current_scene = main
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	var err := ""
+	var seen: Array = []
+	for s in 4:   # stages 1..4 -> next_stage swaps the whole main scene
+		var v: Vector2i = count.call() - base
+		seen.append(v.x)
+		if v != Vector2i(1, 0):
+			err = "stage %d: %d shops on gold_changed (%d out of the tree), want exactly 1" % [s + 1, v.x, v.y]
+			break
+		var old: Node = _tree().current_scene
+		fs.next_stage()
+		v = count.call() - base   # old scene removed (queued free), new one in: still exactly 1
+		if v != Vector2i(1, 0):
+			err = "right after swap %d: %d shops on gold_changed (%d orphaned)" % [s + 1, v.x, v.y]
+			break
+		if is_instance_valid(old):
+			old.free()   # queued by the swap; free now so later tests don't see its screens
+		fs.set_gold(int(fs.gold) + 1)
+	OS.remove_logger(log)
+	var errs := log.errors.filter(func(e): return "shop" in e.to_lower() or "data.tree" in e)
+	if err.is_empty() and not errs.is_empty():
+		err = "errors on gold_changed after stage changes: %s" % [errs.slice(0, 3)]
+	var cur := _tree().current_scene
+	_tree().current_scene = null
+	if is_instance_valid(cur):
+		cur.free()
+	fs.swap_deferred = keep_deferred
+	fs.reset()
+	fs.stage = 1
+	fs.run_seed = -1
+	var ps := _root().get_node_or_null(^"PlayerStats")
+	if ps:
+		ps.reset()
+	_reset_world()
+	return err
+
+
+func test_strip_badge_pill() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	for i in 3:
+		ps.grant_item(_item_db().make("sneakers"))
+	_settle(strip)
+	var err := ""
+	var tile := strip.tiles[0].get_node(^"Tile") as Control
+	var pill := tile.find_child("Badge", true, false) as PanelContainer
+	var lab := tile.find_child("Stack", true, false) as Label
+	if pill == null or lab == null or lab.text != "×3":
+		return "×3 badge missing"
+	var sb := pill.get_theme_stylebox(&"panel") as StyleBoxFlat
+	if sb == null or sb.bg_color.a < 0.7 or sb.bg_color.get_luminance() > 0.15 or sb.corner_radius_top_left < 3:
+		err = "badge should be a dark (lum <= 0.15, alpha >= 0.7) rounded pill"
+	if err.is_empty() and lab.get_theme_color(&"font_color") != Color.WHITE:
+		err = "badge text should be white"
+	var tr := tile.get_global_rect()
+	var pr := pill.get_global_rect()
+	if err.is_empty() and not (tr.grow(0.5).encloses(pr) and pr.position.x >= tr.position.x + tr.size.x * 0.3 and pr.position.y >= tr.position.y + tr.size.y * 0.4):
+		err = "badge %s should sit in the tile's bottom-right corner %s" % [pr, tr]
+	if err.is_empty() and pr.get_area() > tr.get_area() * 0.4:
+		err = "badge covers too much of the icon (%.0f%% of the tile)" % (100.0 * pr.get_area() / tr.get_area())
+	_cleanup([strip, ps])
+	return err
+
+
+func _contrast(a: Color, b: Color) -> float:
+	var la := a.get_luminance() + 0.05
+	var lb := b.get_luminance() + 0.05
+	return maxf(la, lb) / minf(la, lb)
+
+
+func test_strip_pip_contrast() -> String:
+	var S: Script = load("res://scripts/ui/owned_items_strip.gd")
+	var c: Dictionary = S.get_script_constant_map()
+	var dark_wall := Color(0.09, 0.07, 0.11)   # mansion wallpaper in shadow
+	var light_bg := Color(0.9, 0.86, 0.78)     # lit wall / parchment panel
+	if _contrast(c.PIP_RING, dark_wall) < 4.5:
+		return "spent pip ring vs dark wall contrast %.1f < 4.5" % _contrast(c.PIP_RING, dark_wall)
+	if _contrast(c.PIP_EMPTY, light_bg) < 4.5:
+		return "spent pip fill vs light background contrast %.1f < 4.5" % _contrast(c.PIP_EMPTY, light_bg)
+	if c.PIP_EDGE.a < 0.8 or c.PIP_EDGE.get_luminance() > 0.1:
+		return "spent pip needs a dark outer edge"
+	if _contrast(c.PIP_FULL, c.PIP_EMPTY) < 4.5:
+		return "lit vs spent pip contrast %.1f < 4.5" % _contrast(c.PIP_FULL, c.PIP_EMPTY)
+	return ""
+
+
+func test_minimap_freed_chaser() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	ps.grant_item(_item_db().make("minimap"))
+	var a := _Chaser.new(); _root().add_child(a); a.global_position = Vector2(300, 300)
+	var c := _Chaser.new(); _root().add_child(c); c.global_position = Vector2(900, 300)
+	b.report_chase(a, true)
+	b.report_chase(c, true)
+	var err := ""
+	if mm.snapshot.chasers.size() != 2:
+		err = "2 chasers reported -> 2 dots, got %d" % mm.snapshot.chasers.size()
+	a.free()   # killed / despawned without a chase-end report, no _process tick
+	if err.is_empty() and mm.snapshot.chasers.size() != 1:
+		err = "freed chaser should drop its dot at once, got %d dots" % mm.snapshot.chasers.size()
+	_root().remove_child(c)   # tree_exiting without a report
+	if err.is_empty() and not mm.snapshot.chasers.is_empty():
+		err = "chaser leaving the tree should drop its dot at once"
+	_root().add_child(c)
+	b.report_chase(c, true)   # chasing again -> dot + watched again
+	if err.is_empty() and (mm.snapshot.chasers.size() != 1 or mm.watched_count() != 1):
+		err = "re-reported chaser -> dot again (%d dots, %d watched)" % [mm.snapshot.chasers.size(), mm.watched_count()]
+	_root().remove_child(mm)
+	if err.is_empty() and (mm.watched_count() != 0 or _conns_into(c, &"tree_exiting", [mm]) != 0):
+		err = "minimap out of the tree should stop watching chasers"
+	_cleanup([mm, c, b, ps])
 	return err
