@@ -31,6 +31,7 @@ func run_all() -> Dictionary:
 		["chest_loot_deterministic", test_chest_deterministic],
 		["chest_opens_through_hold_channel", test_chest_channel],
 		["fe_shop_adapter_finds_shop", test_fe_adapter],
+		["desc_percentages_match_measured_effect", test_desc_percent],
 	]
 	var passed := 0
 	for item in checks:
@@ -387,3 +388,47 @@ func test_fe_adapter() -> String:
 	var ok := PlayerStats.gold == 100 - int(o.price) and PlayerStats.owned_items.size() == 1
 	if FESignals.buy_offer(o): return "FE bought the same offer twice"
 	return "" if ok else "FE buy didn't spend/own (gold %d)" % PlayerStats.gold
+
+
+## PRODUCT.md "Item text": no hand-written percentages, and every "N%" in a description
+## equals the effect MEASURED through PlayerStats with the item granted (stat ratio, or the
+## behaviour hook's multiplier). Shadow Cloak's light line must read 67% (1 / 0.6).
+func test_desc_percent() -> String:
+	var hand := RegEx.create_from_string("\\d+\\s*%")
+	var tok := RegEx.create_from_string("\\{(mul|inv|add|param):(\\w+)\\}")
+	var pct := RegEx.create_from_string("(\\d+)%")
+	var vase := {script_path = "res://scripts/world/vase.gd"}
+	for r in ItemDb.ITEMS:
+		var raw := str(r.desc)
+		if hand.search(raw): return "%s: hand-written %% in desc" % r.id
+		var want: Array = []
+		for m in tok.search_all(raw):
+			var kind := m.get_string(1)
+			var key := m.get_string(2)
+			PlayerStats.reset()
+			var v := NAN
+			if kind == "param":
+				var it := ItemDb.make(str(r.id))
+				PlayerStats.grant_item(it)
+				match key:
+					"noise_mult": v = PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase) - 1.0
+					"offscreen_drain_mult": v = PlayerStats.memory_drain_mult(null, true) - 1.0
+					"carry_speed_mult": v = PlayerStats.carry_speed_mult([vase]) - 1.0
+					_: return "%s: no measurement for param %s" % [r.id, key]
+			else:
+				var before := PlayerStats.get_stat(StringName(key))
+				PlayerStats.grant_item(ItemDb.make(str(r.id)))
+				var after := PlayerStats.get_stat(StringName(key))
+				match kind:
+					"mul": v = after / before - 1.0
+					"inv": v = before / after - 1.0   # time-based: how much longer / sooner
+					"add": v = after - before
+			want.append(int(round(absf(v) * 100.0)))
+		var got: Array = []
+		var text := ItemDb.make(str(r.id)).description
+		if text.contains("{"): return "%s: unfilled token in '%s'" % [r.id, text]
+		for m in pct.search_all(text):
+			got.append(int(m.get_string(1)))
+		if got != want: return "%s: text %s%% vs measured %s%% ('%s')" % [r.id, got, want, text]
+	var cloak := ItemDb.make("shadow_cloak").description
+	return "" if cloak.contains("67%") else "shadow cloak text: " + cloak

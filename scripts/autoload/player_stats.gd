@@ -32,29 +32,44 @@ const BASE := {
 	&"minimap": 0.0,             # >= 1 = the minimap item is owned (FE minimap reads has_minimap())
 }
 
-## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
 ## Physics layers (bits). Player and enemies never block each other, so a catch is a
 ## distance check on overlapping bodies instead of two colliders stalling 26px apart.
 const LAYER_WORLD := 1
 const LAYER_PLAYER := 2
 const LAYER_ENEMY := 4
 
+## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
+## Additive stats keep absolute floors here; multiplier stats are capped by STAT_BOUNDS.
 const MIN := {
 	&"max_health": 1.0,
 	&"pickup_time": 0.1,
 	&"tap_threshold": 0.05,
 	&"light_startle_time": 0.2,
 	&"inventory_slots": 1.0,
-	# Item-stack floors (any item combo stays playable):
-	&"move_speed": 60.0,
-	&"climb_speed": 30.0,
-	&"pickup_range": 16.0,
-	&"light_range": 80.0,
 	&"light_angle_deg": 10.0,
-	&"light_detect_mult": 0.2,
-	&"noise_mult": 0.2,
-	&"gold_find_mult": 0.1,
 }
+
+## Stat caps (PRODUCT.md "Stat caps"): every MULTIPLIER stat's effective value, all items
+## stacked, stays within [min, max] x its base. The ONE table for them. Keys in BASE clamp
+## in get_stat(); the hook-only multiplier (give_up_speed, no BASE row) clamps in its
+## dispatcher, and noise / move speed clamp the stat x hook product (Greedy Sack, Heavy Vases).
+const STAT_BOUNDS := {
+	&"noise_mult": [0.3, 3.0],          # PD: noise x0.3 .. x3 (stat x item noise hooks)
+	&"light_range": [0.5, 2.0],         # 130 .. 520 px
+	&"light_detect_mult": [0.3, 3.0],   # startle takes 3.3x .. 0.33x as long
+	&"move_speed": [0.5, 2.0],          # 70 .. 280 px/s (stat x carry hooks)
+	&"climb_speed": [0.4, 2.5],         # 36 .. 225 px/s
+	&"pickup_time": [0.3, 3.0],         # 0.3 .. 3 s
+	&"pickup_range": [0.5, 2.0],        # 20 .. 80 px
+	&"gold_find_mult": [0.25, 3.0],
+	&"give_up_speed": [0.3, 3.0],       # hook only: searching enemy memory drain (Cracked Mirror)
+}
+
+## `stat`'s effective multiplier `m` (vs base) clamped to STAT_BOUNDS (unchanged if unbounded).
+static func clamp_mult(stat: StringName, m: float) -> float:
+	var b: Array = STAT_BOUNDS.get(stat, [])
+	return clampf(m, b[0], b[1]) if b.size() == 2 else m
+
 
 var health: int = 3
 var gold: int = 0
@@ -79,7 +94,11 @@ func get_stat(stat: StringName) -> float:
 		if m.stat == stat:
 			add += m.add
 			mul *= m.mul
-	return maxf((float(BASE[stat]) + add) * mul, float(MIN.get(stat, 0.0)))
+	var base := float(BASE[stat])
+	var v := (base + add) * mul
+	if STAT_BOUNDS.has(stat) and base != 0.0:
+		v = base * clamp_mult(stat, v / base)
+	return maxf(v, float(MIN.get(stat, 0.0)))
 
 
 func max_health() -> int:
@@ -229,7 +248,9 @@ func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Varian
 	var m := 1.0
 	for it in _live_items():
 		m *= float(it.on_noise(at, radius, loudness, source))
-	return m
+	# The cap is on the whole noise effect: stat (already in `radius`) x hooks.
+	var ns := get_stat(&"noise_mult")
+	return clamp_mult(&"noise_mult", ns * m) / ns
 
 
 ## PlayerController throw / knock: items may write into `item` (the dict the enemy gets).
@@ -258,7 +279,8 @@ func carry_speed_mult(held: Array) -> float:
 	var m := 1.0
 	for it in _live_items():
 		m *= float(it.carry_speed_mult(held))
-	return m
+	var ms := get_stat(&"move_speed") / float(BASE[&"move_speed"])
+	return clamp_mult(&"move_speed", ms * m) / ms
 
 
 ## Multiplier on a searching enemy's give-up drain.
@@ -266,7 +288,7 @@ func memory_drain_mult(enemy: Node, off_screen: bool) -> float:
 	var m := 1.0
 	for it in _live_items():
 		m *= float(it.memory_drain_mult(enemy, off_screen))
-	return m
+	return clamp_mult(&"give_up_speed", m)
 
 
 ## FE off-screen arrows: show a chaser's arrow only within this many px of the boy.

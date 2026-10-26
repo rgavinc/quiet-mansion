@@ -25,6 +25,8 @@ func run_all() -> Dictionary:
 		["knocked_prop_hits_enemy_where_it_lands", test_knock_lands_on_enemy],
 		["player_and_puppet_bodies_are_solid", test_layers],
 		["full_pickup_is_pickup_time_from_press", test_pickup_total_time],
+		["hit_mid_chest_hold_needs_new_press", test_chest_hit_no_resume],
+		["leaving_range_mid_chest_hold_needs_new_press", test_chest_range_no_resume],
 	]
 	var passed := 0
 	for item in checks:
@@ -241,3 +243,43 @@ func test_pickup_total_time() -> String:
 	while p.inventory.items.is_empty() and t < 3.0:
 		p.tick(1.0 / 60.0, Vector2.ZERO); t += 1.0 / 60.0
 	return "" if absf(t - PlayerStats.get_stat(&"pickup_time")) < 0.05 else "full pickup took %.2fs" % t
+
+
+func _chest(at := Vector2(120, 100)) -> Chest:
+	var c := Chest.new()
+	c.loot_seed = 7
+	return _add(c, at)
+
+
+## QA (#27): hit at 0.75 s into a 1.5 s chest hold, button still held: the hold must not
+## resume (it used to restart from 0.5 and open). Still closed at 1.5 s and 3 s.
+func test_chest_hit_no_resume() -> String:
+	var p := _player()
+	var c := _chest()
+	p.interact_pressed(); _run(p, 0.75)
+	if p.state != p.State.PICKUP: return "chest hold not started"
+	PlayerStats.take_hit(1, true)
+	if p.state != p.State.NORMAL or p.pickup_progress != 0.0: return "hit did not cancel"
+	_run(p, 0.75)
+	if c.is_open: return "chest opened by 1.5 s after the hit (hold resumed)"
+	_run(p, 1.5)
+	if c.is_open or p.state == p.State.PICKUP: return "hold restarted while the button stayed down"
+	p.interact_released()
+	p.interact_pressed(); _run(p, 1.6)   # a fresh press opens it as normal
+	return "" if c.is_open else "a new press didn't open the chest"
+
+
+func test_chest_range_no_resume() -> String:
+	var p := _player()
+	var c := _chest()
+	p.interact_pressed(); _run(p, 0.75)
+	if p.state != p.State.PICKUP: return "chest hold not started"
+	c.global_position = Vector2(400, 100)   # out of range
+	_run(p, 1.0 / 60.0)
+	if p.state != p.State.NORMAL or p.pickup_progress != 0.0: return "leaving range did not cancel"
+	c.global_position = Vector2(120, 100)   # back in range, button still held
+	_run(p, 0.75)
+	if c.is_open: return "chest opened by 1.5 s after leaving range (hold resumed)"
+	_run(p, 1.5)
+	if c.is_open or p.state == p.State.PICKUP: return "hold restarted while the button stayed down"
+	return ""

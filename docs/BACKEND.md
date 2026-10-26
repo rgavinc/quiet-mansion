@@ -28,7 +28,7 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 - `NoiseBus.emit_noise(at, radius, loudness, source)`: every sound goes here. Enemies hear it if they're inside `radius`, on screen or not. `DEFAULT_RADIUS` is 760px, slightly past the screen edge.
 - `WorldObject` (`scripts/world/world_object.gd`) is the base for all props. Override the defaults in a subclass `_init()`: `can_pick_up`, `throwable`, `breakable`, `break_on_touch`, `noise_radius`, `pickup_time_mult`, `gold_inside`, `blocks_throws`, `art_slot`.
 - `Vase` is pickable and throwable, uses the default radius, and has a 45% chance of 1 to 3 gold. `obstacle.gd` is a generic breakable that can't be picked up.
-- Player: a LMB tap throws the held item at `FESignals.selected_enemy`. With empty hands, a tap knocks over the nearest prop you're facing. Holding LMB longer than `tap_threshold` starts a pickup that lasts `pickup_time * pickup_time_mult`. During a pickup you can't move or toggle the light. The pickup cancels if you leave range, get hit, or let go. The wheel cycles the `Inventory` (capacity is `inventory_slots`).
+- Player: a LMB tap throws the held item at `FESignals.selected_enemy`. With empty hands, a tap knocks over the nearest prop you're facing. Holding LMB longer than `tap_threshold` starts a pickup that lasts `pickup_time * pickup_time_mult`. During a pickup you can't move or toggle the light. The pickup cancels if you leave range, get hit, or let go, and a cancel ends the press completely (`_cancel_pickup` clears the held flag and time): even with the button still down, nothing resumes; a new press starts from 0 (PRODUCT.md "Holds", first-look blocker). The wheel cycles the `Inventory` (capacity is `inventory_slots`).
 - A thrown object flies at the target. Physics bodies (walls) and props with `blocks_throws` stop it. It always shatters with its own noise radius where it stops, so a miss is still loud. A calm puppet that gets hit dies, and an enraged one is stunned for 1.5s.
 - Hovering the mouse over a lit puppet selects it through `FESignals.select_enemy`. The selection stays when the light goes off.
 - Not done yet: the jump and gravity wait for Lead's floor layout.
@@ -37,11 +37,26 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 - `Item` (`scripts/items/item.gd`, a Resource) has `id`, `display_name`, `description`, `icon_slot`, `price`, `rarity` and `mods` (`[{stat, add, mul}]`). `apply()` and `remove()` only call `PlayerStats.add_modifier` / `remove_modifiers_from`. Each instance uses its own source key (`item:<id>#<instance>`), so two copies stack and come off separately. A second `apply()` does nothing. `to_dict()` gives the FE offer fields.
 - `ItemDb` (`scripts/items/item_db.gd`) is the single table: 20 trade-off items (14 stat items + 6 behaviour items, see below). Each one has at least one upside and one downside, and only uses stats that gameplay reads. `ItemDb.make(id)` returns a fresh instance.
 - Rarity: common (weight 60, stage 1+), uncommon (30, 1+), rare (14, 2+), legendary (6, 4+).
-- `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage, each priced `ItemDb.shop_price(id, stage)` (see Gold economy). The same (stage, seed) always gives the same stock. FE shows the first `shop_offer_count` (3).
+- `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage, each priced `ItemDb.shop_price(id, stage)` (see Gold economy). The same (stage, seed) always gives the same stock. The shop shows all 4 offers (`STOCK_SIZE`; FE #34).
 - `Shop.buy(item) -> bool` spends through `try_spend`. It then marks the item `sold` and calls `PlayerStats.grant_item` (apply + add to `owned_items` + `items_changed`). It returns false and changes nothing if gold is short or the item is already sold or applied.
 - `PlayerStats.owned_items`: items stay owned across Continue (PlayerStats is an autoload). `reset()` clears them along with every modifier. Signal: `items_changed(items)`. Helpers: `owns(id)` and `has_minimap()`.
 - Max health: a higher max heals by the same amount. A lower max only clamps current health, so it never costs you an extra heart.
-- New MIN floors keep stacked downsides sane: move_speed 60, climb_speed 30, pickup_range 16, light_range 80, light_angle_deg 10, light_detect_mult / noise_mult 0.2, gold_find_mult 0.1.
+- Stat caps (PRODUCT.md "Stat caps"): `PlayerStats.STAT_BOUNDS` is the one table, a `[min, max]` per multiplier stat on its effective value (all items stacked) relative to base; `PlayerStats.clamp_mult(stat, m)` applies it. `get_stat` clamps the BASE stats; the hook dispatchers clamp the rest, and for noise and move speed the bound is on stat × hook (Greedy Sack's vase noise, Heavy Vases' carry slow).
+
+  | Stat | min | max | Effective range |
+  |---|---|---|---|
+  | `noise_mult` (+ `on_noise` hooks) | ×0.3 | ×3.0 | PD's numbers |
+  | `light_range` | ×0.5 | ×2.0 | 130–520 px |
+  | `light_detect_mult` | ×0.3 | ×3.0 | startle takes 3.3× to 0.33× as long |
+  | `move_speed` (+ `carry_speed_mult` hooks) | ×0.5 | ×2.0 | 70–280 px/s |
+  | `climb_speed` | ×0.4 | ×2.5 | 36–225 px/s |
+  | `pickup_time` | ×0.3 | ×3.0 | 0.3–3 s (× the target's `pickup_time_mult`) |
+  | `pickup_range` | ×0.5 | ×2.0 | 20–80 px |
+  | `gold_find_mult` | ×0.25 | ×3.0 | |
+  | `give_up_speed` (`memory_drain_mult` hooks, no BASE row) | ×0.3 | ×3.0 | searching enemies' memory drain |
+
+  Additive stats keep the absolute `MIN` floors (max_health 1, pickup_time 0.1 s, tap_threshold 0.05 s, light_startle_time 0.2 s, inventory_slots 1, light_angle_deg 10). Tests: each bound stat stacked 10× at ×2 / ×0.5 lands exactly on its own max / min; 10 Greedy Sacks / Cracked Mirrors / Heavy Vases clamp through the hooks; every stat an item multiplies must have a bound.
+- Item text: `desc` in ItemDb holds tokens, not numbers, for every percentage; `ItemDb.describe(row)` fills them from the row's own mods / params (`{mul:stat}` = \|mul−1\|, `{inv:stat}` = \|1/mul−1\| for time-based effects like `light_detect_mult` ×0.6 → "67% longer", `{add:stat}`, `{param:key}` = \|param−1\|). `test_items` rejects hand-written "N%" and checks every % against the effect measured through PlayerStats with the item granted.
 - `Chest` (`scripts/world/chest.gd`, a WorldObject) opens through the normal LMB hold channel (`pickup_time × 1.5`), even when the inventory is full, via the new `WorldObject.on_hold_complete(by)` hook. It opens only once. It grants one item from `ItemDb.roll_chest(stage, seed)`. The seed is `loot_seed`, or a hash of run seed + stage + position. It also adds `gold_inside` and swaps the art from `prop_chest_closed` to `prop_chest_open`. It makes a creak: `DEFAULT_RADIUS × 0.5 × noise_mult`, loudness 0.6. Signal: `opened(item)`.
 - Stats waiting on other work: `light_detect_mult` and `light_startle_time` only matter once the enemy state machine (PR #26) lands. Nothing draws a minimap yet: FE should show it when `PlayerStats.has_minimap()` (or `stat_changed(&"minimap", ...)`).
 
@@ -67,7 +82,7 @@ Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()
 | Item | Rarity | Base price | Upside | Cost | Tunables (`params`) |
 |---|---|---|---|---|---|
 | Rabbit's Foot `rabbits_foot` | rare | 14 | first lethal hit each stage leaves 1 heart (1 charge) | -1 max heart | — |
-| Music Box `music_box` | uncommon | 9 | each stage starts with a lure in hand (charge = lure in hand); thrown (at the ringed enemy, or along the aim 320 px with none ringed) it lands (`MusicBoxLure`) and pulses a noise every 0.5 s for 4 s; hearers SEARCH toward the lure, not the boy (`Enemy.hear_lure`) | takes a hand slot until thrown; doesn't kill/stun | lure_time 4, lure_interval 0.5, lure_radius 900, lure_loudness 1.2, world_slot |
+| Music Box `music_box` | uncommon | 9 | each stage starts with a lure in hand (charge = lure in hand); thrown (at the ringed enemy, or 320 px in the FACING direction, `Vector2(facing, 0)`, with none ringed — never the last mouse aim) it lands (`MusicBoxLure`) and pulses a noise every 0.5 s for 4 s; hearers SEARCH toward the lure, not the boy (`Enemy.hear_lure`) | takes a hand slot until thrown; doesn't kill/stun | lure_time 4, lure_interval 0.5, lure_radius 900, lure_loudness 1.2, world_slot |
 | Heavy Vases `heavy_vases` | common | 6 | vase throw/knock stun ×2 (`stun_mult` in the dict) | move ×0.85 while any vase is held | stun_mult 2, carry_speed_mult 0.85 |
 | Flash Bulb `flash_bulb` | rare | 14 | once per stage a completed startle stuns 2.5 s, then CALM (no chase, no FE chase report) | light_range ×0.9 | stun_time 2.5 |
 | Cracked Mirror `cracked_mirror` | uncommon | 9 | off-screen SEARCH memory drains ×1.4 | arrows hidden beyond 1280 px | offscreen_drain_mult 1.4, arrow_reveal_distance 1280 |

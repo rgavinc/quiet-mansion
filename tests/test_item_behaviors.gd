@@ -15,6 +15,7 @@ func run_all() -> Dictionary:
 		["rabbits_foot_saves_first_lethal_hit_per_stage", test_rabbits_foot],
 		["music_box_lure_in_hand_thrown_pulls_chasers", test_music_box],
 		["music_box_world_art_slot_or_fallback", test_music_box_art],
+		["music_box_tap_throws_facing_not_last_aim", test_music_box_facing],
 		["heavy_vases_double_stun_and_carry_slow", test_heavy_vases],
 		["flash_bulb_stuns_startle_once_per_stage", test_flash_bulb],
 		["cracked_mirror_offscreen_drain_and_arrow_distance", test_cracked_mirror],
@@ -23,6 +24,8 @@ func run_all() -> Dictionary:
 		["at_most_3_items_pay_with_noise", test_noise_budget],
 		["shop_prices_follow_price_scale", test_price_scale],
 		["behaviour_rows_load_their_script", test_rows],
+		["each_stat_clamps_to_its_own_bounds_x10", test_stat_bounds],
+		["item_hooks_clamp_to_stat_bounds_x10", test_hook_bounds],
 	]
 	var passed := 0
 	for item in checks:
@@ -181,6 +184,26 @@ func test_music_box() -> Variant:
 	t.setup(Vector2(100, 300), it.lure_dict(), calm, p)
 	_fly(t)
 	return "" if not calm.is_queued_for_deletion() else "lure killed a calm puppet"
+
+
+## QA repro: light off, last aim right, boy turns to face left, tap: the lure flies LEFT.
+func test_music_box_facing() -> Variant:
+	_grant("music_box")
+	var p := _player(Vector2(600, 100))
+	if p.light_on(): p.toggle_light()
+	if p.light_on(): return "light still on"
+	p.aim_dir = Vector2.RIGHT
+	p.tick(DT, Vector2.LEFT)   # face left
+	if p.facing != -1: return "not facing left"
+	FESignals.selected_enemy = null
+	p._tap()
+	var thrown: Array = root.get_tree().get_nodes_in_group("thrown")
+	if thrown.is_empty(): return "nothing thrown"
+	_fly(thrown[0])
+	var lures: Array = root.get_tree().get_nodes_in_group("lures")
+	if lures.is_empty(): return "lure didn't land"
+	var x: float = (lures[0] as Node2D).global_position.x
+	return "" if x < p.global_position.x - 200.0 else "lure landed at x=%.0f, boy at %.0f (not left)" % [x, p.global_position.x]
 
 
 func test_music_box_art() -> Variant:
@@ -376,4 +399,47 @@ func test_rows() -> Variant:
 	if n != 6: return "%d behaviour items, want 6" % n
 	for id in ["rabbits_foot", "music_box", "heavy_vases", "flash_bulb", "cracked_mirror", "greedy_sack"]:
 		if ItemDb.row(id).is_empty(): return "missing " + id
+	return ""
+
+
+# --- stat caps (PlayerStats.STAT_BOUNDS) -----------------------------------------
+## Every multiplier stat an item touches has its own [min, max]; noise is PD's x0.3..x3;
+## 10 stacked x2 (or x0.5) modifiers land exactly on that stat's max (min).
+func test_stat_bounds() -> Variant:
+	var nb: Array = PlayerStats.STAT_BOUNDS.get(&"noise_mult", [])
+	if nb != [0.3, 3.0]: return "noise bounds %s, want [0.3, 3.0]" % [nb]
+	for r in ItemDb.ITEMS:
+		for m in r.mods:
+			var st := StringName(m.stat)
+			var is_mult := float(m.get("mul", 1.0)) != 1.0 or str(st).ends_with("_mult")
+			if is_mult and not PlayerStats.STAT_BOUNDS.has(st): return "%s: %s has no bounds" % [r.id, st]
+	for st in PlayerStats.STAT_BOUNDS:
+		if not PlayerStats.BASE.has(st):
+			continue
+		var b: Array = PlayerStats.STAT_BOUNDS[st]
+		if b.size() != 2 or not (b[0] < 1.0 and b[1] > 1.0): return "%s bounds %s don't bracket x1" % [st, b]
+		var base := float(PlayerStats.BASE[st])
+		for case in [[2.0, b[1]], [0.5, b[0]]]:
+			PlayerStats.reset()
+			for i in 10:
+				PlayerStats.add_modifier(st, 0.0, case[0], "stack%d" % i)
+			var v := PlayerStats.get_stat(st)
+			if absf(v - base * case[1]) > 1e-4: return "%s x%s^10 = %.3f, want %.3f" % [st, case[0], v, base * case[1]]
+	return ""
+
+
+## Hook multipliers clamp too: 10 Greedy Sacks (vase noise x1.5^10), 10 Cracked Mirrors
+## (give-up x1.4^10), 10 Heavy Vases (carry x0.85^10).
+func test_hook_bounds() -> Variant:
+	var vase := {script_path = "res://scripts/world/vase.gd"}
+	for i in 10:
+		_grant("greedy_sack"); _grant("cracked_mirror"); _grant("heavy_vases")
+	var noise := PlayerStats.get_stat(&"noise_mult") * PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase)
+	if absf(noise - 3.0) > 1e-4: return "vase noise x%.3f, want capped at x3.0" % noise
+	var give_up := PlayerStats.memory_drain_mult(null, true)
+	if absf(give_up - PlayerStats.STAT_BOUNDS[&"give_up_speed"][1]) > 1e-4: return "give-up x%.3f not capped" % give_up
+	var p := _player()
+	p.inventory.items.append(vase)
+	var spd: float = p.move_speed() / float(PlayerStats.BASE[&"move_speed"])
+	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-4: return "carry speed x%.3f, want floor x%.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
 	return ""

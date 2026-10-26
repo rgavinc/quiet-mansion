@@ -5,7 +5,8 @@ extends RefCounted
 ##   add  — added to the base value (default 0)
 ##   mul  — multiplies the result (default 1)
 ## Every item is a trade-off (Brotato-style): something better, something worse.
-## Stats are PlayerStats.BASE keys; the floors in PlayerStats.MIN keep combos sane.
+## Stats are PlayerStats.BASE keys; PlayerStats.STAT_BOUNDS (multipliers) and MIN (floors) keep combos sane.
+## Percentages in `desc` are tokens filled by describe() from the row's own numbers.
 
 ## Rarity → shop/chest weight and the first stage whose shop or chests can roll it.
 ## (The shop after stage N rolls with stage = N; chests in stage N too.)
@@ -51,36 +52,36 @@ static func shop_price(id: String, stage: int) -> int:
 const ITEMS: Array[Dictionary] = [
 	# --- common ------------------------------------------------------------
 	{id = "bright_bulb", name = "Bright Bulb", icon = "item_icon_bright_bulb", price = 7, rarity = "common",
-		desc = "Light reaches 30% farther, but puppets notice it 25% faster.",
+		desc = "Light reaches {mul:light_range} farther, but puppets notice it {inv:light_detect_mult} sooner.",
 		mods = [{stat = &"light_range", mul = 1.3}, {stat = &"light_detect_mult", mul = 1.25}]},
 	{id = "soft_shoes", name = "Soft Shoes", icon = "item_icon_soft_shoes", price = 7, rarity = "common",
-		desc = "Your noise carries 25% less far. You move 8% slower.",
+		desc = "Your noise carries {mul:noise_mult} less far. You move {mul:move_speed} slower.",
 		mods = [{stat = &"noise_mult", mul = 0.75}, {stat = &"move_speed", mul = 0.92}]},
 	{id = "quick_hands", name = "Quick Hands", icon = "item_icon_quick_hands", price = 6, rarity = "common",
-		desc = "Pick things up 30% faster, but you must stand 15% closer.",
+		desc = "Pick things up {mul:pickup_time} faster, but you must stand {mul:pickup_range} closer.",
 		mods = [{stat = &"pickup_time", mul = 0.7}, {stat = &"pickup_range", mul = 0.85}]},
 	{id = "sneakers", name = "Sneakers", icon = "item_icon_sneakers", price = 6, rarity = "common",
-		desc = "Move 15% faster. Squeaky: your noise carries 15% farther.",
+		desc = "Move {mul:move_speed} faster. Squeaky: your noise carries {mul:noise_mult} farther.",
 		mods = [{stat = &"move_speed", mul = 1.15}, {stat = &"noise_mult", mul = 1.15}]},
 	{id = "banister_gloves", name = "Banister Gloves", icon = "item_icon_banister_gloves", price = 5, rarity = "common",
-		desc = "Climb stairs 35% faster, but your reach is 10% shorter.",
+		desc = "Climb stairs {mul:climb_speed} faster, but your reach is {mul:pickup_range} shorter.",
 		mods = [{stat = &"climb_speed", mul = 1.35}, {stat = &"pickup_range", mul = 0.9}]},
 	{id = "heavy_vases", name = "Heavy Vases", icon = "item_icon_heavy_vases", price = 6, rarity = "common",
-		desc = "Vases you throw or knock over stun puppets twice as long. Carrying a vase slows you 15%.",
+		desc = "Vases you throw or knock over stun puppets twice as long. Carrying a vase slows you {param:carry_speed_mult}.",
 		script = "res://scripts/items/behaviors/heavy_vases.gd", downside_behavior = true,
 		params = {stun_mult = 2.0, carry_speed_mult = 0.85}, mods = []},
 	# --- uncommon ----------------------------------------------------------
 	{id = "extra_heart", name = "Extra Heart", icon = "item_icon_extra_heart", price = 10, rarity = "uncommon",
-		desc = "+1 max heart (and heals it). Heavier: you climb 15% slower.",
+		desc = "+1 max heart (and heals it). Heavier: you climb {mul:climb_speed} slower.",
 		mods = [{stat = &"max_health", add = 1.0}, {stat = &"climb_speed", mul = 0.85}]},
 	{id = "minimap", name = "Minimap", icon = "item_icon_minimap", price = 12, rarity = "uncommon",
 		desc = "Shows the floor layout. Fumbling with it: pickups take 0.15 s longer.",
 		mods = [{stat = &"minimap", add = 1.0}, {stat = &"pickup_time", add = 0.15}]},
 	{id = "big_pockets", name = "Big Pockets", icon = "item_icon_big_pockets", price = 10, rarity = "uncommon",
-		desc = "Hold one more thing. You move 7% slower.",
+		desc = "Hold one more thing. You move {mul:move_speed} slower.",
 		mods = [{stat = &"inventory_slots", add = 1.0}, {stat = &"move_speed", mul = 0.93}]},
 	{id = "thick_sweater", name = "Thick Sweater", icon = "item_icon_thick_sweater", price = 9, rarity = "uncommon",
-		desc = "+0.5 s of safety after a hit. You move 5% slower.",
+		desc = "+0.5 s of safety after a hit. You move {mul:move_speed} slower.",
 		mods = [{stat = &"invuln_time", add = 0.5}, {stat = &"move_speed", mul = 0.95}]},
 	{id = "music_box", name = "Music Box", icon = "item_icon_music_box", price = 9, rarity = "uncommon",
 		desc = "Each floor starts with a music box in hand. Throw it: it plays loudly where it lands and draws puppets there. It takes a hand slot until thrown.",
@@ -88,36 +89,36 @@ const ITEMS: Array[Dictionary] = [
 		params = {world_slot = "music_box_world", lure_time = 4.0, lure_interval = 0.5,
 			lure_radius = 900.0, lure_loudness = 1.2}, mods = []},
 	{id = "cracked_mirror", name = "Cracked Mirror", icon = "item_icon_cracked_mirror", price = 9, rarity = "uncommon",
-		desc = "Puppets searching for you off screen give up 40% sooner. You only see a chaser's arrow once it is about a screen away.",
+		desc = "Puppets searching for you off screen give up {param:offscreen_drain_mult} faster. You only see a chaser's arrow once it is about a screen away.",
 		script = "res://scripts/items/behaviors/cracked_mirror.gd", downside_behavior = true,
 		params = {offscreen_drain_mult = 1.4, arrow_reveal_distance = 1280.0}, mods = []},
 	{id = "gold_magnet", name = "Gold Magnet", icon = "item_icon_gold_magnet", price = 11, rarity = "uncommon",
-		desc = "+60% gold found. Heavy: you climb 20% slower.",
+		desc = "+{add:gold_find_mult} gold found. Heavy: you climb {mul:climb_speed} slower.",
 		mods = [{stat = &"gold_find_mult", add = 0.6}, {stat = &"climb_speed", mul = 0.8}]},
 	# --- rare (stage 2+) ---------------------------------------------------
 	{id = "ghost_slippers", name = "Ghost Slippers", icon = "item_icon_ghost_slippers", price = 16, rarity = "rare",
-		desc = "Your noise carries 45% less far. -1 max heart.",
+		desc = "Your noise carries {mul:noise_mult} less far. -1 max heart.",
 		mods = [{stat = &"noise_mult", mul = 0.55}, {stat = &"max_health", add = -1.0}]},
 	{id = "rabbits_foot", name = "Rabbit's Foot", icon = "item_icon_rabbits_foot", price = 14, rarity = "rare",
 		desc = "Once per floor, a hit that would catch you leaves you on 1 heart instead. -1 max heart.",
 		script = "res://scripts/items/behaviors/rabbits_foot.gd", charges = 1, params = {},
 		mods = [{stat = &"max_health", add = -1.0}]},
 	{id = "flash_bulb", name = "Flash Bulb", icon = "item_icon_flash_bulb", price = 14, rarity = "rare",
-		desc = "Once per floor, a puppet you startle with light is stunned for 2.5 s instead of chasing. Light reaches 10% less far.",
+		desc = "Once per floor, a puppet you startle with light is stunned for 2.5 s instead of chasing. Light reaches {mul:light_range} less far.",
 		script = "res://scripts/items/behaviors/flash_bulb.gd", charges = 1, params = {stun_time = 2.5},
 		mods = [{stat = &"light_range", mul = 0.9}]},
 	{id = "night_eyes", name = "Night Eyes", icon = "item_icon_night_eyes", price = 15, rarity = "rare",
-		desc = "Puppets take much longer to notice your light (x0.6). Beam 10 degrees narrower.",
+		desc = "Puppets take {inv:light_detect_mult} longer to notice your light. Beam 10 degrees narrower.",
 		mods = [{stat = &"light_detect_mult", mul = 0.6}, {stat = &"light_angle_deg", add = -10.0}]},
 	{id = "grandfather_watch", name = "Grandfather's Watch", icon = "item_icon_grandfather_watch", price = 15, rarity = "rare",
-		desc = "Puppets need +0.5 s of light to startle. Ticks loudly: noise carries 10% farther.",
+		desc = "Puppets need +0.5 s of light to startle. Ticks loudly: noise carries {mul:noise_mult} farther.",
 		mods = [{stat = &"light_startle_time", add = 0.5}, {stat = &"noise_mult", mul = 1.1}]},
 	# --- legendary (stage 4+) ----------------------------------------------
 	{id = "shadow_cloak", name = "Shadow Cloak", icon = "item_icon_shadow_cloak", price = 26, rarity = "legendary",
-		desc = "Noise carries 40% less far and light is noticed 40% slower. Light reaches 25% less far.",
+		desc = "Noise carries {mul:noise_mult} less far and puppets take {inv:light_detect_mult} longer to notice your light. Light reaches {mul:light_range} less far.",
 		mods = [{stat = &"noise_mult", mul = 0.6}, {stat = &"light_detect_mult", mul = 0.6}, {stat = &"light_range", mul = 0.75}]},
 	{id = "greedy_sack", name = "Greedy Sack", icon = "item_icon_greedy_sack", price = 22, rarity = "legendary",
-		desc = "Every vase holds gold. Breaking a vase is 50% louder.",
+		desc = "Every vase holds gold. Breaking a vase is {param:noise_mult} louder.",
 		script = "res://scripts/items/behaviors/greedy_sack.gd", downside_behavior = true,
 		params = {gold_min = 1, gold_max = 3, noise_mult = 1.5}, mods = []},
 ]
@@ -153,7 +154,7 @@ static func make(id: String) -> Item:
 	it.charges = it.max_charges
 	it.id = str(r.id)
 	it.display_name = str(r.name)
-	it.description = str(r.desc)
+	it.description = describe(r)
 	it.icon_slot = str(r.icon)
 	it.price = int(r.price)
 	it.rarity = str(r.rarity)
@@ -162,6 +163,39 @@ static func make(id: String) -> Item:
 		ms.append({stat = StringName(m.stat), add = float(m.get("add", 0.0)), mul = float(m.get("mul", 1.0))})
 	it.mods = ms
 	return it
+
+
+## Item text: every percentage in `desc` is a token filled from the row's OWN numbers, so
+## text and effect can't drift (PRODUCT.md "Item text"). Tokens (each becomes "N%"):
+##   {mul:stat}   |mul - 1|        e.g. light_range x1.3 -> "30%"
+##   {inv:stat}   |1/mul - 1|      time-based effect of a rate mul (light_detect x0.6: the
+##                                 startle takes 1/0.6 = 1.67x as long -> "67%")
+##   {add:stat}   |add|            e.g. gold_find_mult +0.6 -> "60%"
+##   {param:key}  |params.key - 1| behaviour tunables (greedy_sack noise_mult 1.5 -> "50%")
+static func describe(r: Dictionary) -> String:
+	var out := str(r.get("desc", ""))
+	var re := RegEx.create_from_string("\\{(mul|inv|add|param):(\\w+)\\}")
+	for m in re.search_all(out):
+		var v := token_value(r, m.get_string(1), m.get_string(2))
+		assert(not is_nan(v), "%s: bad desc token %s" % [r.get("id", "?"), m.get_string()])
+		out = out.replace(m.get_string(), "%d%%" % int(round(v * 100.0)))
+	return out
+
+
+## The fraction a description token stands for (NAN if the row has no such number).
+static func token_value(r: Dictionary, kind: String, key: String) -> float:
+	if kind == "param":
+		var ps: Dictionary = r.get("params", {})
+		return absf(float(ps[key]) - 1.0) if ps.has(key) else NAN
+	for md in r.get("mods", []):
+		if str(md.stat) != key:
+			continue
+		var mul := float(md.get("mul", 1.0))
+		match kind:
+			"mul": return absf(mul - 1.0)
+			"inv": return absf(1.0 / mul - 1.0)
+			"add": return absf(float(md.get("add", 0.0)))
+	return NAN
 
 
 ## Ids a shop or chest on `stage` may roll.

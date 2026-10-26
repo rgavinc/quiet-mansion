@@ -270,7 +270,9 @@ func _tap() -> void:
 		if held.get("throwable", false) and is_instance_valid(tgt):
 			throw_at(tgt)
 		elif held.get("lure", false):
-			throw_toward(global_position + aim_dir.normalized() * LURE_THROW_DIST)   # Music Box: no target needed
+			# Music Box: no target needed; flies the way the boy FACES (PRODUCT.md), never the
+			# last mouse aim (that only means something while the light is on).
+			throw_toward(global_position + Vector2(facing, 0) * LURE_THROW_DIST)
 		return  # holding something with no ringed enemy: tap does nothing
 	_try_knock()
 
@@ -387,6 +389,10 @@ func _cancel_pickup() -> void:
 	state = State.NORMAL
 	pickup_target = null
 	pickup_progress = 0.0
+	# A cancel (hit, out of range, let go) ends the hold for good: forget the press so a
+	# still-held button can't restart the channel from the time already held. New press needed.
+	_interact_down = false
+	_interact_held = 0.0
 	FESignals.report_pickup_cancelled()
 
 
