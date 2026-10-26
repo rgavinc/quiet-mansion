@@ -17,8 +17,12 @@ All numbers are in pixels unless noted. Tile = 16px.
 - Room kits from Designer: width multiple of 4 tiles, height exactly 10 tiles, floor slab included, doorway gaps at x=0 and x=width on rows 6-8 (counted from top, 0-based).
 
 ## Stairs
-- The only way between floors. An `Area2D` in group `stairs`, 4 tiles wide, spanning two bands (320px tall), with `from_floor` and `to_floor` ints.
+- The only way between floors. An `Area2D` in group `stairs`, 4 tiles wide. The climb rises exactly one floor (160px), from the lower slab top to the upper slab top. The trigger area covers both bands (lower band + upper band = 320px tall) so you can enter it from either floor. `from_floor` = lower floor index, `to_floor` = from_floor + 1; the generator sets both and the validator uses them to build the floor graph.
 - Player presses up/down inside it to climb (boy_climb_stairs anim); jump is disabled while climbing.
+
+## Enemies
+- Default movement is `walk`: gravity, floor collision, and they change floors only via stairs (same floor graph as the player).
+- `EnemyDef.movement = &"float"` is reserved for a later-stage type (stage 4+) that ignores gravity but is still blocked by slabs and walls.
 
 ## Generator guarantees (validator rejects + rerolls, fallback to known-good layout after 20 tries)
 - Exit is reachable from start using walk + stairs only (no forced jump over anything taller than 2 tiles, no forced pickup/throw).
