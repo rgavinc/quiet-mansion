@@ -47,7 +47,9 @@ func _physics_process(_delta: float) -> void:
 	velocity = dir * chase_speed
 	move_and_slide()
 	if global_position.distance_to(player.global_position) <= catch_distance:
-		GameState.on_caught()
+		# A touch costs one heart (3 = game over via PlayerStats); invuln_time stops repeat hits.
+		if PlayerStats.take_hit(1):
+			player.global_position += dir * 48.0  # shove the player clear so it can run
 
 ## Knock while calm can kill; while enraged or miss → noise risk (caller emits noise).
 func try_knock_kill() -> bool:

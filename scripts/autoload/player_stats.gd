@@ -31,7 +31,7 @@ var health: int = 3
 var gold: int = 0
 ## modifiers: Array of {stat, add, mul, source}
 var _mods: Array[Dictionary] = []
-var _last_hit_ms: int = -1
+var _invuln_left: float = 0.0  # counts down in _process, so it freezes while paused (shop)
 
 
 func _ready() -> void:
@@ -77,12 +77,11 @@ func remove_modifiers_from(source: Variant) -> void:
 
 ## Enforces invuln_time here so no caller can double-hit. Tests may pass ignore_invuln.
 func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
-	if health <= 0:
+	if health <= 0 or amount <= 0:
 		return false
-	var now := Time.get_ticks_msec()
-	if not ignore_invuln and _last_hit_ms >= 0 and now - _last_hit_ms < int(get_stat(&"invuln_time") * 1000.0):
+	if not ignore_invuln and _invuln_left > 0.0:
 		return false
-	_last_hit_ms = now
+	_invuln_left = get_stat(&"invuln_time")
 	health = maxi(health - amount, 0)
 	health_changed.emit(health, max_health())
 	if health == 0:
@@ -95,22 +94,31 @@ func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 
 
 func is_invulnerable() -> bool:
-	return _last_hit_ms >= 0 and Time.get_ticks_msec() - _last_hit_ms < int(get_stat(&"invuln_time") * 1000.0)
+	return _invuln_left > 0.0
+
+
+func _process(delta: float) -> void:
+	if _invuln_left > 0.0:
+		_invuln_left = maxf(_invuln_left - delta, 0.0)
 
 
 func heal(amount: int = 1) -> void:
+	if amount <= 0:
+		return
 	health = mini(health + amount, max_health())
 	health_changed.emit(health, max_health())
 
 
 func add_gold(amount: int) -> void:
+	if amount <= 0:
+		return  # spending goes through try_spend only
 	var delta := int(round(amount * get_stat(&"gold_find_mult"))) if amount > 0 else amount
 	gold = maxi(gold + delta, 0)
 	gold_changed.emit(gold, delta)
 
 
 func try_spend(cost: int) -> bool:
-	if cost > gold:
+	if cost < 0 or cost > gold:
 		return false
 	gold -= cost
 	gold_changed.emit(gold, -cost)
@@ -120,7 +128,7 @@ func try_spend(cost: int) -> bool:
 ## New run. Keeps nothing.
 func reset() -> void:
 	_mods.clear()
-	_last_hit_ms = -1
+	_invuln_left = 0.0
 	health = max_health()
 	gold = 0
 	health_changed.emit(health, max_health())

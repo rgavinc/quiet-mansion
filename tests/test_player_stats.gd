@@ -17,6 +17,9 @@ func run_all() -> Dictionary:
 		["max_health_item", test_max_health_item],
 		["gold_spend", test_gold_spend],
 		["invuln_blocks_double_hit", test_invuln],
+		["rejects_bad_values", test_bad_values],
+		["invuln_expires_by_game_time", test_invuln_expires],
+		["input_bindings", test_bindings],
 		["input_actions", test_input_actions],
 	]
 	var passed := 0
@@ -90,3 +93,43 @@ func test_invuln() -> String:
 	var ok: bool = first and not second and s.health == 2
 	s.free()
 	return "" if ok else "second hit inside invuln_time landed"
+
+
+func test_bad_values() -> String:
+	var s := _make()
+	s.take_hit(-2, true)
+	s.add_gold(-5)
+	var spent: bool = s.try_spend(-5)
+	var ok: bool = s.health == 3 and s.gold == 0 and not spent
+	s.free()
+	return "" if ok else "bad values changed state: hp %d gold %d" % [s.health if is_instance_valid(s) else -1, 0]
+
+
+func _bound(action: String, pred: Callable) -> bool:
+	for e in InputMap.action_get_events(action):
+		if pred.call(e):
+			return true
+	return false
+
+
+func test_bindings() -> String:
+	if not _bound("jump", func(e): return e is InputEventKey and e.physical_keycode == KEY_SPACE):
+		return "jump not on Space"
+	if not _bound("flashlight_toggle", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_RIGHT):
+		return "flashlight not on RMB"
+	if not _bound("interact", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT):
+		return "interact not on LMB"
+	if not _bound("inv_next", func(e): return e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		return "inv_next not on wheel"
+	return ""
+
+
+func test_invuln_expires() -> String:
+	var s := _make()
+	s.take_hit()
+	s._process(0.5)
+	if s.take_hit(): s.free(); return "hit landed at 0.5s of 1.0s invuln"
+	s._process(0.6)
+	var ok: bool = s.take_hit()
+	s.free()
+	return "" if ok else "invuln never expired"
