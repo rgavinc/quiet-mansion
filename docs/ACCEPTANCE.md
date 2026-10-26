@@ -94,3 +94,16 @@ Automated seed sweep, which must pass before every merge to `main`:
 | Merge `development` into `main` and ask Gavin to review | Only after all of the above |
 
 **Status:** Bar rewritten for the side-scroller expansion. **Not ready for Gavin.**
+
+## 10. Controls, pickup and throw (added 2026-10-25 from Gavin)
+
+Controls: A/D move, **Space = jump**, **Right mouse = flashlight**, **Left mouse (hold) = pick up**, **Scroll wheel = cycle held items/objects**, vase throw targets the currently ringed enemy.
+
+- [ ] Pickup requires holding LMB ~1.0s (value in PlayerStats); a gauge is visible the whole time.
+- [ ] While picking up the player is committed: cannot move, jump, or use the flashlight.
+- [ ] Leaving pickup range (or releasing LMB) cancels the pickup and resets progress.
+- [ ] Taking a hit or a startle during pickup is possible and fair (risk is real, never a guaranteed hit).
+- [ ] Scroll wheel cycles held objects/usable items; empty inventory scroll is a safe no-op.
+- [ ] Throwing a vase at the selected (ringed) enemy: projectile is blocked by walls/props; a miss or block still breaks and emits full noise at impact.
+- [ ] Throw with no enemy selected never errors (defined behavior: no-op or throw forward; document which).
+- [ ] Generation sweep: no level forces a pickup or a throw on the only route to the exit.
