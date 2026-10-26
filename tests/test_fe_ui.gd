@@ -22,10 +22,11 @@ func run_all() -> Dictionary:
 		["throw_line_blocked_by_wall", test_throw_block],
 		["input_actions_exist", test_input_actions],
 		["throw_line_only_when_holding_and_ringed", test_throw_rule],
-		["pickup_gauge_waits_hold_threshold", test_pickup_threshold],
-		["pickup_tap_never_flashes_gauge", test_pickup_tap],
+		["pickup_gauge_shows_on_be_start_fill_is_be_progress", test_pickup_threshold],
+		["real_player_tap_never_shows_gauge_hold_does", test_pickup_tap],
 		["flashlight_is_toggle_ring_persists", test_flashlight_toggle],
 		["startle_meter_hides_when_light_off", test_startle_meter_light],
+		["freed_selected_lit_chasing_enemy_is_cleared_without_errors", test_enemy_freed],
 		["main_scene_has_new_hud_overlay_watermark", test_main_scene],
 		["ui_art_resolves_manifest_slots", test_ui_art_slots],
 		["fe_scripts_no_hardcoded_art_paths", test_no_art_paths],
@@ -281,42 +282,79 @@ func test_throw_rule() -> String:
 
 
 func test_pickup_threshold() -> String:
+	# BE only sends pickup_started after its tap threshold, so the gauge shows at once.
 	var b := _bus()
 	var g := _mount("res://scripts/ui/pickup_gauge.gd", b)
 	var err := ""
-	if absf(g.show_delay() - 0.15) > 0.0001:
-		err = "default show delay should be 0.15 s, got %f" % g.show_delay()
 	b.report_pickup_started(null)
-	g._process(0.1)
-	if err.is_empty() and g.visible:
-		err = "gauge must stay hidden before 0.15 s of hold"
-	g._process(0.06)
-	if err.is_empty() and not g.visible:
-		err = "gauge should appear after 0.15 s of hold"
-	b.report_pickup_cancelled()
+	if not g.visible:
+		err = "gauge must show immediately on pickup_started (no extra FE delay)"
+	b.report_pickup_progress(0.3)
+	if err.is_empty() and absf(g.progress - 0.3) > 0.001:
+		err = "fill should be BE's reported progress 0.3, got %f" % g.progress
+	g._process(5.0)   # time passing alone must not move the fill
+	if err.is_empty() and absf(g.progress - 0.3) > 0.001:
+		err = "fill advanced on its own clock (%f); it must follow BE progress only" % g.progress
+	b.report_pickup_progress(1.0)
+	b.report_pickup_completed()
 	g._process(1.0)
 	if err.is_empty() and g.visible:
-		err = "gauge should hide after a late cancel"
+		err = "gauge should hide after complete"
 	_cleanup([g, b])
 	return err
 
 
 func test_pickup_tap() -> String:
-	var b := _bus()
-	var g := _mount("res://scripts/ui/pickup_gauge.gd", b)
+	# Real BE player_controller + real FESignals: a tap never starts a pickup, a hold
+	# shows the gauge on the very tick BE starts it, and the fill mirrors BE's progress.
+	var fe: Node = _root().get_node("FESignals")
+	var ps: Node = _root().get_node("PlayerStats")
+	fe.reset(); ps.reset()
+	var g := _mount("res://scripts/ui/pickup_gauge.gd", fe)
+	var p: CharacterBody2D = load("res://scripts/player/player_controller.gd").new()
+	_root().add_child(p)
+	p.global_position = Vector2(100, 100)
+	var v: Node2D = load("res://scripts/world/vase.gd").new()
+	v.set("break_on_touch", false)
+	v.set("gold_inside", 0)
+	_root().add_child(v)
+	v.global_position = Vector2(120, 100)
+	var starts: Array = []
+	fe.pickup_started.connect(func(_t): starts.append(true))
+	var dt := 1.0 / 60.0
+	var tap: float = ps.get_stat(&"tap_threshold")
 	var err := ""
-	b.report_pickup_started(null)
-	b.report_pickup_progress(0.05)   # 0.05 s at pickup_time 1.0
-	g._process(0.05)
-	if g.visible:
-		err = "0.1 s tap must not show the gauge"
-	b.report_pickup_cancelled()      # released: it was a tap
-	if err.is_empty() and (g.visible or g._cancel_flash > 0.0):
-		err = "early cancel must be silent (no red shake)"
-	g._process(0.016)
-	if err.is_empty() and g.visible:
-		err = "still hidden after the tap"
-	_cleanup([g, b])
+	p.interact_pressed()
+	var t := 0.0
+	while t < tap * 0.5:
+		p.tick(dt, Vector2.ZERO); g._process(dt); t += dt
+		if g.visible: err = "gauge visible during a tap"
+	p.interact_released()
+	g._process(dt)
+	if err.is_empty() and (g.visible or not starts.is_empty()):
+		err = "a tap must never start a pickup or show the gauge"
+	# The tap knocked that vase over (empty hands), so set out a fresh one to hold on.
+	var v2: Node2D = load("res://scripts/world/vase.gd").new()
+	v2.set("break_on_touch", false)
+	v2.set("gold_inside", 0)
+	_root().add_child(v2)
+	v2.global_position = Vector2(120, 100)
+	if err.is_empty():
+		p.interact_pressed()
+		t = 0.0
+		var shown_at := -1.0
+		while t < tap + 0.3:
+			p.tick(dt, Vector2.ZERO); g._process(dt); t += dt
+			if g.visible and shown_at < 0.0: shown_at = t
+		if shown_at < 0.0:
+			err = "hold never showed the gauge"
+		elif shown_at < tap - 0.0001 or shown_at > tap + 2.0 * dt:
+			err = "gauge should appear right at BE's pickup start (~%.2fs), was %.3fs" % [tap, shown_at]
+		elif absf(g.progress - p.pickup_progress) > 0.001:
+			err = "fill %f != BE pickup_progress %f" % [g.progress, p.pickup_progress]
+		p.interact_released()
+	_cleanup([g, p, v, v2])
+	fe.reset(); ps.reset()
 	return err
 
 
@@ -429,3 +467,67 @@ func test_no_art_paths() -> String:
 		if src.contains("res://assets/art/") or src.contains("res://assets/replace_me/"):
 			return "%s hard-codes an art path; use a manifest slot" % f
 	return ""
+
+
+
+class _ErrCount extends Logger:
+	var errors: Array = []
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String,
+			_editor_notify: bool, _error_type: int, _bt: Array[ScriptBacktrace]) -> void:
+		errors.append("%s:%d %s %s" % [file, line, code, rationale])
+
+
+## QA #18: kill a selected + lit + chasing enemy; nothing may log an error, and every
+## FE entry for it (selection, lit, startle, chase, chase memory, meter) is cleared.
+func test_enemy_freed() -> String:
+	var b := _bus()
+	var ov: Node2D = load("res://scenes/ui/world_overlay.tscn").instantiate()
+	ov.set("bus", b)
+	_root().add_child(ov)
+	var arrows := _mount("res://scripts/ui/offscreen_arrows.gd", b)
+	var cam := Camera2D.new(); _root().add_child(cam); cam.make_current()
+	var e := Node2D.new(); e.add_to_group("puppets"); _root().add_child(e)
+	e.global_position = Vector2(5000, 5000)   # off-screen so an arrow is drawn
+	b.set_items([{"id": "vase", "slot": "vase", "name": "Vase", "throwable": true}])
+	b.select_item(0)
+	b.select_enemy(e)
+	b.report_lit(e, true)
+	b.report_chase(e, true)
+	b.report_chase_memory(e, 0.6)
+	var ring: Node2D = ov.get("ring")
+	var nudge: Node = ov.get("camera_nudge")
+	var line: Node2D = ov.get("throw_line")
+	var tick := func():
+		b._process(0.1)
+		ring._process(0.1)
+		nudge._process(0.1)
+		arrows._process(0.1)
+		line._physics_process(0.1)
+		for m in ov.get("layer").get_children():
+			if m.get_script() == load("res://scripts/ui/startle_meter.gd") and is_instance_valid(m):
+				m._process(0.1)
+	tick.call(); tick.call()
+	var err := ""
+	if not ring.visible or b.get_startle(e) <= 0.0 or arrows.arrows.is_empty() or ov.meter_for(e) == null:
+		err = "setup: ring, startle, arrow and meter should all be live before the kill"
+	var log := _ErrCount.new()
+	OS.add_logger(log)
+	var id := e.get_instance_id()
+	e.free()   # killed
+	for i in 5:
+		tick.call()
+	OS.remove_logger(log)
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors after enemy freed: %s" % [log.errors]
+	if err.is_empty() and (b.get_selected_enemy() != null or b.selected_enemy != null):
+		err = "selection not cleared"
+	if err.is_empty() and (not b.chasing.is_empty() or b.chase_memory.has(id)):
+		err = "chase entries not cleared"
+	if err.is_empty() and (b._lit.has(id) or b.startle.has(id)):
+		err = "lit/startle entries not cleared"
+	if err.is_empty() and (ring.visible or line.visible or not arrows.arrows.is_empty()):
+		err = "ring/throw line/arrow still showing for a dead enemy"
+	if err.is_empty() and b.can_throw():
+		err = "can_throw must be false with no live ringed enemy"
+	_cleanup([ov, arrows, cam, b])
+	return err

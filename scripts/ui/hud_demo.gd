@@ -231,9 +231,9 @@ func _update_pickup(delta: float) -> void:
 	if _press_time < 0.0:
 		return
 	_press_time += delta
-	# Pickup channel starts on press (like BE will); the gauge itself waits
-	# pickup_show_delay before drawing, so taps never flash it.
-	if _pickup_target == null and _press_time <= delta:
+	# Like BE's player_controller: the pickup channel only starts once LMB has
+	# been held past tap_threshold, so a tap never starts it (or shows the gauge).
+	if _pickup_target == null and _press_time >= bus.tap_threshold and _press_time - delta < bus.tap_threshold:
 		var v := _nearest_vase()
 		if v:
 			_pickup_target = v

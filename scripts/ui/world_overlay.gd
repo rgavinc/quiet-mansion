@@ -55,17 +55,19 @@ func _add(n: Node2D, nm: String) -> Node2D:
 
 
 func meter_for(enemy: Node2D) -> Node2D:
-	if enemy == null:
+	if enemy == null or not is_instance_valid(enemy):
 		return null
-	return _meters.get(enemy.get_instance_id(), null)
+	var raw = _meters.get(enemy.get_instance_id(), null)
+	return raw if is_instance_valid(raw) else null
 
 
 func _on_startle(enemy: Node2D, p: float) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
 	var id := enemy.get_instance_id()
-	var m: Node2D = _meters.get(id, null)
-	if m == null or not is_instance_valid(m):
+	var raw = _meters.get(id, null)   # untyped: the meter frees itself with its enemy
+	var m: Node2D = raw if is_instance_valid(raw) else null
+	if m == null:
 		if p <= 0.0:
 			return
 		m = StartleMeter.new()
@@ -75,4 +77,5 @@ func _on_startle(enemy: Node2D, p: float) -> void:
 		m.target = enemy
 		layer.add_child(m)
 		_meters[id] = m
+		m.tree_exiting.connect(func(): _meters.erase(id))
 	m.set_progress(p)

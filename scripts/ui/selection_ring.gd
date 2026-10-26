@@ -35,7 +35,7 @@ func _ready() -> void:
 	if bus:
 		bus.enemy_selected.connect(set_target)
 		bus.flashlight_toggled.connect(func(_on): _update_glow())
-		set_target(bus.selected_enemy)
+		set_target(bus.get_selected_enemy())
 	else:
 		set_target(null)
 
@@ -65,7 +65,7 @@ func _update_glow() -> void:
 func _process(delta: float) -> void:
 	if target != null and not is_instance_valid(target):
 		set_target(null)
-		if bus and bus.selected_enemy != null and not is_instance_valid(bus.selected_enemy):
+		if bus and bus.get_selected_enemy() == null and bus.selected_enemy != null:
 			bus.select_enemy(null)
 		return
 	if target == null:
