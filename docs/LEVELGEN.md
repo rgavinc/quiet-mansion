@@ -2,8 +2,12 @@
 
 All numbers are in pixels unless noted. Tile = 16px.
 
+## Size (docs/PRODUCT.md, Oct 25 evening)
+- Every stage has **3-4 floors**; stage 1 is 3 floors and **~3 screens wide** (232-248 tiles = 3712-3968px; the screen is 1280x720 at zoom 1). Stages 2-5 grow from there (table below).
+- The **exit is always on a different floor from the start** (start: ground floor at one end; exit: top floor at the other end).
+
 ## Floors
-- A level is 1-4 floors stacked vertically. Each floor band is 10 tiles (160px) tall.
+- Each floor band is 10 tiles (160px) tall.
 - The bottom tile row of each band is the floor slab: solid StaticBody2D / TileMap collision on physics layer 1 (`world`).
 - Ceiling: the slab of the floor above. The top floor gets its own 1-tile ceiling.
 - Floor N's walkable surface y = level_origin_y - N * 160 (N = 0 is ground floor).
@@ -13,19 +17,67 @@ All numbers are in pixels unless noted. Tile = 16px.
 - jump_velocity 320 -> apex ~52px (3.25 tiles). Clears a 2-tile (32px) prop, never a puppet, never a floor.
 
 ## Rooms
-- A room is 20-40 tiles wide, one floor tall. Rooms on the same floor join through a doorway 3 tiles high in the shared wall.
+- A room is **24-40 tiles** wide (6-10 four-tile units), one floor tall, so a 21-tile stair footprint always fits inside one room. Room walls **stack floor to floor** (one partition per level), so a room on floor f and the room above it share their walls and a stair fits in both. Rooms on the same floor join through a doorway 3 tiles high in the shared wall (doorways and solid walls are rolled per floor).
 - Room kits from Designer: width multiple of 4 tiles, height exactly 10 tiles, floor slab included, doorway gaps at x=0 and x=width on rows 6-8 (counted from top, 0-based).
 
-## Stairs
-- The only way between floors. An `Area2D` in group `stairs`, 4 tiles wide. The climb rises exactly one floor (160px), from the lower slab top to the upper slab top. The trigger area covers both bands (lower band + upper band = 320px tall) so you can enter it from either floor. `from_floor` = lower floor index, `to_floor` = from_floor + 1; the generator sets both and the validator uses them to build the floor graph.
-- Player presses up/down inside it to climb (boy_climb_stairs anim); jump is disabled while climbing.
+## Stairs (final numbers, Lead decision Oct 25)
+- The only way between floors. A **diagonal staircase**: **15 tiles (240px) horizontal run** rising **one floor (160px)**, ~34 deg (matches the `boy_climb_stairs` art), plus a **flat 3-tile (48px) landing** at the bottom and at the top. **Total footprint 21 tiles (336px).**
+- Data: `{from_floor, to_floor, bottom, top}`, `to_floor = from_floor + 1`. **`bottom`** = start of the diagonal at the end of the bottom landing (on `from_floor`'s surface); **`top`** = end of the diagonal at the start of the top landing (on `to_floor`'s surface). `|top.x - bottom.x| = 240` exactly; the stair rises left or right. The bottom landing lies on the far side of `bottom` from the run, the top landing beyond `top`. Helpers: `LevelValidator.stair_span(s)` (footprint `[x0, x1]`), `LevelValidator.stair_landings(s)`; constants `STAIR_RUN_PX 240`, `STAIR_LANDING_PX 48`, `STAIR_FOOTPRINT_PX 336`.
+- **Footprint kept clear on both floors:** no wall column (doorways included), furniture, other stairs, props, gold, chests, enemy spawns, start or exit anywhere in the 21 tiles, so the landings are always clear and a puppet can't spawn on the top step.
+- Node: `Stair` (`scripts/world/stair.gd`, BE) `Area2D` in group `stairs`, a segment from `bottom` to `top`; the player presses W/S (up/down) on it to climb (`boy_climb_stairs`), jump is disabled while climbing.
+- **Placement (docs/DESIGN.md, Designer #20):** a stair is placed by its **leftmost footprint tile `x`** (footprint = tiles `x .. x+20`). Rising right: `bottom` = left edge of tile **x+3** on the lower floor, `top` = left edge of tile **x+18** on the upper floor. Rising left mirrors the columns: `bottom` = x+18, `top` = x+3. Both ends sit on tile left edges (validator rule). `LevelValidator.stair_x(s)` gives `x`.
+- **Slab cutout:** the upper floor's slab is cut open over the 9 diagonal tiles next to `top`: tiles **x+9..x+17** rising right, **x+3..x+11** rising left (`LevelValidator.stair_hole(s)`, 144px, `STAIR_HOLE_PX`). The hole has no collision (the boy climbs up through it) and is a 144px gap: not walkable and not jumpable, so it is a **blocker in the floor graph**. It splits the upper floor; the stair's top attaches to the landing side. The slab end tile goes next to it (`slab_end_right` at x+8 / `slab_end_left` at x+12).
+- **Cutout rules (validator):** nothing (start, exit, props, gold, chests, enemy spawns) may stand over the hole on the upper floor, and since the hole is a graph blocker, the reachability rule (exit, gold, chests) can never rely on floor the cutout removes. The generator places stairs flush against walls/other stairs where possible, refuses a stair whose cutout would strand the exit or another stair, and accepts a repair stair only if it grows the reachable floor. Short floor left between a cutout and a wall ("pockets") is allowed to stay unreached and is never given gold, chests or the exit.
+- **Art (`LevelSkin`, default painter):** builds `TileMapLayer`s from `tiles_stage1` (21x15 atlas, indexes 0-23 unchanged): `TilesBack` (z -15: ceiling trim, wallpaper per room, wainscot), `TilesStairs` (z -6: `stair_stamp` 15x10, `landing_bottom` 3x3, `landing_top` 3x3, `stair_rail_cap` 3x2, flipped horizontally for left-rising stairs) and `TilesFront` (z -5: `floor_top` slabs with the cutout left open, slab ends, wall columns, door lintels and posts). Atlas row 5 lines up with the upper slab row. When it paints, the placeholder slab/wall colours and stair lines are hidden; if the PNG is missing the placeholders stay. `LevelGenerator.skin` (Callable `(level, layout)`) replaces it. Visual only: collision stays the generator's (slabs split around each hole).
 
 ## Enemies
 - Default movement is `walk`: gravity, floor collision, and they change floors only via stairs (same floor graph as the player).
-- `EnemyDef.movement = &"float"` is reserved for a later-stage type (stage 4+) that ignores gravity but is still blocked by slabs and walls.
+- `EnemyDef.movement = &"float"` enemies (**stages 4-5 only**) ignore gravity and **drift through floor slabs (not blocked by slabs)**, matching BE PR #26.
+- Stage table (`scripts/levelgen/stage_table.gd`): stages 1-3 roll only `walk` types; the `float` tier (t4/t5) is allowed only at stages 4-5 (`ENEMY_TYPES[id].min_stage`, enforced by the generator and tested).
+- Back End owns enemy movement/pathing. The generator only supplies data: each spawned enemy gets meta `enemy_type`, `movement`, `home` (and the `movement` property when the script has one), and the floor graph below.
 
-## Generator guarantees (validator rejects + rerolls, fallback to known-good layout after 20 tries)
-- Exit is reachable from start using walk + stairs only (no forced jump over anything taller than 2 tiles, no forced pickup/throw).
-- Every stair connects two existing floors.
-- No enemy spawn within 1 screen (480px) of the start, or in line of sight of it.
-- Same seed + stage always yields the same level.
+## Stage table (`scripts/levelgen/stage_table.gd`) - exact content budget per stage
+| Stage | Floors | Width (tiles) | Enemies | Props | Gold piles | Chests | Types |
+|---|---|---|---|---|---|---|---|
+| 1 | 3 | 232-248 (~3 screens) | 4 | 18 | 4 | 1 | puppet_hand |
+| 2 | 3 | 272-288 | 6 | 22 | 5 | 1 | + t2 (walk) |
+| 3 | 4 | 312-328 | 8 | 28 | 6 | 2 | + t3 (walk) |
+| 4 | 4 | 352-368 | 10 | 32 | 7 | 2 | + t4 (float) |
+| 5 | 4 | 392-408 | 12 | 36 | 8 | 3 | + t5 (float) |
+
+Every generated level has **exactly** its budget (`layout.budget`, `StageTable.budget(stage)`); a short layout is rejected and rerolled. Solid-wall / furniture chances rise with the stage. A run is `StageTable.STAGE_COUNT` = 5 stages (stage 5's exit = win screen); `StageTable.stage_count()` returns it and FE's `FESignals.MAX_STAGES` is defined from it.
+
+## Generator guarantees (validator rejects + rerolls, fallback to a known-good layout after 20 tries)
+- 3-4 floors; exit on a different floor from the start.
+- Exit reachable from start by walking + stairs only (no forced jump over anything taller than 2 tiles, no forced pickup/throw). Every gold pile and chest is reachable.
+- **No enemy within one screen (1280px straight-line distance, any floor) of the start, none inside the start camera view** (main.gd's clamped camera, `LevelValidator.start_view`), and none in line of sight of the start (same floor, within 1280px, no solid wall or >2-tile furniture between). Tension = sneaking toward something unseen.
+- **No prop ever has to be broken:** every floor prop has a clear jump lane of 64px each side (no walls or doorway lintels, furniture, stair footprints, other props, chests, start or exit), and a plain jump at PlayerStats speed/jump/gravity clears its touch radius (`LevelValidator.prop_jump_clears`, tested). So there is always a route to the exit that breaks nothing.
+- **No overlaps:** start, exit, stair footprints, props, gold, chests and enemies each own a footprint on their floor and none overlap; nothing is inside a wall column or furniture; everything is inside the level bounds.
+- **Full content budget** (table above).
+- **Deterministic:** same seed + stage = the same layout, and `build()` makes an identical node tree (names, positions, hidden vase gold).
+- The fallback layout (template per stage: stage-table floors, 40-tile rooms, zig-zag stairs, content from a fixed seed) meets every rule too, but at 1000 seeds x 5 stages it is never needed.
+
+## Generator (`scripts/levelgen/`)
+- `LevelGenerator.generate(seed, stage, opts = {}) -> Dictionary` - pure data. Attempt *k* uses `RandomNumberGenerator` seeded with `hash("qm:<seed>:<stage>:<k>")`; up to 20 attempts, then `fallback_layout(stage)` (hand-made, validated in tests). The result records `attempt`, `rerolls`, `fallback`, `reject_reasons`. `opts`: `params` (override stage-table keys), `max_attempts`.
+- The level is partitioned into rooms of 24-40 tiles (4-tile multiples), the same walls on every floor. Interior walls have a doorway unless `solid_wall_chance` rolls; 2-3 stairs are placed per floor pair, then a repair pass adds stairs (or, when no stair fits, opens a solid wall into a doorway / lowers tall furniture to 2 tiles) until every walkable segment is reachable from the start. Then props (with jump lanes), gold, chests and enemies are placed into free floor space.
+- `LevelGenerator.build(layout, world) -> {level, player, exit, enemies, stairs, bounds, nav, layout}` makes nodes under `world` (main.tscn's `World`, using its Player/Exit/Puppets/Obstacles holders). Invalid layouts build the fallback; a null world returns `{}`. Calls `seed(build_seed)` first so vase gold is deterministic too.
+- Bodies use a feet origin: collision circles sit on the node origin (player r12, puppet r14), like the bottom-centre art pivots.
+- `LevelValidator.validate(layout) -> PackedStringArray` (empty = OK). Never crashes on null/garbage.
+- `main.gd` exposes `level_seed: int` (-1 = roll a new random seed) and `stage: int`. FE (`FESignals`) sets both on the new instance for Retry seed / New run / next stage. `-- --seed=N [--stage=S]` (or `--seed N`) and web `?seed=N&stage=S` apply on the **first boot only** and never override values FE set on a reload. Level completion = `GameState.reached_exit` (no extra signal). The seed shows under the hint line.
+
+### Layout data (feet points in World space; floor f surface y = -f*160)
+`floors, width_tiles, rooms[{floor,x0,x1}], walls[{floor,x,doorway}], furniture[{floor,x,w,h}]` (tiles), `stairs[{from_floor,to_floor,bottom,top}], props[{type,pos}], gold[{pos,amount}], chests[{pos}], enemies[{type,movement,pos,home,floor}], start, exit, budget{enemies,props,gold,chests}, safe_radius`, plus `seed, stage, attempt, rerolls, fallback, reject_reasons, build_seed`.
+
+## Floor graph / stair data for enemies (`LevelNav`)
+Plain data, no nodes, no rendering: works the same for off-screen enemies.
+- `LevelNav.current` - the loaded level's nav (null with no generated level). Also on the Level node as meta `nav`.
+- `nav.stairs` - `[{from_floor, to_floor, bottom, top}]`, world-space feet points (bottom on `from_floor`, top on `to_floor`).
+- `nav.graph` - `{segments: {floor: [Vector2(x_from, x_to)]}, adj: {"f:i": [{to: "g:j", stair: index}]}}`. A segment is a walkable stretch of one floor between solid walls / >2-tile furniture; edges are stairs.
+- `nav.floor_of(pos)`, `nav.node_for(pos)` (`"f:i"`; nearest segment if pos is inside a blocker).
+- `nav.route(a, b)` - `[]` same segment, `null` unreachable, else `[{stair, enter, exit}]` hops in order.
+- `nav.next_waypoint(a, b)` - `{}` unreachable, `{point}` walk straight to it, or `{point, stair_to, stair}` walk to `point`, climb to `stair_to`.
+
+## Tests
+- `tests/test_levelgen.gd` (in `run_tests.gd`): determinism (layout and built node tree), stage 1 size/floors, walk-only stages 1-3, stair shape (240px run, 48px landings, clear footprints), and a rejection test for every rule (exit on start floor, <3 floors, enemy too close on any floor / on screen / in sight, prop without a jump lane, overlaps incl. landings, wrong stair run, doorway on a landing, stair ends off tile edges, objects over the slab cutout, short budget, rooms < 24 tiles), Designer placement (x+3/x+18, cutout x+9..x+17 and mirrored), the cutout splitting the floor graph, built slab collision open over the cutout and atlas layers painted, `STAGE_COUNT` = table size = FE `MAX_STAGES`, fallback valid for all stages, nav routes, main.gd FE seed/stage contract.
+- `tests/seed_sweep.gd`: `godot --headless -s res://tests/seed_sweep.gd -- --seeds 1000 --stages 1-5 [--catch 0]`. Per seed: validate, >=3 floors, exit off the start floor, full budget, regenerate = identical. Every 25th seed boots main.tscn for 120 physics frames (boy walks toward the exit; fails on any engine/script error, leaving the level, or not standing on a floor) and builds twice (identical node trees). Prints per stage: valid, rerolls (total/avg/max), fallbacks, short counts, nondeterministic, boots. Then `tests/scene_catch.gd` (real-physics catch).
+- CI (`.github/workflows/ci.yml`, PRs and pushes to development): job `test` = suite, smoke boot, web export; job `sweep` = matrix over stages 1-5, 1000 seeds each in parallel (catch check in the stage 1 job). Every stage must be 1000/1000 valid with 0 crashes.
