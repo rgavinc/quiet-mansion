@@ -70,7 +70,9 @@ func _physics_process(_delta: float) -> void:
 	if global_position.distance_to(player.global_position) <= catch_distance:
 		# A touch costs one heart (3 = game over via PlayerStats); invuln_time stops repeat hits.
 		if PlayerStats.take_hit(1):
-			player.global_position += dir * 48.0  # shove the player clear so it can run
+			# Shove with collision so a hit can never push the boy through a wall or off the map.
+			if player is PhysicsBody2D:
+				(player as PhysicsBody2D).move_and_collide(dir * 48.0)
 
 ## Knock while calm can kill; while enraged or miss → noise risk (caller emits noise).
 func try_knock_kill() -> bool:

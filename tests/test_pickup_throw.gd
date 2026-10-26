@@ -20,6 +20,9 @@ func run_all() -> Dictionary:
 		["miss_still_makes_noise", test_miss_noise],
 		["noise_radius_offscreen_reach", test_noise_radius],
 		["vase_defaults_vs_generic_override", test_defaults],
+		["tap_never_targets_puppet", test_tap_not_puppet],
+		["knock_noise_once", test_knock_noise_once],
+		["knocked_prop_hits_enemy_where_it_lands", test_knock_lands_on_enemy],
 	]
 	var passed := 0
 	for item in checks:
@@ -178,3 +181,41 @@ func test_defaults() -> String:
 	var ok: bool = v.can_pick_up and v.throwable and not g.can_pick_up and is_equal_approx(v.noise_radius, NoiseBus.DEFAULT_RADIUS)
 	v.free(); g.free()
 	return "" if ok else "WorldObject defaults/overrides wrong"
+
+
+func _puppet(at: Vector2) -> Node2D:
+	var e: Node2D = Node2D.new()
+	e.add_to_group("puppets")
+	e.set_script(null)
+	return _add(e, at)
+
+
+func test_tap_not_puppet() -> String:
+	var p := _player()
+	var e := _puppet(Vector2(115, 100))
+	p.interact_pressed(); p.interact_released()
+	return "" if is_instance_valid(e) and not e.is_queued_for_deletion() else "tap hit a puppet directly"
+
+
+func test_knock_noise_once() -> String:
+	var heard := [0]
+	var cb := func(_a, _r, _l, _s): heard[0] += 1
+	NoiseBus.noise.connect(cb)
+	var p := _player()
+	var g: WorldObject = load("res://scripts/world/obstacle.gd").new()
+	g.break_on_touch = false
+	_add(g, Vector2(120, 100))
+	p.interact_pressed(); p.interact_released()
+	NoiseBus.noise.disconnect(cb)
+	return "" if heard[0] == 1 else "knock made %d noises" % heard[0]
+
+
+func test_knock_lands_on_enemy() -> String:
+	var p := _player()
+	var g: WorldObject = load("res://scripts/world/obstacle.gd").new()
+	g.break_on_touch = false
+	_add(g, Vector2(120, 100))
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	_add(e, Vector2(148, 100))
+	p.interact_pressed(); p.interact_released()
+	return "" if e.is_queued_for_deletion() else "falling prop did not hit calm puppet"

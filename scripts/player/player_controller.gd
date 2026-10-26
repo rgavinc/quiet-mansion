@@ -128,14 +128,18 @@ func throw_at(tgt: Node2D) -> Node2D:
 	return t
 
 
-## Empty hands: knock over the ONE nearest prop in range on the side you face.
+## Empty hands: knock over the ONE nearest knockable prop in range on the side you face.
+## Puppets are never tapped directly: the prop falls toward `facing`, and an enemy right
+## where it lands is hit (calm dies, enraged is stunned). The break makes the noise, once.
+const KNOCK_FALL_DIST := 28.0
+
 func _try_knock() -> void:
-	var best: Node2D = null
+	var best: WorldObject = null
 	var best_d := INF
-	for node in get_tree().get_nodes_in_group("obstacles") + get_tree().get_nodes_in_group("puppets"):
-		if not (node is Node2D):
+	for node in get_tree().get_nodes_in_group("world_objects"):
+		if not (node is WorldObject) or node.broken or not node.breakable:
 			continue
-		var to := (node as Node2D).global_position - global_position
+		var to: Vector2 = node.global_position - global_position
 		var d := to.length()
 		if d > knock_range or to.x * facing < -4.0:
 			continue
@@ -144,10 +148,12 @@ func _try_knock() -> void:
 			best = node
 	if best == null:
 		return
-	if best.has_method("break_apart"):
-		best.break_apart()
-	elif best.has_method("try_knock_kill") and not best.try_knock_kill():
-		NoiseBus.emit_noise(global_position, 240.0 * PlayerStats.get_stat(&"noise_mult"), 0.6, self)
+	var land := best.global_position + Vector2(facing * KNOCK_FALL_DIST, 0)
+	for e in get_tree().get_nodes_in_group("puppets"):
+		if e is Node2D and e.global_position.distance_to(land) <= 20.0 and e.has_method("on_hit_by_throw"):
+			e.on_hit_by_throw(best.to_item())
+			break
+	best.break_apart()
 
 
 # --- hold: pickup channel ---------------------------------------------------
