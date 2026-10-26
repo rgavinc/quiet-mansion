@@ -153,3 +153,7 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Seed sweep:** 1,000 seeds per stage.
 - **Merge rule:** an author's "ready" message ends with "frozen at `<sha>`"; Lead merges only that sha; follow-ups go on a new branch. Nothing merges until QA posts a pass on that frozen sha (the pass is the go-ahead; no hold message needed).
 - **Wednesday first-look checklist:** generated multi-floor stage 1 start-to-exit; walking/stair-taking chasers; off-screen arrows that drain and give up; 1s light startle with visible twitch; vase noise pulling multiple chasers; vase gold and throws at the ringed puppet; styled game-over; merchant with a few working items.
+- **Startle timing:** holding the light on a puppet for 1.0s startles it; the chase starts when the scream animation finishes (~0.5s, from manifest frames/fps), giving a short read-and-run window.
+- **Floaters** (`movement = &"float"`, stage 4+) drift through floors and slabs.
+- **Give-up gauge** drains faster the farther the boy is from the chaser.
+- **Hit pacing (stage 1 baseline):** with the 1.5s back-off, one puppet takes 3 hearts in ~7s; per-stage tuning happens in the PD fun pass.
