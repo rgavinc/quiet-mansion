@@ -67,7 +67,7 @@ func _ready() -> void:
 	owned_items.skin = skin
 	root.add_child(owned_items)
 	owned_items.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE)
-	owned_items.position = Vector2(14, 64)
+	owned_items.position = Vector2(14, 112)   # under hearts/gold and the level's 2-line Hint (16, 64)
 
 	lure_hint = LureHint.new()
 	lure_hint.name = "LureHint"
@@ -84,7 +84,7 @@ func _ready() -> void:
 	root.add_child(minimap)
 	minimap.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE)
 	minimap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	minimap.offset_top = 64.0
+	minimap.offset_top = 100.0   # under the alert counter and its pips
 	minimap.offset_right = -8.0
 
 	banner = StageBanner.new()

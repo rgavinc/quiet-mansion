@@ -14,6 +14,7 @@ extends Control
 const REFRESH_HZ := 10.0
 const MAX_SIZE := Vector2(240, 120)
 const PAD := 6.0
+const MIN_H := 48.0                  # long, flat levels get stretched vertically to stay readable
 const FLOOR_PX := 160.0              # #13 LevelValidator.FLOOR_PX (fallback if not readable)
 const C_BACK := Color(0.05, 0.04, 0.07, 0.78)
 const C_RIM := Color(0.45, 0.38, 0.3, 1)
@@ -183,12 +184,13 @@ func _draw() -> void:
 	var avail := size - Vector2(PAD, PAD) * 2.0
 	var k := minf(avail.x / b.size.x, avail.y / b.size.y)
 	var sz := b.size * k
+	sz.y = clampf(sz.y, minf(MIN_H, avail.y), avail.y)   # non-uniform for wide side-scroller levels
 	_map_rect = Rect2(Vector2(size.x - PAD - sz.x, PAD), sz)   # hug the right edge
 	draw_rect(_map_rect.grow(PAD), C_BACK)
 	draw_rect(_map_rect.grow(PAD), C_RIM, false, 2.0)
 	var i := 0
 	for band in snapshot.bands:
-		var r := Rect2(to_map(band.position), (band as Rect2).size * k).intersection(_map_rect)
+		var r := Rect2(to_map(band.position), Vector2.ZERO).expand(to_map((band as Rect2).end)).intersection(_map_rect)
 		draw_rect(r.grow_individual(0, -1, 0, -1), C_BAND if i % 2 == 0 else C_BAND_ALT)
 		draw_line(Vector2(r.position.x, r.end.y), r.end, C_STAIR, 1.0)   # floor line
 		i += 1
