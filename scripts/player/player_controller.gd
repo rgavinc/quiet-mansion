@@ -44,6 +44,8 @@ const SHAKE_MAX_TIME := 1.2
 var _shake_dir: float = 0.0
 var _shake_left: float = 0.0
 var _shake_air: bool = false
+var _shake_still: float = 0.0
+var _shake_last: Vector2 = Vector2.ZERO
 signal shaken_off(dir: float)
 var _was_grounded: bool = true
 
@@ -205,6 +207,8 @@ func shake_off(dir: float) -> void:
 	_shake_dir = signf(dir)
 	_shake_left = SHAKE_MAX_TIME
 	_shake_air = false
+	_shake_still = 0.0
+	_shake_last = global_position
 	facing = int(_shake_dir)
 	if _grounded():
 		velocity.y = -SHAKE_KICK_SPEED
@@ -214,6 +218,14 @@ func shake_off(dir: float) -> void:
 func _tick_shake(delta: float) -> void:
 	_shake_left -= delta
 	velocity.x = _shake_dir * SHAKE_PUSH_SPEED
+	# watchdog: wedged (no movement for 0.3 s) -> control comes back
+	if global_position.distance_to(_shake_last) < 0.5:
+		_shake_still += delta
+		if _shake_still >= 0.3:
+			_shake_left = 0.0
+	else:
+		_shake_still = 0.0
+		_shake_last = global_position
 	if not _grounded():
 		_shake_air = true
 	elif _shake_air and furniture_under() <= 0.0 and not _standing_on_body():
@@ -229,6 +241,12 @@ func _standing_on_body() -> bool:
 		if c.get_normal().y < -0.5 and c.get_collider() is CharacterBody2D:
 			return true
 	return false
+
+
+## Hands control back at once (the walker's watchdog when a shake wedges him).
+func end_shake() -> void:
+	_shake_left = 0.0
+	velocity.x = 0.0
 
 
 func is_shaken() -> bool:

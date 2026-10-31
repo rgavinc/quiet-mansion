@@ -84,6 +84,12 @@ const MOVE_FLOAT := &"float"
 @export var rattle_noise_every: float = 0.0
 ## Tallest piece it rattles (4 tiles = 64 + margin); a hop above it still counts as "on it".
 @export var rattle_max_height: float = 72.0
+## Fairness (PD may veto / retune): after the shake-off touchdown the boy has control and this
+## long before our hit can land.
+@export var shake_hit_grace: float = 0.25
+## Visual only: while rattling the sprite sits this many px toward the piece so the claw tips
+## meet its edge (the body stops ~14 px out; collision unchanged).
+@export var rattle_claw_px: float = 12.0
 
 const STARTLE_FALLBACK_TIME := 0.5   # startle slot missing / no frames / no fps
 const REACH_FALLBACK_TIME := 0.6     # PD: a clear ~0.6 s reach when there's no reach anim
@@ -102,6 +108,15 @@ const FACE_TURN_PX := 12.0
 const FACE_HOLD_TIME := 0.2
 ## Walker beside a piece it rattles: centre within half the piece + this.
 const RATTLE_STAND_X := 40.0
+## The unreachable count decays at this fraction of real time while he is off the piece (QA #49:
+## dropping to the far side and re-climbing used to restart the 3 s), and a rattle he leaves
+## resumes (its remaining time) if he is back within RATTLE_RESUME_TIME.
+const RATTLE_DECAY := 1.0 / 3.0
+const RATTLE_RESUME_TIME := 3.0   # time away from the piece (not on top) for which rattle progress is kept
+## Shaken-off boy stuck in the air (wedged): control and hits come back after this long still,
+## or this long airborne in all.
+const WATCHDOG_STILL_TIME := 0.3
+const WATCHDOG_AIR_TIME := 1.6
 const RATTLE_SLOT_FALLBACK_LOOP := 0.5
 const VFX_RATTLE_SLOT := "vfx_rattle"
 ## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
@@ -173,6 +188,20 @@ var _reach_resume_left: float = 0.0
 var _face_hold: float = 0.0
 # rattle
 var _rattle_shaken: bool = false
+var _rattle_blocked_now: bool = false
+var _rattle_saved_left: float = 0.0
+var _rattle_resume_left: float = 0.0
+var _shake_retry_left: float = 0.0
+var _shake_watch: bool = false
+var _shake_watch_air: bool = false
+var _shake_watch_t: float = 0.0
+var _hit_grace: float = 0.0
+var _stuck_t: float = 0.0
+var _airborne_t: float = 0.0
+var _stuck_pos: Vector2 = Vector2.ZERO
+var _approach_path_ok: bool = false
+var _approach_check_left: float = 0.0
+var _spr_x0: float = 0.0
 var _rattle_unreach: float = 0.0       # s unreachable so far (CHASE/SEARCH)
 var _rattle_clock: float = 0.0         # s into the current rattle
 var _rattle_noise_n: int = 0           # noises emitted so far this rattle
@@ -429,6 +458,7 @@ func _set_state(s: State) -> void:
 		_end_rattle(shaken)
 	if s != State.CHASE and s != State.SEARCH:
 		_rattle_unreach = 0.0
+		_rattle_resume_left = 0.0
 	state = s
 	match s:
 		State.CALM, State.RETURN:
@@ -647,12 +677,18 @@ func _find_piece(p: Node2D) -> Dictionary:
 	return best
 
 
-## True once he has been out of our reach (rattle_blocked) for rattle_wait seconds. Any frame
-## he isn't (he left, we aren't beside the piece, reachable now) resets the count.
+## True once he has been out of our reach (rattle_blocked) for rattle_wait seconds. Frames he
+## isn't (he left, we aren't beside the piece, reachable now) only decay the count (RATTLE_DECAY).
 func _tick_rattle_wait(delta: float, p: Node2D) -> bool:
-	if rattle_wait < 0.0 or not rattle_blocked(p):
+	_rattle_blocked_now = false
+	if rattle_wait < 0.0:
 		_rattle_unreach = 0.0
 		return false
+	if not rattle_blocked(p):
+		if not boy_perched(p):   # (a walker still walking over to a boy who is on top loses nothing)
+			_rattle_unreach = maxf(_rattle_unreach - delta * RATTLE_DECAY, 0.0)   # decays, never snaps to 0
+		return false
+	_rattle_blocked_now = true
 	_rattle_unreach += delta
 	return _rattle_unreach >= rattle_wait - 1e-4
 
@@ -669,6 +705,57 @@ func _rattle_hold(delta: float, p: Node2D) -> void:
 	else:
 		velocity.x = 0.0
 	_apply_gravity(delta)
+
+
+## He stands on a tall piece we can reach the base of on our own side (same floor, no wall,
+## no gap between): go straight there instead of following LevelNav (which may put a boy
+## inside a blocker on the far segment and send us around). Cached path check, cheap per frame.
+func _rattle_approach_ok(p: Node2D, delta: float) -> bool:
+	if rattle_wait < 0.0 or not is_side_scroll() or is_floating() or climbing or not _grounded():
+		return false
+	if "stair" in p and p.get("stair") != null:
+		return false
+	if not _boy_standing(p):
+		return false
+	var raw := _feet().y - body_feet(p).y
+	if raw <= reach_height() or raw > rattle_max_height:
+		return false
+	var pc := _find_piece(p)
+	if pc.is_empty():
+		return false
+	var r: Rect2 = pc.rect
+	if absf(_feet().y - r.end.y) > 6.0:
+		return false   # the piece doesn't stand on our floor
+	var cx := r.get_center().x
+	var half := r.size.x * 0.5
+	if absf(_feet().x - cx) <= half + 2.0:
+		return false   # under / inside it: nothing to approach
+	_approach_check_left -= delta
+	if _approach_check_left <= 0.0:
+		_approach_check_left = 0.2
+		_approach_path_ok = _base_path_clear(cx + signf(_feet().x - cx) * half)
+	return _approach_path_ok
+
+
+## Floor under every 24 px from our feet to `edge_x`, nothing solid between at body height.
+func _base_path_clear(edge_x: float) -> bool:
+	if not is_inside_tree():
+		return false
+	var space := get_world_2d().direct_space_state
+	var f := _feet()
+	var dir := signf(edge_x - f.x)
+	var x := f.x
+	var skip: Array[RID] = [get_rid()]
+	for ex in get_collision_exceptions():   # walkers pass low furniture (#13): not a wall to them
+		if ex is CollisionObject2D:
+			skip.append((ex as CollisionObject2D).get_rid())
+	while absf(edge_x - x) > 1.0:
+		var q := PhysicsRayQueryParameters2D.create(Vector2(x, f.y - 4.0), Vector2(x, f.y + 10.0), PlayerStats.LAYER_WORLD, skip)
+		if space.intersect_ray(q).is_empty():
+			return false
+		x += dir * minf(24.0, absf(edge_x - x))
+	var w := PhysicsRayQueryParameters2D.create(Vector2(f.x, f.y - 10.0), Vector2(edge_x - dir * 2.0, f.y - 10.0), PlayerStats.LAYER_WORLD, skip)
+	return space.intersect_ray(w).is_empty()
 
 
 func rattle_loop_time() -> float:
@@ -689,10 +776,13 @@ func _enter_rattle(p: Node2D) -> void:
 	_rattle_clock = 0.0
 	_rattle_noise_n = 0
 	rattle_progress = 0.0
-	_state_left = maxf(rattle_time, 0.0)
+	_state_left = _rattle_saved_left if _rattle_resume_left > 0.0 else maxf(rattle_time, 0.0)
+	_rattle_resume_left = 0.0
 	_set_state(State.RATTLE)
 	_spawn_rattle_vfx()
 	_collect_wobble_nodes(p)
+	if _spr != null:
+		_spr_x0 = _spr.position.x
 	rattle_started.emit()
 	_rattle_noise()   # the first rattle is loud at once
 
@@ -700,18 +790,28 @@ func _enter_rattle(p: Node2D) -> void:
 func _tick_rattle(delta: float, p: Node2D) -> void:
 	_stop_x(delta)
 	if p == null or not rattle_blocked(p):
-		_set_state(State.CHASE)   # he left / we can't stand beside it: cancelled, timers reset
+		var left := _state_left
+		_set_state(State.CHASE)   # he left / we can't stand beside it: rattle cancelled
+		if p != null:   # a brief hop doesn't wipe the progress (QA #49 camping)
+			_rattle_unreach = rattle_wait
+			_rattle_saved_left = left
+			_rattle_resume_left = RATTLE_RESUME_TIME
 		return
 	_rattle_clock += delta
-	_state_left -= delta
+	_state_left = maxf(_state_left - delta, 0.0)
 	rattle_progress = clampf(1.0 - _state_left / maxf(rattle_time, 1e-4), 0.0, 1.0)
+	var done := _state_left <= 1e-4
+	if done:
+		_shake_retry_left -= delta
+		if _shake_retry_left <= 0.0:
+			_shake_retry_left = 0.1
+			if _shake_off(p):
+				return
 	var every := rattle_noise_interval()
-	while float(_rattle_noise_n) * every <= _rattle_clock + 1e-4 and _rattle_noise_n * every < rattle_time - 1e-4:
+	# no free landing yet (PD): keep rattling, noise every loop, retry until a spot opens
+	while float(_rattle_noise_n) * every <= _rattle_clock + 1e-4 and (done or _rattle_noise_n * every < rattle_time - 1e-4):
 		_rattle_noise()
 	_apply_rattle_wobble()
-	if _state_left > 1e-4:
-		return
-	_shake_off(p)
 
 
 func _rattle_noise() -> void:
@@ -748,6 +848,9 @@ func _apply_rattle_wobble() -> void:
 		if _spr != null and _spr.flip_h:
 			w = -w
 	_set_wobble(w)
+	if _spr != null and not _rattle_piece.is_empty():
+		var toward := signf(_rattle_top_point().x - _feet().x)
+		_spr.position.x = _spr_x0 + toward * rattle_claw_px
 
 
 func _set_wobble(w: float) -> void:
@@ -830,6 +933,8 @@ func _spawn_rattle_vfx() -> void:
 ## Leaving RATTLE (any way): vfx freed, wobble restored, timers reset, rattle_ended(shaken).
 func _end_rattle(shaken: bool) -> void:
 	_set_wobble(0.0)
+	if _spr != null:
+		_spr.position.x = _spr_x0
 	_wobble_nodes.clear()   # _set_wobble(0) just put every node back on its base x
 	if _rattle_vfx != null and is_instance_valid(_rattle_vfx):
 		_rattle_vfx.queue_free()
@@ -842,17 +947,106 @@ func _end_rattle(shaken: bool) -> void:
 	rattle_ended.emit(shaken)
 
 
-## 3 s of rattling: the boy drops off the piece's edge toward our side (PlayerController
-## .shake_off: a small kick + push under real physics, so he lands on the floor, never in a wall).
-func _shake_off(p: Node2D) -> void:
+## 3 s of rattling: the boy drops off the piece toward a spot verified free, our side first (past
+## our body), else the far side. Neither free: false, we keep rattling and retry (never cancels).
+func _shake_off(p: Node2D) -> bool:
 	var cx := _rattle_top_point().x
-	var dir := signf(_feet().x - cx)
+	var ours := signf(_feet().x - cx)
+	if ours == 0.0:
+		ours = -1.0 if face_dir < 0 else 1.0
+	var dir := 0.0
+	if _landing_free(p, ours, true):
+		dir = ours
+	elif _landing_free(p, -ours, false):
+		dir = -ours
 	if dir == 0.0:
-		dir = -1.0 if face_dir < 0 else 1.0
+		return false
 	_boy_off_perch = true   # airborne until he lands: no contact hit mid-fall
 	if p != null and p.has_method(&"shake_off"):
 		p.call(&"shake_off", dir)
+		_shake_watch = true
+		_shake_watch_air = false
+		_shake_watch_t = 0.0
 	_end_rattle_state(true)
+	return true
+
+
+## A boy-sized spot on the floor, free of world and bodies (shape query) and with floor under it:
+## our side = past our body; far side = just outside the piece's far edge. Two spots, 12 px apart.
+func _landing_free(p: Node2D, dir: float, our_side: bool) -> bool:
+	if _rattle_piece.is_empty() or not is_inside_tree() or p == null:
+		return false
+	var r: Rect2 = _rattle_piece.rect
+	var cs: CollisionShape2D = null
+	for c in p.get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape != null and not (c as CollisionShape2D).disabled:
+			cs = c
+			break
+	if cs == null:
+		return true
+	var he := shape_half_extents(cs.shape)
+	var rel := cs.global_position - body_feet(p)
+	var x1: float
+	if our_side:
+		x1 = _feet().x + dir * (shape_half_extents(_own_shape()).x + he.x + 2.0)
+	else:
+		x1 = r.get_center().x + dir * (r.size.x * 0.5 + he.x + 4.0)
+	var space := get_world_2d().direct_space_state
+	var floor_y := r.end.y
+	for k in 2:
+		var x := x1 + dir * 12.0 * k
+		var q := PhysicsShapeQueryParameters2D.new()
+		q.shape = cs.shape
+		q.transform = Transform2D(0.0, Vector2(x, floor_y - 2.5) + rel)
+		q.collision_mask = PlayerStats.LAYER_WORLD | PlayerStats.LAYER_ENEMY
+		q.exclude = [p.get_rid()] if p is CollisionObject2D else []
+		if not space.intersect_shape(q, 1).is_empty():
+			return false
+		var fr := PhysicsRayQueryParameters2D.create(Vector2(x, floor_y - 6.0), Vector2(x, floor_y + 8.0), PlayerStats.LAYER_WORLD, [p.get_rid()] if p is CollisionObject2D else [])
+		if space.intersect_ray(fr).is_empty():
+			return false
+	return true
+
+
+func _own_shape() -> Shape2D:
+	for c in get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape != null and not (c as CollisionShape2D).disabled:
+			return (c as CollisionShape2D).shape
+	return null
+
+
+## After a shake-off: when he touches down (or his control returns) the walker's hit waits
+## shake_hit_grace; a boy stuck in the air gets control and hit-ability back (watchdog).
+func _tick_shake_watch(delta: float, p: Node2D) -> void:
+	_hit_grace = maxf(_hit_grace - delta, 0.0)
+	if p == null:
+		return
+	if _shake_watch:
+		_shake_watch_t += delta
+		var shaken: bool = p.has_method(&"is_shaken") and bool(p.call(&"is_shaken"))
+		if shaken:
+			_shake_watch_air = true
+		elif _shake_watch_air or _shake_watch_t > 0.5:
+			_shake_watch = false
+			_hit_grace = shake_hit_grace
+	if _boy_off_perch and not _boy_standing(p):
+		_airborne_t += delta
+		if p.global_position.distance_to(_stuck_pos) > 1.5:
+			_stuck_pos = p.global_position
+			_stuck_t = 0.0
+		else:
+			_stuck_t += delta
+		if _stuck_t >= WATCHDOG_STILL_TIME or _airborne_t >= WATCHDOG_AIR_TIME:
+			_boy_off_perch = false   # wedged: immunity and the lock end, the hit comes back
+			if p.has_method(&"end_shake"):
+				p.call(&"end_shake")
+			_stuck_t = 0.0
+			_airborne_t = 0.0
+			_hit_grace = shake_hit_grace
+	else:
+		_stuck_t = 0.0
+		_airborne_t = 0.0
+		_stuck_pos = p.global_position
 
 
 func _end_rattle_state(shaken: bool) -> void:
@@ -934,6 +1128,10 @@ func tick(delta: float) -> void:
 	_track_left = maxf(_track_left - delta, 0.0)
 	_reach_resume_left = maxf(_reach_resume_left - delta, 0.0)
 	_note_perch(p)
+	_tick_shake_watch(delta, p)
+	# the resume window runs only while he is away from the piece (time on top doesn't use it up)
+	if not _rattle_blocked_now and not (p != null and boy_perched(p)):
+		_rattle_resume_left = maxf(_rattle_resume_left - delta, 0.0)
 	match state:
 		State.CALM, State.RETURN:
 			_tick_startle(delta, p)
@@ -958,7 +1156,7 @@ func tick(delta: float) -> void:
 			elif p != null and _tick_rattle_wait(delta, p):
 				_enter_rattle(p)
 				_stop_x(delta)
-			elif p != null and _rattle_unreach > 0.0:
+			elif p != null and (_rattle_blocked_now or _rattle_approach_ok(p, delta)):
 				_rattle_hold(delta, p)
 			else:
 				_tick_hunt(delta, p, sees)
@@ -1059,6 +1257,8 @@ func _try_hit() -> void:
 	var p := _player()
 	if p == null or not hitbox.overlaps_body(p):
 		return  # polled every frame, so a boy who stays in contact is hit again later
+	if _hit_grace > 0.0 or _shake_watch:
+		return  # mid-shake, or just touched down: a beat to react
 	if boy_perched(p) or (_boy_off_perch and not _boy_standing(p)):
 		return  # perched (or hopping off / in place): only the telegraphed reach catches him
 	if PlayerStats.take_hit(1):
