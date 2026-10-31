@@ -127,6 +127,7 @@ func _build() -> void:
 	owned_strip.stats = stats
 	owned_strip.make_compact(11, 1)
 	owned_strip.popover_bounds = left   # the overflow list stays inside OffersPanel   # one row of 11 (+N): fits OffersPanel's 460 px under 4 cards
+	owned_strip.overflow_focus_lost.connect(_on_overflow_focus_lost)   # own child's signal: nothing to disconnect
 	owned_row.add_child(owned_strip)
 	lcol.add_child(owned_row)
 
@@ -250,6 +251,7 @@ func open_shop(count: int = -1) -> void:
 	var n := clampi(count if count > 0 else skin.shop_offer_count, 1, MAX_CARDS)
 	if owned_strip:
 		owned_strip.close_overflow()
+		owned_strip.reset_input_state()
 	offers = bus.get_shop_offer(n) if bus and bus.has_method(&"get_shop_offer") else ([] as Array[Dictionary])
 	_tile_text = unique_initials(_catalogue_names(offers))
 	sold.clear()
@@ -510,9 +512,16 @@ func _sparkle(card: Control) -> void:
 	spr.play(skin.sparkle_slot)
 
 
+## The "+N" tile that had focus is gone (nothing is hidden any more): Continue takes it.
+func _on_overflow_focus_lost() -> void:
+	if continue_button and continue_button.is_visible_in_tree():
+		continue_button.grab_focus()
+
+
 func _on_continue() -> void:
 	if owned_strip:
 		owned_strip.close_overflow()
+		owned_strip.reset_input_state()
 	close()
 	if bus and bus.has_method(&"next_stage"):
 		bus.next_stage()
