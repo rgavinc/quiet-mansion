@@ -61,7 +61,12 @@ func run_all() -> Dictionary:
 		["rails_cannot_be_cleared_by_capped_running_jumps", test_rail_jump_rule],
 		["rejects_furniture_a_capped_jump_clears_a_rail_from", test_reject_furniture_rail],
 		["gold_floor_and_worst_roll_vs_cheapest_shop_item", test_gold_floor],
-		["layouts_match_pr13_hashes", test_layout_hashes],
+		["layouts_are_deterministic_across_two_runs", test_layout_determinism],
+		["sprite_choice_never_changes_the_layout", test_sprite_stream_separate],
+		["sprite_row0_sits_on_the_collision_top_for_all_slots", test_sprite_row0_on_collision_top],
+		["tall_piece_mount_rule", test_mount_rule],
+		["every_floor_has_a_reachable_climbable_piece", test_floors_have_mountable],
+		["nav_target_on_a_tall_piece_routes_directly_from_either_side", test_nav_on_piece],
 		["furniture_falls_back_to_rects_without_slots", test_furniture_fallback],
 		["furniture_sprites_by_height_class_separate_stream", test_furniture_sprites],
 		["furniture_slot_art_matches_collision_height", test_furniture_art_contract],
@@ -311,8 +316,8 @@ func test_reject_tall_block() -> String:
 		T.furniture.append({floor = 0, x = tx, w = 2, h = 2})   # jumpable
 		if not LevelValidator.validate(T).is_empty():
 			continue
-		T.furniture[-1].h = 3   # 3 tiles: can't be jumped
-		return "" if _has(LevelValidator.validate(T), "exit not reachable") else "3-tile block on the only path passed"
+		T.furniture[-1].h = 4   # 4 tiles: can't be jumped or climbed
+		return "" if _has(LevelValidator.validate(T), "exit not reachable") else "4-tile block on the only path passed"
 	return "no clear spot for the test block"
 
 
@@ -963,9 +968,147 @@ func test_gold_floor() -> String:
 
 # --- furniture sprites + per-stage look (lead/furniture-stage-look) ---
 
-func test_layout_hashes() -> String:
-	var bad := LookHash.check(20)   # tests/look_hash_sweep.gd runs all 200 seeds x 5 stages
-	return "" if bad.is_empty() else "layout differs from PR #13: %s" % ", ".join(bad.slice(0, 5))
+func test_layout_determinism() -> String:
+	for st in range(1, 6):
+		for sd in [0, 1, 7, 23, 1009]:
+			if LookHash.hash_of(sd, st) != LookHash.hash_of(sd, st):
+				return "seed %d stage %d differs between two runs" % [sd, st]
+			var a := LevelGenerator.generate(sd, st)
+			var b := LevelGenerator.generate(sd, st)
+			if _strip(a) != _strip(b):
+				return "seed %d stage %d layout dictionaries differ" % [sd, st]
+	return ""
+
+
+## The sprite picks use their own RNG stream (FurnitureSkin.rng_for): whatever art is in the
+## manifest, the layout (and so collision, enemies, loot) is byte-identical.
+func test_sprite_stream_separate() -> String:
+	for st in [1, 3, 5]:
+		for sd in [3, 11, 40]:
+			FurnitureSkin.slots_override = null
+			var real := LookHash.hash_of(sd, st)
+			FurnitureSkin.slots_override = {}
+			var none := LookHash.hash_of(sd, st)
+			FurnitureSkin.slots_override = {1: ["vase_idle"], 2: ["vase_idle", "vase_thrown"], 3: ["vase_idle"], 4: ["vase_idle"]}
+			var fake := LookHash.hash_of(sd, st)
+			FurnitureSkin.slots_override = null
+			if real != none or real != fake:
+				return "seed %d stage %d layout depends on the furniture slots" % [sd, st]
+	return ""
+
+
+## All 8 real slots (furniture_h{1..4}_{a,b}): the frame is h*16 tall, its top opaque row is
+## row 0, and as painted that row sits exactly on the collision top (surface - h*16). ONE pivot
+## rule: the frame's bottom edge stands on the floor surface (the manifest pivot is not used).
+func test_sprite_row0_on_collision_top() -> String:
+	var seen := 0
+	for h in range(1, 5):
+		for suffix in ["a", "b"]:
+			var slot := "furniture_h%d_%s" % [h, suffix]
+			if UiArt.texture(slot) == null:
+				continue   # art not in the manifest (yet): the fallback test covers it
+			seen += 1
+			var fs := FurnitureSkin.frame_size(slot)
+			if int(fs.y) != h * 16:
+				return "%s is %dpx tall, want %d" % [slot, fs.y, h * 16]
+			var img := UiArt.texture(slot).get_image()
+			var top := -1
+			for y in int(fs.y):
+				for x in int(fs.x):
+					if img.get_pixel(x, y).a > 0.0:
+						top = y
+						break
+				if top >= 0:
+					break
+			if top != 0:
+				return "%s: first opaque row is %d, want 0" % [slot, top]
+			var L := {stage = 1, build_seed = 1, furniture = [{floor = 1, x = 10, w = int(fs.x) / 16, h = h}]}
+			FurnitureSkin.slots_override = {h: [slot]}
+			var lvl := Node2D.new()
+			lvl.set_meta(&"lg_test", true)
+			root.add_child(lvl)
+			FurnitureSkin.paint(lvl, L, [])
+			FurnitureSkin.slots_override = null
+			var sp := lvl.get_node(FurnitureSkin.ROOT).get_child(0) as Sprite2D
+			var world_top := sp.position.y + sp.offset.y + top   # world y of the first opaque row
+			var want := LevelValidator.surface_y(1) - h * 16.0
+			if not is_equal_approx(world_top, want):
+				return "%s: row 0 at y=%s, collision top at y=%s" % [slot, world_top, want]
+	return "" if seen == 0 or seen == 8 else "only %d of the 8 furniture slots exist" % seen
+
+
+func test_mount_rule() -> String:
+	if not LevelValidator.can_mount(48.0) or LevelValidator.can_mount(64.0):
+		return "can_mount: 48px should be climbable at the caps, 64px not"
+	var L := LevelGenerator.fallback_layout(1)
+	var tx := -1
+	for x in range(8, int(L.stairs[0].bottom.x / 16.0) - 10):
+		var T := L.duplicate(true)
+		T.furniture.append({floor = 0, x = x, w = 2, h = 3})
+		if LevelValidator.validate(T).is_empty() and LevelValidator.mount_passable(T, T.furniture[0]):
+			tx = x
+			break
+	if tx < 0:
+		return "no clear spot for a 3-tile piece"
+	var T := L.duplicate(true)
+	T.furniture.append({floor = 0, x = tx, w = 2, h = 3})
+	var segs_before: int = LevelValidator.segments(L)[0].size()
+	if LevelValidator.segments(T)[0].size() != segs_before:
+		return "a climbable 3-tile piece split the floor"
+	if LevelValidator.mountable_pieces(T).size() != 1:
+		return "reachable 3-tile piece not counted as mountable"
+	# 4 tiles: never climbable, always a blocker
+	T.furniture[0].h = 4
+	if LevelValidator.segments(T)[0].size() != segs_before + 1 or not LevelValidator.mountable_pieces(T).is_empty():
+		return "a 4-tile piece must block and not count as mountable"
+	# 3 tiles with a wall closer than the 2-tile run: blocks like a tall piece
+	T.furniture[0].h = 3
+	T.walls.append({floor = 0, x = tx + 3, doorway = false})
+	if LevelValidator.mount_passable(T, T.furniture[0]):
+		return "3-tile piece 0 tiles from a wall counted as climbable"
+	return ""
+
+
+func test_floors_have_mountable() -> String:
+	for st in range(1, 6):
+		for sd in range(12):
+			var L := LevelGenerator.generate(sd, st)
+			if L.fallback:
+				return "seed %d stage %d fell back" % [sd, st]
+			var errs := LevelValidator.mountable_floor_errors(L)
+			if not errs.is_empty():
+				return "seed %d stage %d: %s" % [sd, st, errs[0]]
+			if not LevelValidator.validate(L).is_empty():
+				return "seed %d stage %d invalid: %s" % [sd, st, LevelValidator.validate(L)[0]]
+	return ""
+
+
+## QA: a boy on top of / inside a tall piece used to map to the segment on its LEFT, so a walker
+## on the right detoured via stairs. Either side now walks straight to the piece.
+func test_nav_on_piece() -> String:
+	var L := LevelGenerator.fallback_layout(1)
+	var tx := -1
+	for x in range(10, int(L.stairs[0].bottom.x / 16.0) - 10):
+		var T := L.duplicate(true)
+		T.furniture.append({floor = 0, x = x, w = 2, h = 4})
+		if LevelValidator.segments(T)[0].size() == LevelValidator.segments(L)[0].size() + 1:
+			tx = x
+			break
+	if tx < 0:
+		return "no spot for a blocking piece"
+	L.furniture.append({floor = 0, x = tx, w = 2, h = 4})
+	var nav := LevelNav.from_layout(L)
+	var y := LevelValidator.surface_y(0)
+	var boy := Vector2((tx + 1) * 16.0, y - 64.0)   # standing on top of the piece
+	for dx in [-80.0, 80.0, -200.0, 200.0]:
+		var walker := Vector2(boy.x + dx, y)
+		var r: Variant = nav.route(walker, boy)
+		if r == null or not (r as Array).is_empty():
+			return "walker %.0fpx from the piece: route %s, want a direct walk" % [dx, r]
+		var wp := nav.next_waypoint(walker, boy)
+		if wp.has("stair_to") or wp.get("point") != boy:
+			return "walker %.0fpx from the piece: waypoint %s" % [dx, wp]
+	return ""
 
 
 func _build_at(seed_value: int, stage: int) -> Dictionary:
@@ -1064,13 +1207,6 @@ func test_furniture_sprites() -> String:
 			if not sp.position.is_equal_approx(want) or not tl.is_equal_approx(want - Vector2(fs.x * 0.5, fs.y)):
 				err = "piece %d at %s (top-left %s), want bottom-centre %s" % [i, sp.position, tl, want]
 	b.world.free()
-	# the picks come from their own stream: layout hash identical with or without slots
-	var with_slots := LookHash.hash_of(sd, 1)
-	FurnitureSkin.slots_override = {}
-	var without := LookHash.hash_of(sd, 1)
-	FurnitureSkin.slots_override = null
-	if err.is_empty() and with_slots != without:
-		err = "layout depends on furniture slots"
 	# exact width preferred (vase_idle 32 wide, exit door 48 wide); none exact -> any of the class
 	FurnitureSkin.slots_override = {1: ["vase_idle", "exit_door_stage1"]}
 	if FurnitureSkin.candidates(1, 2) != ["vase_idle"] or FurnitureSkin.candidates(1, 3) != ["exit_door_stage1"] \

@@ -29,6 +29,7 @@ const DOOR_ROWS := 3
 const STAIR_TILES := 15          # diagonal run (240px) for a one-floor rise (160px), ~34 deg
 const LANDING_TILES := 3         # flat landing beyond each end; footprint 21 tiles
 const MAX_ATTEMPTS := 20
+const FLUSH_CHANCE := 0.5   # share of tall pieces tried flush against a solid end wall
 const PLAYER_RADIUS := 12.0
 const PUPPET_RADIUS := 14.0
 const ENEMY_SPACING := 64.0
@@ -59,6 +60,7 @@ static func generate(seed_value: int, stage: int, opts: Dictionary = {}) -> Dict
 		if over is Dictionary and not (over as Dictionary).is_empty():
 			L.custom_params = true   # tests only: table-match rules relaxed (see LevelValidator)
 		var errs := LevelValidator.validate(L)
+		errs.append_array(LevelValidator.mountable_floor_errors(L))
 		if errs.is_empty():
 			L.merge({seed = seed_value, attempt = attempt, rerolls = attempt, fallback = false,
 					reject_reasons = reasons, build_seed = derive_seed(seed_value, stage, attempt)}, true)
@@ -131,24 +133,120 @@ static func generate_layout(rng: RandomNumberGenerator, stage: int, P: Dictionar
 					break
 				placed = _try_stair(L, used, f, rng.randi_range(1, W - 21), 1 if rng.randf() < 0.5 else -1)
 
-	# furniture: one block per room at most
+	# Connect the walls/stairs graph FIRST, then furnish: tall pieces (> 2 tiles) block walking,
+	# so they used to split floors the repair pass then "fixed" by lowering them (94% of them
+	# at stage 5). Now a tall piece is only kept where the floor graph stays connected.
+	_connect(rng, L, used)
+	_furnish(rng, L, P, used)
+	_ensure_mountable(rng, L, used)
+	_connect(rng, L, used)   # safety net: no-op unless furnishing left something unreached
+	_populate(rng, L, P, used, stage)
+	return L
+
+
+## Furniture: at most one block per room (anchor pieces are already in L.furniture).
+## Tall pieces (h > MAX_JUMP_TILES) block walkers, so each one must leave the floor graph as
+## connected as it was (`_unreached`), and every piece keeps the stair-rail keepout.
+static func _furnish(rng: RandomNumberGenerator, L: Dictionary, P: Dictionary, used: Dictionary) -> void:
 	for r in L.rooms:
 		if rng.randf() >= float(P.get("furniture_chance", 0.0)):
 			continue
 		var w := rng.randi_range(2, 3)
 		var h := rng.randi_range(3, 4) if rng.randf() < float(P.get("tall_furniture_chance", 0.0)) else rng.randi_range(1, 2)
 		for _try in 12:
-			var fx := rng.randi_range(int(r.x0) + 3, maxi(int(r.x1) - 3 - w, int(r.x0) + 3))
-			var a := float((fx - 1) * TILE)
-			var b := float((fx + w + 1) * TILE)
-			if _free(used[r.floor], a, b) and LevelValidator.furniture_rail_ok(L, r.floor, fx * TILE, (fx + w) * TILE, h):
-				L.furniture.append({floor = r.floor, x = fx, w = w, h = h})
-				used[r.floor].append(Vector2(a, b))
+			if _place_piece(rng, L, used, r, w, h):
 				break
 
-	_connect(rng, L, used)
-	_populate(rng, L, P, used, stage)
-	return L
+
+## One try: a random x in the room, or (half the time, tall pieces) flush against a solid end
+## wall of the room - the piece then adds no walkable segment, so it can't strand anything.
+static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary, r: Dictionary, w: int, h: int) -> bool:
+	var f: int = r.floor
+	var fx := rng.randi_range(int(r.x0) + 3, maxi(int(r.x1) - 3 - w, int(r.x0) + 3))
+	var skip := Vector2(-1, -1)   # the end wall's own margin, ignored for a flush piece
+	var flush := false
+	if h > LevelValidator.MAX_JUMP_TILES and rng.randf() < FLUSH_CHANCE:
+		var left := rng.randf() < 0.5
+		for side in [left, not left]:
+			var wx: int = int(r.x0) if side else int(r.x1)
+			if _solid_wall_at(L, f, wx):
+				fx = wx + 1 if side else wx - w
+				skip = Vector2((wx - 2) * TILE, (wx + 3) * TILE)
+				flush = true
+				break
+	var a := float((fx - 1) * TILE)
+	var b := float((fx + w + 1) * TILE)
+	for s in used[f]:
+		if s != skip and b > s.x and a < s.y:
+			return false
+	if flush and not _free_ex(used[f], float(fx * TILE), float((fx + w) * TILE), skip):
+		return false
+	if not LevelValidator.furniture_rail_ok(L, f, fx * TILE, (fx + w) * TILE, h):
+		return false
+	var before := _unreached(L)
+	L.furniture.append({floor = f, x = fx, w = w, h = h})
+	if h > LevelValidator.MAX_JUMP_TILES and _unreached(L) > before:
+		L.furniture.pop_back()
+		return false
+	used[f].append(Vector2(a, b))
+	return true
+
+
+static func _solid_wall_at(L: Dictionary, f: int, x: int) -> bool:
+	for wl in L.walls:
+		if int(wl.floor) == f and int(wl.x) == x:
+			return not bool(wl.doorway)
+	return false
+
+
+static func _free_ex(spans: Array, a: float, b: float, skip: Vector2) -> bool:
+	for s in spans:
+		if s != skip and b > s.x and a < s.y:
+			return false
+	return true
+
+
+## Walkable segments (pockets excluded) the start can't reach, +1000 if the exit can't be.
+static func _unreached(L: Dictionary) -> int:
+	var g := LevelValidator.floor_graph(L)
+	var reach := LevelValidator.reachable_from(g, LevelValidator.node_at(g.segments, 0, L.start.x))
+	var n := 0
+	for f in g.segments:
+		for i in (g.segments[f] as Array).size():
+			if not reach.has("%d:%d" % [f, i]) and not _is_pocket(L, f, g.segments[f][i]):
+				n += 1
+	if not reach.has(LevelValidator.node_at(g.segments, LevelValidator.floor_of(L.exit.y), L.exit.x)):
+		n += 1000
+	return n
+
+
+## Every floor gets a piece the boy can climb over (LevelValidator.mount_passable): a 3-tile
+## piece needs no flanking tricks - it does not split the floor - only open floor on both sides.
+static func _ensure_mountable(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary) -> void:
+	for f in int(L.floors):
+		if _has_mountable(L, f):
+			continue
+		var rooms := []
+		for r in L.rooms:
+			if int(r.floor) == f:
+				rooms.append(r)
+		for _try in 40:
+			var r: Dictionary = rooms[rng.randi_range(0, rooms.size() - 1)]
+			var n: int = used[f].size()
+			var fn: int = L.furniture.size()
+			if _place_piece(rng, L, used, r, rng.randi_range(2, 3), LevelValidator.MOUNT_TILES):
+				if _has_mountable(L, f):
+					break
+				L.furniture.resize(fn)
+				used[f].resize(n)
+
+
+static func _has_mountable(L: Dictionary, f: int) -> bool:
+	for fu in LevelValidator.mountable_pieces(L):
+		if int(fu.floor) == f:
+			return true
+	return false
+
 
 
 ## Px spans per floor that new things must keep clear of: walls (+ margin), start, exit,
@@ -679,7 +777,9 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	var furn_rects: Array = []
 	for fu in L.furniture:
 		var surf := float(LevelValidator.surface_y(fu.floor))
-		var low := int(fu.h) <= LevelValidator.MAX_JUMP_TILES
+		# a climb-over piece (3 tiles, LevelValidator.mount_passable) is not a graph blocker either, so
+		# walkers must pass it like low furniture; 4-tile pieces block both
+		var low := int(fu.h) <= LevelValidator.MAX_JUMP_TILES or LevelValidator.mount_passable(L, fu)
 		furn_rects.append(_box(low_furn if low else geo, Rect2(fu.x * TILE, surf - fu.h * TILE, fu.w * TILE, fu.h * TILE), C_FURN))
 
 	var stairs := []

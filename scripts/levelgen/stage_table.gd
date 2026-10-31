@@ -43,7 +43,7 @@ const STAGE_COUNT := 5
 const STAGES := {
 	1: {
 		floors = 3, width_tiles = [232, 248], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.15, furniture_chance = 0.45, tall_furniture_chance = 0.25,
+		solid_wall_chance = 0.15, furniture_chance = 0.75, tall_furniture_chance = 0.0,
 		enemies = 4, props = 18, gold_piles = 4, chests = 1,
 		enemy_weights = {"puppet_hand": 1.0},
 		vase_ratio = 0.6, gold_amount = [1, 3], gold_floor_min = 6,
@@ -51,7 +51,7 @@ const STAGES := {
 	},
 	2: {
 		floors = 3, width_tiles = [272, 288], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.2, furniture_chance = 0.5, tall_furniture_chance = 0.3,
+		solid_wall_chance = 0.2, furniture_chance = 0.65, tall_furniture_chance = 0.0,
 		enemies = 6, props = 22, gold_piles = 5, chests = 1,
 		enemy_weights = {"puppet_hand": 0.8, "t2": 0.2},
 		vase_ratio = 0.55, gold_amount = [2, 4],
@@ -59,7 +59,7 @@ const STAGES := {
 	},
 	3: {
 		floors = 4, width_tiles = [312, 328], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.25, furniture_chance = 0.55, tall_furniture_chance = 0.35,
+		solid_wall_chance = 0.25, furniture_chance = 0.7, tall_furniture_chance = 0.03,
 		enemies = 8, props = 28, gold_piles = 6, chests = 2,
 		enemy_weights = {"puppet_hand": 0.6, "t2": 0.3, "t3": 0.1},
 		vase_ratio = 0.5, gold_amount = [2, 5],
@@ -67,7 +67,7 @@ const STAGES := {
 	},
 	4: {
 		floors = 4, width_tiles = [352, 368], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.3, furniture_chance = 0.6, tall_furniture_chance = 0.4,
+		solid_wall_chance = 0.3, furniture_chance = 0.7, tall_furniture_chance = 0.06,
 		enemies = 10, props = 32, gold_piles = 7, chests = 2,
 		enemy_weights = {"puppet_hand": 0.4, "t2": 0.3, "t3": 0.2, "t4": 0.1},
 		vase_ratio = 0.5, gold_amount = [3, 6],
@@ -75,7 +75,7 @@ const STAGES := {
 	},
 	5: {
 		floors = 4, width_tiles = [392, 408], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.35, furniture_chance = 0.65, tall_furniture_chance = 0.45,
+		solid_wall_chance = 0.35, furniture_chance = 0.7, tall_furniture_chance = 0.09,
 		enemies = 12, props = 36, gold_piles = 8, chests = 3,
 		enemy_weights = {"puppet_hand": 0.3, "t2": 0.25, "t3": 0.2, "t4": 0.15, "t5": 0.1},
 		vase_ratio = 0.45, gold_amount = [4, 8],
