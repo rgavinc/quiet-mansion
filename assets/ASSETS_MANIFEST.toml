@@ -216,7 +216,34 @@ frames = 5
 fps = 12
 loop = false
 pivot = [16, 15]
-notes = "32x16 creak puff for climbing onto any furniture: 0 impact tick + dust burst on the top, 1-2 dust spreads sideways while three short squiggly creak lines rise, 3-4 dust thins (dithered) and the creak lines break up and fade at the top. Play once with the bottom-centre pivot on the furniture top where the boy lands; free after the last frame"
+notes = "32x16 creak puff for climbing onto any furniture: 0 impact tick + dust burst on the top, 1-2 dust spreads sideways while three short squiggly creak lines rise, 3-4 dust thins (dithered) and the creak lines break up and fade at the top. Every frame keeps a >= 1px transparent margin on all four sides (content inside cols 1-30 / rows 1-14; the dust is flat-bottomed on row 14, the row just above the surface). Play once with the bottom-centre pivot on the furniture top where the boy lands; free after the last frame"
+
+[[asset]]
+path = "assets/art/characters/puppet_rattle.png"
+slot = "puppet_rattle"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 12
+loop = true
+pivot = [32, 63]
+facing = "right"
+grip_x_px = 26
+grip_heights_px = [16, 22, 28]
+furniture_wobble_px = [-1, 1, -1, 1, -1, 1]
+notes = "64x64 walker (scuttle form, same design as puppet_chase) RATTLING tall furniture it cannot reach over: the telegraph before the boy is shaken off (PD rule: 3s unreachable -> rattle, 3s later the boy is shaken off). Loop 6f @12fps = 0.5s. Art faces RIGHT (the furniture is to its right; flip_h for a piece on the left, facing = "right", same as puppet_chase). It stands braced on thumb + pinky (feet planted on pivot row 63, x 16 and 36 in frame) and hooks three claws over the furniture's near vertical edge at 16 / 22 / 28 px above the floor (grip band 16-28 px, so it works for any 2-3 tile piece); the near edge sits grip_x_px = 26 px right of the pivot (frame x 58 at furniture dx 0) and the claws overlap 1-3 px into the piece, so a +-1 px wobble never opens a gap. The body heaves 2-4 px against the claws and the arms flex: 0 pull (body back, jaw gritted), 1 shove (red eye glint), 2 PULL HARD (dust ticks beside the grip, mouth opens), 3 shove (glint), 4 pull, 5 SHOVE HARD (roar with drool, dust ticks). The furniture it grips moves +-1 px per frame in step: furniture_wobble_px = [-1, 1, -1, 1, -1, 1] (art facing right; negate for a flipped walker) - the claws are drawn on the shaken edge, so apply that offset to the furniture piece (and anything standing on it, i.e. the boy) on frame change; if the wobble runs unsynced the claws still overlap the edge. No pixel is higher than 36 px above the pivot. Pair with vfx_rattle on the furniture top; play on a loop while the rattle lasts (each rattle = one loud noise)"
+
+[[asset]]
+path = "assets/art/props/vfx_rattle.png"
+slot = "vfx_rattle"
+status = "ai"
+frame_size = [48, 16]
+frames = 4
+fps = 12
+loop = true
+pivot = [24, 15]
+furniture_wobble_px = [-1, 1, -1, 1, -1, 1]
+notes = "48x16 looping shake overlay for rattled furniture (furniture is generated tile blocks, not sprites, so the wobble is NOT redrawn): bottom-centre pivot sits on the furniture top (row 14 is the last row above the surface, row 15 empty). Two brackets flank the piece at +-18-19 px from the pivot and alternate small / large (large beats add an echo arc) = the shake, dust motes pop off the top edge and fade, and a flat dust puff resting on the surface flips side each beat. 4f @12fps loop (0.33s), every pixel inside rows 5-14 / cols 2-46. Centre it on the top of any 1-3 tile wide piece (brackets clear a 2 tile = 32 px piece; on 3 tile = 48 px wide pieces they overlap the corners, which still reads). Play it while puppet_rattle plays, and free it when the rattle ends. CODE WOBBLE: shift the furniture piece (every tile of the block + the boy standing on it) by +-1 px horizontally each animation frame of puppet_rattle - furniture_wobble_px = [-1, 1, -1, 1, -1, 1] (6 steps per 0.5s loop, i.e. 12 shifts/s; any 12-15 Hz +-1 px square wave is fine, never more than 1 px so the boy stays on the top and collision is untouched); keep the collision body fixed and move only the visuals. Overlay and walker are independent: the overlay can be the only feedback on a piece that has no walker beside it"
 
 [[asset]]
 path = "assets/art/props/vase_idle.png"
