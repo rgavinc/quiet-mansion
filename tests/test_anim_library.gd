@@ -65,4 +65,11 @@ func test_eye_points() -> String:
 					return "%s frame %d: bad eye point %s" % [slot, i, str(pt)]
 	if not AnimLibrary.has_slot("vfx_eye_glint"):
 		return "vfx_eye_glint slot missing"
+	if not AnimLibrary.has_slot("vfx_eye_glint_calm"):
+		return "vfx_eye_glint_calm slot missing"
+	var hunt: Dictionary = AnimLibrary.meta("vfx_eye_glint")
+	var calm: Dictionary = AnimLibrary.meta("vfx_eye_glint_calm")
+	for k in ["frame_size", "frames", "pivot"]:
+		if calm.get(k) != hunt.get(k):
+			return "vfx_eye_glint_calm %s %s differs from vfx_eye_glint %s" % [k, str(calm.get(k)), str(hunt.get(k))]
 	return "" if n >= 6 else "expected eye_points on 6 puppet slots, found %d" % n
