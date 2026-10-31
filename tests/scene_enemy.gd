@@ -1405,6 +1405,11 @@ func _real_level_case(tree: SceneTree, c: Array, side: int) -> String:
 	walker.global_position = Vector2(cx + side * (half + 200.0), floor_y) - Vector2(0, float(walker.call("_foot")))
 	walker.velocity = Vector2.ZERO
 	for i in 12: await tree.physics_frame
+	# A spawn spot over a floor hole (stair cutout / level edge) is not a case: the walker would fall.
+	if not (walker.is_on_floor() and absf(Enemy.body_feet(walker).y - floor_y) < 3.0):
+		world.queue_free()
+		await tree.process_frame
+		return ""
 	walker.call("_enter_chase", 9999.0)
 	var got := -1
 	for f in 900:
