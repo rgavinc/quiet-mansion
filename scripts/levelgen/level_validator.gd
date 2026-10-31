@@ -39,6 +39,10 @@ const FLOOR_PX := 160.0
 const MIN_FLOORS := 3
 const MAX_FLOORS := 4
 const MAX_JUMP_TILES := 2
+const MOUNT_TILES := 3             # the climb-over piece: 48px, above one capped jump from the floor (apex 52.2px, margin 4.2px) - never climbed directly
+const MOUNT_STEP_MAX_TILES := 2   # steps touching it are 1-2 tiles, so every single climb is <= 2 tiles (32px)
+const MOUNT_MARGIN_PX := 16.0     # apex clearance over the tallest single climb required (actual margin: 52.2 - 32 = 20.2px)
+const MOUNT_RUN_TILES := 2        # open floor wanted beyond the steps on both sides
 const MIN_ROOM_TILES := 24
 const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
@@ -367,13 +371,82 @@ static func blockers(L: Dictionary, f: int) -> Array:
 		if int(w.floor) == f and not bool(w.doorway):
 			out.append(Vector2(w.x * TILE, w.x * TILE + TILE))
 	for fu in L.get("furniture", []):
-		if int(fu.floor) == f and int(fu.h) > MAX_JUMP_TILES:
+		if int(fu.floor) == f and int(fu.h) > MAX_JUMP_TILES and not mount_passable(L, fu):
 			out.append(Vector2(fu.x * TILE, (fu.x + fu.w) * TILE))
 	for s in L.get("stairs", []):   # slab cutout: a 144px hole you can't walk or jump across
 		if int(s.get("to_floor", -1)) == f and s.get("bottom") is Vector2 and s.get("top") is Vector2:
 			out.append(stair_hole(s))
 	out.sort_custom(func(a, b): return a.x < b.x)
 	return out
+
+
+## Spans on floor f that stop a walker for certain: walls, stair holes and furniture taller
+## than MOUNT_TILES (a MOUNT_TILES piece is climbed over, see mount_passable).
+static func hard_blockers(L: Dictionary, f: int) -> Array:
+	var out := []
+	for w in L.get("walls", []):
+		if int(w.floor) == f and not bool(w.doorway):
+			out.append(Vector2(w.x * TILE, w.x * TILE + TILE))
+	for fu in L.get("furniture", []):
+		if int(fu.floor) == f and int(fu.h) > MAX_JUMP_TILES and int(fu.h) != MOUNT_TILES:
+			out.append(Vector2(fu.x * TILE, (fu.x + fu.w) * TILE))
+	for s in L.get("stairs", []):
+		if int(s.get("to_floor", -1)) == f and s.get("bottom") is Vector2 and s.get("top") is Vector2:
+			out.append(stair_hole(s))
+	return out
+
+
+## The two steps of a climb-over piece: furniture of 1..MOUNT_STEP_MAX_TILES tiles touching it
+## on each side. {left, right} or {} if either is missing.
+static func step_pieces(L: Dictionary, fu: Dictionary) -> Dictionary:
+	var out := {}
+	var f := int(fu.floor)
+	for o in L.get("furniture", []):
+		if o == fu or int(o.floor) != f or int(o.h) < 1 or int(o.h) > MOUNT_STEP_MAX_TILES:
+			continue
+		if int(o.x) + int(o.w) == int(fu.x):
+			out["left"] = o
+		elif int(fu.x) + int(fu.w) == int(o.x):
+			out["right"] = o
+	return out if out.has("left") and out.has("right") else {}
+
+
+## Tallest single climb (px) on the way over a climb-over piece: floor -> step -> top, either side.
+static func max_single_climb_px(fu: Dictionary, steps: Dictionary) -> float:
+	var m := 0.0
+	for k in ["left", "right"]:
+		var sh := float(int(steps[k].h) * TILE)
+		m = maxf(m, maxf(sh, float(int(fu.h) * TILE) - sh))
+	return m
+
+
+## px of capped-jump apex left over the tallest single climb (20.2px with 2-tile steps).
+static func climb_margin_px(fu: Dictionary, steps: Dictionary) -> float:
+	return min_jump_apex() - max_single_climb_px(fu, steps)
+
+
+## A MOUNT_TILES-tall piece with a step on each side does not split its segment: the boy climbs
+## step -> top -> step (no single climb over 2 tiles = 32px, so item combos that slow him cannot
+## strand him) and walks off the far side. Needs MOUNT_RUN_TILES of open floor beyond both steps
+## and no other MOUNT_TILES piece closer than that.
+static func mount_passable(L: Dictionary, fu: Dictionary) -> bool:
+	if int(fu.h) != MOUNT_TILES:
+		return false
+	var st := step_pieces(L, fu)
+	if st.is_empty() or climb_margin_px(fu, st) < MOUNT_MARGIN_PX:
+		return false
+	var f := int(fu.floor)
+	var run := MOUNT_RUN_TILES * TILE
+	var a := float(int(st.left.x) * TILE)
+	var b := float((int(st.right.x) + int(st.right.w)) * TILE)
+	for bl in hard_blockers(L, f):
+		if bl.y > a - run and bl.x < b + run:
+			return false
+	for o in L.get("furniture", []):
+		if o != fu and o != st.left and o != st.right and int(o.floor) == f and int(o.h) == MOUNT_TILES:
+			if (o.x + o.w) * TILE > a - run and o.x * TILE < b + run:
+				return false
+	return true
 
 
 ## Walkable segments per floor: {f: [Vector2(a, b), ...]} between blockers.
@@ -541,6 +614,13 @@ static func max_jump_apex() -> float:
 	return j.x * j.x / (2.0 * j.y)
 
 
+## Apex at the stat caps that MINIMISE height (jump_velocity at stat_min, gravity at stat_max):
+## what a climb must survive. (Today both are pinned to BASE, so it equals max_jump_apex().)
+static func min_jump_apex() -> float:
+	var v := PlayerStats.stat_min(&"jump_velocity")
+	return v * v / (2.0 * PlayerStats.stat_max(&"gravity"))
+
+
 ## Fastest horizontal speed in the air (move_speed at its cap; carry penalties only slow him).
 static func max_run_speed() -> float:
 	return PlayerStats.stat_max(&"move_speed")
@@ -619,3 +699,38 @@ static func in_line_of_sight(L: Dictionary, a: Vector2, b: Vector2) -> bool:
 		if bl.y > lo and bl.x < hi:
 			return false
 	return true
+
+
+## True if a jump at the stat caps lifts the feet at least MOUNT_MARGIN_PX over a top h_px high
+## (kinematic bound; the real climb is simulated in tests/climb_sim.gd).
+static func can_mount(h_px: float) -> bool:
+	return min_jump_apex() - h_px >= MOUNT_MARGIN_PX
+
+
+## Furniture the boy can climb onto: climb-over pieces (mount_passable) standing in a
+## segment the start can reach.
+static func mountable_pieces(L: Dictionary) -> Array:
+	var out := []
+	var g := floor_graph(L)
+	var reach := reachable_from(g, node_at(g.segments, floor_of(L.start.y), float(L.start.x)))
+	for fu in L.get("furniture", []):
+		if not mount_passable(L, fu):
+			continue
+		var sp := furniture_span(fu)
+		var n := node_at(g.segments, int(fu.floor), (sp.x + sp.y) * 0.5)
+		if n != "" and reach.has(n):
+			out.append(fu)
+	return out
+
+
+## One error per floor with no reachable piece the boy can climb onto (generator guarantee;
+## not part of validate(): hand-built layouts and the fallback need not have furniture).
+static func mountable_floor_errors(L: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
+	var have := {}
+	for fu in mountable_pieces(L):
+		have[int(fu.floor)] = true
+	for f in int(L.get("floors", 0)):
+		if not have.has(f):
+			out.append("floor %d has no reachable %d-tile piece to climb onto" % [f, MOUNT_TILES])
+	return out

@@ -37,22 +37,44 @@ func floor_of(p: Vector2) -> int:
 	return clampi(LevelValidator.floor_of(p.y), 0, maxi(int(layout.get("floors", 1)) - 1, 0))
 
 
-## Graph node for a point; if it's inside a blocker, the nearest segment on that floor.
-func node_for(p: Vector2) -> String:
+## Graph node for a point; if it's inside a blocker, the nearest segment on that floor (a tie,
+## e.g. a perch in the middle of a piece, goes to the side of `toward` when given).
+func node_for(p: Vector2, toward: Vector2 = Vector2(INF, INF)) -> String:
+	var n := LevelValidator.node_at(graph.get("segments", {}), floor_of(p), p.x)
+	if n != "":
+		return n
+	var c := nodes_for(p)
+	if c.size() == 1 or toward.x == INF:
+		return "" if c.is_empty() else c[0]
+	return c[0] if toward.x < p.x else c[1]
+
+
+## Graph nodes a point can count as: its own segment, or - when it is inside a blocker (on top
+## of / inside a tall piece, over a hole) - the segment on EACH side of it, [left, right] (just
+## the one when it has only one neighbour). The walker can reach the point from either, so
+## `route` takes whichever is shorter (QA: a boy on a piece mapped to the LEFT segment only,
+## and a walker on the right detoured via stairs instead of coming in under it).
+func nodes_for(p: Vector2) -> Array:
 	var f := floor_of(p)
 	var n := LevelValidator.node_at(graph.get("segments", {}), f, p.x)
 	if n != "":
-		return n
+		return [n]
 	var list: Array = graph.get("segments", {}).get(f, [])
-	var best := -1
-	var best_d := INF
+	var left := -1
+	var right := -1
 	for i in list.size():
 		var s: Vector2 = list[i]
-		var d := minf(absf(p.x - s.x), absf(p.x - s.y))
-		if d < best_d:
-			best_d = d
-			best = i
-	return "" if best < 0 else "%d:%d" % [f, best]
+		if s.y <= p.x and (left < 0 or s.y > (list[left] as Vector2).y):
+			left = i
+		if s.x >= p.x and (right < 0 or s.x < (list[right] as Vector2).x):
+			right = i
+	var out := []
+	for i in [left, right]:
+		if i >= 0:
+			out.append("%d:%d" % [f, i])
+	if out.size() == 2 and left >= 0 and right >= 0 and left == right:
+		out.pop_back()
+	return out
 
 
 ## Shortest list of stair hops from a to b by walked distance (|dx| on floors + stair length),
@@ -60,10 +82,21 @@ func node_for(p: Vector2) -> String:
 ## [{stair, enter, exit}] (enter/exit are feet points). [] when already in the same segment;
 ## null when unreachable. Dijkstra over stair-exit states; ties keep the earlier stair index.
 func route(a: Vector2, b: Vector2) -> Variant:
-	var na := node_for(a)
-	var nb := node_for(b)
-	if na == "" or nb == "":
-		return null
+	var best: Variant = null
+	var best_d := INF
+	for na in nodes_for(a):
+		for nb in nodes_for(b):
+			var r: Variant = _route_nodes(a, b, na, nb)
+			if r == null:
+				continue
+			var d := _route_len(a, r as Array, b)
+			if d < best_d:
+				best_d = d
+				best = r
+	return best
+
+
+func _route_nodes(a: Vector2, b: Vector2, na: String, nb: String) -> Variant:
 	if na == nb:
 		return []
 	var adj: Dictionary = graph.get("adj", {})

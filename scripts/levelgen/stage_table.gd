@@ -43,7 +43,7 @@ const STAGE_COUNT := 5
 const STAGES := {
 	1: {
 		floors = 3, width_tiles = [232, 248], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.15, furniture_chance = 0.45, tall_furniture_chance = 0.25,
+		solid_wall_chance = 0.15, furniture_chance = 0.5, tall_furniture_chance = 0.0,
 		enemies = 4, props = 18, gold_piles = 4, chests = 1,
 		enemy_weights = {"puppet_hand": 1.0},
 		vase_ratio = 0.6, gold_amount = [1, 3], gold_floor_min = 6,
@@ -51,7 +51,7 @@ const STAGES := {
 	},
 	2: {
 		floors = 3, width_tiles = [272, 288], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.2, furniture_chance = 0.5, tall_furniture_chance = 0.3,
+		solid_wall_chance = 0.2, furniture_chance = 0.45, tall_furniture_chance = 0.0,
 		enemies = 6, props = 22, gold_piles = 5, chests = 1,
 		enemy_weights = {"puppet_hand": 0.8, "t2": 0.2},
 		vase_ratio = 0.55, gold_amount = [2, 4],
@@ -59,7 +59,7 @@ const STAGES := {
 	},
 	3: {
 		floors = 4, width_tiles = [312, 328], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.25, furniture_chance = 0.55, tall_furniture_chance = 0.35,
+		solid_wall_chance = 0.25, furniture_chance = 0.5, tall_furniture_chance = 0.12,
 		enemies = 8, props = 28, gold_piles = 6, chests = 2,
 		enemy_weights = {"puppet_hand": 0.6, "t2": 0.3, "t3": 0.1},
 		vase_ratio = 0.5, gold_amount = [2, 5],
@@ -67,7 +67,7 @@ const STAGES := {
 	},
 	4: {
 		floors = 4, width_tiles = [352, 368], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.3, furniture_chance = 0.6, tall_furniture_chance = 0.4,
+		solid_wall_chance = 0.3, furniture_chance = 0.5, tall_furniture_chance = 0.15,
 		enemies = 10, props = 32, gold_piles = 7, chests = 2,
 		enemy_weights = {"puppet_hand": 0.4, "t2": 0.3, "t3": 0.2, "t4": 0.1},
 		vase_ratio = 0.5, gold_amount = [3, 6],
@@ -75,13 +75,33 @@ const STAGES := {
 	},
 	5: {
 		floors = 4, width_tiles = [392, 408], stairs_per_link = [2, 3],
-		solid_wall_chance = 0.35, furniture_chance = 0.65, tall_furniture_chance = 0.45,
+		solid_wall_chance = 0.35, furniture_chance = 0.5, tall_furniture_chance = 0.18,
 		enemies = 12, props = 36, gold_piles = 8, chests = 3,
 		enemy_weights = {"puppet_hand": 0.3, "t2": 0.25, "t3": 0.2, "t4": 0.15, "t5": 0.1},
 		vase_ratio = 0.45, gold_amount = [4, 8],
 		safe_radius = 1280.0,
 	},
 }
+
+
+## Per-stage look (PRODUCT.md "Stage mood"): one table, applied by StageLook on build.
+##   ambient            CanvasModulate colour: the light every canvas item gets without the flashlight
+##   tint               modulate on the painted tiles and furniture sprites (warm -> cold)
+##   flashlight_energy  multiplier on the flashlight Beam energy (lighter ambient -> 1.0)
+## Stage 1 warm; every later stage darker (lower ambient luminance) and colder (blue share rises);
+## stage 5 is nearly black, so the flashlight is the main light.
+const LOOKS := {
+	1: {ambient = Color(0.50, 0.42, 0.34), tint = Color(1.00, 0.93, 0.80), flashlight_energy = 1.0},
+	2: {ambient = Color(0.38, 0.33, 0.31), tint = Color(1.00, 0.96, 0.90), flashlight_energy = 1.0},
+	3: {ambient = Color(0.27, 0.26, 0.30), tint = Color(0.95, 0.97, 1.00), flashlight_energy = 1.1},
+	4: {ambient = Color(0.15, 0.17, 0.24), tint = Color(0.85, 0.93, 1.00), flashlight_energy = 1.3},
+	5: {ambient = Color(0.045, 0.055, 0.10), tint = Color(0.80, 0.90, 1.00), flashlight_energy = 1.6},
+}
+
+
+## Look for `stage`, clamped to 1..5 (a copy).
+static func look(stage: int) -> Dictionary:
+	return (LOOKS[clampi(stage, 1, LOOKS.size())] as Dictionary).duplicate(true)
 
 
 ## Content budget for a stage: {enemies, props, gold, chests}.
