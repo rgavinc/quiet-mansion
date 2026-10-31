@@ -9,6 +9,7 @@ func _init() -> void:
 	anim_calm = "puppet_calm"
 	anim_startle = "puppet_startle"
 	anim_chase = "puppet_chase"
+	anim_reach = "puppet_reach_up"   # manifest hit_frame / reach_height_px (PR #40); else 0.6 s / 40 px
 
 
 func _ready() -> void:
