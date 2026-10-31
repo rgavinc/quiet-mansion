@@ -92,6 +92,10 @@ func run_all() -> Dictionary:
 		["shop_owned_overflow_tooltip_lists_hidden_items", test_shop_overflow_tooltip],
 		["shop_owned_overflow_click_opens_list", test_shop_overflow_click],
 		["shop_owned_overflow_outside_click_does_not_buy", test_shop_overflow_click_buy],
+		["shop_plusn_focusable_nav_and_accept_opens_list", test_shop_plusn_focus],
+		["shop_plusn_ui_cancel_closes_list_only_and_refocuses", test_shop_plusn_cancel],
+		["shop_plusn_open_list_ui_accept_never_buys", test_shop_plusn_accept_guard],
+		["shop_plusn_lost_release_never_sticks_a_button", test_shop_plusn_lost_release],
 		["owned_strip_pip_threshold_shop_3_hud_5", test_strip_pip_threshold],
 	]
 	var passed := 0
@@ -3432,4 +3436,316 @@ func test_strip_pip_threshold() -> String:
 			if err.is_empty() and num != (n > limit):
 				err = "%s with %d charges: n/max %s (want pips up to %d)" % ["shop" if strip == shop_s else "HUD", n, num, limit]
 	_cleanup([hud, shop_s, ps])
+	return err
+
+
+## --- +N keyboard / gamepad follow-ups (synthetic key / joypad / mouse events) ---
+
+## Pushes a key through the real input path (focus navigation, ui_* actions).
+func _key(code: Key, pressed := true, echo := false) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.physical_keycode = code
+	ev.pressed = pressed
+	ev.echo = echo
+	_root().push_input(ev, true)
+
+
+func _tap(code: Key) -> void:
+	_key(code, true)
+	_key(code, false)
+
+
+## A gamepad press as the game sees it: the ui_* action itself (headless has no pad mapping).
+func _act(action: StringName, pressed := true) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = pressed
+	_root().push_input(ev, true)
+
+
+## Records what reaches _unhandled_input: a consumed ui_* event never gets here.
+class _Probe extends Node:
+	var seen: Array[StringName] = []
+
+	func _init() -> void:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+
+	func _unhandled_input(ev: InputEvent) -> void:
+		for a in [&"ui_accept", &"ui_cancel"]:
+			if ev.is_action(a) and ev.is_pressed():
+				seen.append(a)
+
+
+func _focus_owner() -> Control:
+	return _root().gui_get_focus_owner()
+
+
+func _fpath() -> String:
+	var f := _focus_owner()
+	return str(f.get_path()) if f else "null"
+
+
+func _buy_of(shop: Node, i: int) -> Button:
+	return (shop.cards[i] as Control).find_child("Buy", true, false) as Button
+
+
+func _stuck(b: BaseButton) -> bool:
+	var m := b.get_draw_mode()
+	return m == BaseButton.DRAW_PRESSED or m == BaseButton.DRAW_HOVER_PRESSED
+
+
+func test_shop_plusn_focus() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var box := over.find_child("Tile", true, false) as PanelContainer
+		if over.focus_mode != Control.FOCUS_ALL:
+			err = "+N tile must be focusable (focus_mode ALL), is %d" % over.focus_mode
+		# focus look: HUD selected-slot style (skin colour, 3 px border), plain again on blur
+		if err.is_empty():
+			var plain := box.get_theme_stylebox(&"panel") as StyleBoxFlat
+			over.grab_focus()
+			var sb := box.get_theme_stylebox(&"panel") as StyleBoxFlat
+			if _focus_owner() != over:
+				err = "grab_focus should focus +N"
+			elif sb == plain or sb.border_color != shop.skin.slot_selected or sb.border_width_left != 3:
+				err = "focused +N should show the selected-slot style (border %s x%d)" % [sb.border_color, sb.border_width_left]
+			else:
+				shop.continue_button.grab_focus()
+				var back := box.get_theme_stylebox(&"panel") as StyleBoxFlat
+				if back.border_width_left != 2 or back.border_color == shop.skin.slot_selected:
+					err = "+N should drop the focus style when focus leaves"
+		# reachable from the existing buttons with ui_up/down/left/right, and back
+		if err.is_empty():
+			_buy_of(shop, shop.cards.size() - 1).grab_focus()
+			for i in 6:
+				if _focus_owner() == over:
+					break
+				_tap(KEY_DOWN)
+			if _focus_owner() != over:
+				err = "ui_down from the last Buy never reaches +N (focus %s)" % _fpath()
+		if err.is_empty():
+			_tap(KEY_UP)
+			var f := _focus_owner()
+			if not f is Button or f == shop.continue_button:
+				err = "ui_up from +N should reach a card's Buy, got %s" % _fpath()
+		if err.is_empty():
+			var reached := false
+			for key in [KEY_LEFT, KEY_DOWN, KEY_UP]:
+				shop.continue_button.grab_focus()
+				for i in 6:
+					if _focus_owner() == over:
+						reached = true
+						break
+					_tap(key)
+				if reached:
+					break
+			if not reached:
+				err = "+N unreachable from Continue with ui_left / ui_down / ui_up"
+		if err.is_empty():
+			over.grab_focus()
+			var seen_cont := false
+			for key in [KEY_RIGHT, KEY_DOWN, KEY_LEFT, KEY_UP]:
+				over.grab_focus()
+				_tap(key)
+				if _focus_owner() != over:
+					seen_cont = true
+					break
+			if not seen_cont:
+				err = "no focus move out of +N at all"
+		# ui_accept opens the 'Also owned' list (keyboard), again closes; a pad action event does the same
+		if err.is_empty():
+			over.grab_focus()
+			_tap(KEY_ENTER)
+			_settle(shop)
+			if not strip.is_overflow_open():
+				err = "ui_accept on +N should open the list"
+			elif _focus_owner() != over:
+				err = "focus should stay on +N while the list is open"
+			elif (strip.popover.find_child("Items", true, false) as Control).get_child_count() != strip.overflow:
+				err = "keyboard-opened list should list every hidden item"
+		if err.is_empty():
+			_tap(KEY_ENTER)
+			if strip.is_overflow_open():
+				err = "ui_accept on +N again should close the list"
+		if err.is_empty():
+			_act(&"ui_accept")
+			_act(&"ui_accept", false)
+			if not strip.is_overflow_open():
+				err = "pad ui_accept on +N should open the list"
+		if err.is_empty():
+			err = _qa_panel_check(shop)
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_plusn_cancel() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	var probe := _Probe.new()
+	_root().add_child(probe)
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		_click(over.get_global_rect().get_center())   # mouse-open
+		shop.continue_button.grab_focus()
+		_settle(shop)
+		if not strip.is_overflow_open():
+			err = "setup: list should be open"
+		if err.is_empty():
+			_tap(KEY_ESCAPE)
+			if strip.is_overflow_open():
+				err = "ui_cancel should close the list"
+			elif _focus_owner() != over:
+				err = "ui_cancel should return focus to +N, got %s" % _fpath()
+			elif not probe.seen.is_empty():
+				err = "the closing ui_cancel must be consumed (it reached unhandled input: %s)" % [probe.seen]
+			elif not shop.is_open():
+				err = "ui_cancel must not close the shop"
+		if err.is_empty():   # list closed: the next ui_cancel is not ours, it passes on
+			_tap(KEY_ESCAPE)
+			if probe.seen.size() != 1:
+				err = "with the list closed ui_cancel must pass through (probe saw %d)" % probe.seen.size()
+		if err.is_empty():   # pad cancel, list opened by keyboard
+			over.grab_focus()
+			_tap(KEY_ENTER)
+			probe.seen.clear()
+			_act(&"ui_cancel")
+			_act(&"ui_cancel", false)
+			if strip.is_overflow_open() or _focus_owner() != over or not probe.seen.is_empty():
+				err = "pad ui_cancel should close the list, consumed, focus on +N (open %s, seen %d)" % [strip.is_overflow_open(), probe.seen.size()]
+	probe.free()
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_plusn_accept_guard() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	var probe := _Probe.new()
+	_root().add_child(probe)
+	if err.is_empty():
+		var ps := _root().get_node(^"PlayerStats")
+		ps.add_gold(2000)
+		_settle(shop)
+		var gold0: int = ps.gold
+		var owned0: int = ps.owned_items.size()
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var stage := _tree().current_scene
+		# list open, focus on a Buy: ui_accept (key and pad) must not buy, and is consumed
+		for pad in [false, true]:
+			if not err.is_empty():
+				break
+			over.grab_focus()
+			_tap(KEY_ENTER)
+			_buy_of(shop, 0).grab_focus()
+			probe.seen.clear()
+			if not strip.is_overflow_open():
+				err = "setup: list should be open"
+				break
+			if pad:
+				_act(&"ui_accept")
+				_act(&"ui_accept", false)
+			else:
+				_tap(KEY_ENTER)
+			_settle(shop)
+			if int(ps.gold) != gold0 or ps.owned_items.size() != owned0 or shop.sold[0]:
+				err = "ui_accept%s with the list open bought (gold %d -> %d)" % [" (pad)" if pad else "", gold0, ps.gold]
+			elif not probe.seen.is_empty():
+				err = "ui_accept with the list open must be consumed"
+			elif strip.is_overflow_open():
+				err = "that ui_accept should only close the list (like an outside click)"
+			elif _stuck(_buy_of(shop, 0)):
+				err = "Buy left pressed after the guarded ui_accept"
+		# Continue as the focus owner
+		if err.is_empty():
+			over.grab_focus()
+			_tap(KEY_ENTER)
+			shop.continue_button.grab_focus()
+			_tap(KEY_ENTER)
+			if not shop.is_open() or _tree().current_scene != stage:
+				err = "ui_accept with the list open pressed Continue"
+		# next ui_accept acts normally
+		if err.is_empty():
+			_buy_of(shop, 0).grab_focus()
+			_tap(KEY_ENTER)
+			_settle(shop)
+			if not shop.sold[0] or int(ps.gold) >= gold0:
+				err = "ui_accept with the list closed should buy (sold %s)" % shop.sold[0]
+	probe.free()
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_plusn_lost_release() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var ps := _root().get_node(^"PlayerStats")
+		ps.add_gold(2000)
+		_settle(shop)
+		var gold0: int = ps.gold
+		var strip: Control = shop.owned_strip
+		var otile: Vector2 = strip.overflow_tile.get_global_rect().get_center()
+		# A: closing press on Buy, release never arrives, pointer moves on (button no longer held)
+		var buy := _buy_of(shop, 0)
+		var at := buy.get_global_rect().get_center()
+		_click(otile)
+		_settle(shop)
+		_mouse(at)
+		_mouse(at, MOUSE_BUTTON_LEFT, true)   # closes the list, consumed
+		if strip.is_overflow_open() or shop.sold[0]:
+			err = "closing press should close the list without buying"
+		if err.is_empty():
+			_mouse(at + Vector2(1, 0))
+			_click(at)
+			_settle(shop)
+			if not shop.sold[0] or int(ps.gold) >= gold0:
+				err = "next click after a lost release must buy (sold %s)" % shop.sold[0]
+			elif _stuck(buy):
+				err = "Buy stuck pressed after the next click"
+		# B: closing press, release lost, no motion at all: the next press clears the stale eat
+		if err.is_empty():
+			var buy1 := _buy_of(shop, 1)
+			var at1 := buy1.get_global_rect().get_center()
+			_click(otile)
+			_settle(shop)
+			_mouse(at1)
+			_mouse(at1, MOUSE_BUTTON_LEFT, true)
+			if strip.is_overflow_open() or shop.sold[1]:
+				err = "closing press should only close the list"
+			else:
+				_click(at1)
+				_settle(shop)
+				if not shop.sold[1]:
+					err = "click after a lost release should buy; its release was eaten (draw mode %d)" % buy1.get_draw_mode()
+				elif _stuck(buy1):
+					err = "Buy stuck pressed"
+		# C: the release arrives elsewhere: no buy, nothing stuck, next click works
+		if err.is_empty():
+			var buy2 := _buy_of(shop, 2)
+			var at2 := buy2.get_global_rect().get_center()
+			_click(otile)
+			_settle(shop)
+			_mouse(at2)
+			_mouse(at2, MOUSE_BUTTON_LEFT, true)
+			_mouse(Vector2(10, 10), MOUSE_BUTTON_LEFT, false)
+			if shop.sold[2] or _stuck(buy2):
+				err = "release elsewhere must not buy or leave Buy pressed"
+			else:
+				_mouse(at2)
+				_click(at2)
+				_settle(shop)
+				if not shop.sold[2]:
+					err = "next click after a release elsewhere must buy"
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
 	return err
