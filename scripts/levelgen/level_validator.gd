@@ -163,6 +163,8 @@ static func validate(layout: Variant) -> PackedStringArray:
 		for o in occupants(L):
 			if o.what != "stair" and int(o.floor) == tf and o.b > hole.x and o.a < hole.y:
 				errs.append("%s at %s over the stair %d->%d slab cutout" % [o.what, o.pos, ff, tf])
+	# no standable spot (floor or furniture top) lets a capped running jump clear a rail (QA #13 b2/b3)
+	errs.append_array(rail_jump_errors(L))
 	if not errs.is_empty():
 		errs.append_array(table_errs)
 		return errs
@@ -509,6 +511,90 @@ static func stair_rail_near(s: Dictionary) -> Vector2:
 ## Every rail collider x span over a stair opening (far-edge wall, near-edge guard).
 static func stair_rail_walls(s: Dictionary) -> Array[Vector2]:
 	return [stair_rail(s), stair_rail_near(s)]
+
+
+## Rail clearance (PRODUCT.md "Stair opening", QA #13 b2/b3). Standable spots are the floor and
+## furniture tops (props have no collision). From a surface `h_px` above the floor, a jump at the
+## stat caps (jump_velocity max, gravity min, move_speed max, no carry penalty) keeps the boy's
+## feet above RAIL_H_PX - RAIL_CLEAR_MARGIN for a horizontal run of rail_jump_reach(h_px) px.
+## Any such surface must keep rail_keepout(h_px) px from every rail wall on its floor: the reach,
+## plus BODY_R overhang at take-off (he stays grounded until his centre is ~r past the edge) and
+## BODY_R for his leading edge, plus JUMP_SLACK_PX for 60Hz integration.
+const RAIL_CLEAR_MARGIN := 16.0
+const BODY_R := 14.0
+const JUMP_SLACK_PX := 8.0
+
+
+## (jump_velocity, gravity) at the stat caps that maximise height.
+static func capped_jump() -> Vector2:
+	var jv := float(PlayerStats.BASE[&"jump_velocity"])
+	var g := float(PlayerStats.BASE[&"gravity"])
+	var bj: Array = PlayerStats.STAT_BOUNDS.get(&"jump_velocity", [1.0, 1.0])
+	var bg: Array = PlayerStats.STAT_BOUNDS.get(&"gravity", [1.0, 1.0])
+	return Vector2(jv * float(bj[1]), g * float(bg[0]))
+
+
+static func max_jump_apex() -> float:
+	var j := capped_jump()
+	return j.x * j.x / (2.0 * j.y)
+
+
+## Fastest horizontal speed in the air (move_speed at its cap; carry penalties only slow him).
+static func max_run_speed() -> float:
+	var b: Array = PlayerStats.STAT_BOUNDS.get(&"move_speed", [1.0, 1.0])
+	return float(PlayerStats.BASE[&"move_speed"]) * float(b[1])
+
+
+static func rail_jump_reach(h_px: float) -> float:
+	var j := capped_jump()
+	var need := RAIL_H_PX - RAIL_CLEAR_MARGIN - h_px   # height to gain above the take-off surface
+	if need <= 0.0:
+		return INF
+	var disc := j.x * j.x - 2.0 * j.y * need
+	if disc < 0.0:
+		return 0.0
+	return max_run_speed() * (j.x + sqrt(disc)) / j.y   # time the feet are above `need`, at full speed
+
+
+static func rail_keepout(h_px: float) -> float:
+	var r := rail_jump_reach(h_px)
+	return 0.0 if r <= 0.0 else r + 2.0 * BODY_R + JUMP_SLACK_PX
+
+
+## Furniture block {floor, x, w, h} as [a, b] px and its top height px.
+static func furniture_span(fu: Dictionary) -> Vector2:
+	return Vector2(float(fu.x) * TILE, float(int(fu.x) + int(fu.w)) * TILE)
+
+
+## px between two spans (negative when they overlap).
+static func span_gap(a: Vector2, b: Vector2) -> float:
+	return maxf(b.x - a.y, a.x - b.y)
+
+
+## True if furniture [a, b] px of height h tiles on floor f keeps clear of every rail there.
+static func furniture_rail_ok(L: Dictionary, f: int, a: float, b: float, h: int) -> bool:
+	var ko := rail_keepout(h * TILE)
+	if ko <= 0.0:
+		return true
+	for s in L.stairs:
+		if int(s.to_floor) != f:
+			continue
+		for rw in stair_rail_walls(s):
+			if span_gap(Vector2(a, b), rw) <= ko:
+				return false
+	return true
+
+
+static func rail_jump_errors(L: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
+	if rail_keepout(0.0) > 0.0:
+		out.append("a capped running jump from the floor clears the %dpx rail (apex %.1fpx)" % [int(RAIL_H_PX), max_jump_apex()])
+	for fu in L.furniture:
+		var sp := furniture_span(fu)
+		if not furniture_rail_ok(L, int(fu.floor), sp.x, sp.y, int(fu.h)):
+			out.append("furniture h%d at x=%d on floor %d is within %dpx of a stair rail: a capped running jump from it clears the rail" % [
+					int(fu.h), int(sp.x), int(fu.floor), int(rail_keepout(int(fu.h) * TILE))])
+	return out
 
 
 ## The two landings [{floor, a, b}]: bottom one beyond `bottom` on from_floor, top one beyond `top` on to_floor.

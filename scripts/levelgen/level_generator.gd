@@ -141,7 +141,7 @@ static func generate_layout(rng: RandomNumberGenerator, stage: int, P: Dictionar
 			var fx := rng.randi_range(int(r.x0) + 3, maxi(int(r.x1) - 3 - w, int(r.x0) + 3))
 			var a := float((fx - 1) * TILE)
 			var b := float((fx + w + 1) * TILE)
-			if _free(used[r.floor], a, b):
+			if _free(used[r.floor], a, b) and LevelValidator.furniture_rail_ok(L, r.floor, fx * TILE, (fx + w) * TILE, h):
 				L.furniture.append({floor = r.floor, x = fx, w = w, h = h})
 				used[r.floor].append(Vector2(a, b))
 				break
@@ -335,9 +335,17 @@ static func _try_stair(L: Dictionary, used: Dictionary, f: int, x: int, dir: int
 	var b := float((x + span) * TILE)
 	if not _stair_free(L, used, f, a, b) or (guard and _cutout_strands(L, f + 1, tx * TILE, dir)):
 		return false
-	L.stairs.append({from_floor = f, to_floor = f + 1,
+	var st := {from_floor = f, to_floor = f + 1,
 			bottom = Vector2(bx * TILE, LevelValidator.surface_y(f)),
-			top = Vector2(tx * TILE, LevelValidator.surface_y(f + 1))})
+			top = Vector2(tx * TILE, LevelValidator.surface_y(f + 1))}
+	# rails keep clear of running jumps off furniture already on the upper floor (QA #13 b2)
+	for fu in L.furniture:
+		if int(fu.floor) == f + 1:
+			var ko := LevelValidator.rail_keepout(int(fu.h) * TILE)
+			for rw in LevelValidator.stair_rail_walls(st):
+				if ko > 0.0 and LevelValidator.span_gap(LevelValidator.furniture_span(fu), rw) <= ko:
+					return false
+	L.stairs.append(st)
 	used[f].append(Vector2(a, b))
 	used[f + 1].append(Vector2(a, b))
 	return true

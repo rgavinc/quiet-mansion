@@ -55,8 +55,10 @@ func node_for(p: Vector2) -> String:
 	return "" if best < 0 else "%d:%d" % [f, best]
 
 
-## Shortest list of stair hops from a to b: [{stair, enter, exit}] (enter/exit are feet points).
-## [] when already in the same segment; null when unreachable.
+## Shortest list of stair hops from a to b by walked distance (|dx| on floors + stair length),
+## not by stair count (QA #13 b4: a 1-stair route twice the length beat a 2-stair short one):
+## [{stair, enter, exit}] (enter/exit are feet points). [] when already in the same segment;
+## null when unreachable. Dijkstra over stair-exit states; ties keep the earlier stair index.
 func route(a: Vector2, b: Vector2) -> Variant:
 	var na := node_for(a)
 	var nb := node_for(b)
@@ -64,27 +66,59 @@ func route(a: Vector2, b: Vector2) -> Variant:
 		return null
 	if na == nb:
 		return []
-	var prev := {na: null}
-	var q := [na]
-	while not q.is_empty():
-		var n: String = q.pop_front()
-		if n == nb:
+	var adj: Dictionary = graph.get("adj", {})
+	# state: {node, pos, cost, prev (state index or -1), stair, up}; -1 = the start
+	var states := [{node = na, pos = a, cost = 0.0, prev = -1, stair = -1, up = true}]
+	var best_at := {}   # "stair:up" -> state index (each stair exit is reached at most once)
+	var done := {}
+	var goal := -1
+	var goal_cost := INF
+	while true:
+		var cur := -1
+		for i in states.size():
+			if not done.has(i) and (cur < 0 or float(states[i].cost) < float(states[cur].cost)):
+				cur = i
+		if cur < 0 or float(states[cur].cost) >= goal_cost:
 			break
-		for e in graph.get("adj", {}).get(n, []):
-			if not prev.has(e.to):
-				prev[e.to] = {from = n, stair = e.stair}
-				q.append(e.to)
-	if not prev.has(nb):
+		done[cur] = true
+		var st: Dictionary = states[cur]
+		if st.node == nb:
+			var c := float(st.cost) + absf((st.pos as Vector2).x - b.x)
+			if c < goal_cost:
+				goal_cost = c
+				goal = cur
+		var f := int(str(st.node).split(":")[0])
+		for e in adj.get(st.node, []):
+			var s: Dictionary = stairs[e.stair]
+			var up := int(s.from_floor) == f
+			var enter: Vector2 = s.bottom if up else s.top
+			var exit: Vector2 = s.top if up else s.bottom
+			var c2 := float(st.cost) + absf((st.pos as Vector2).x - enter.x) + enter.distance_to(exit)
+			var key := "%d:%s" % [e.stair, up]
+			if best_at.has(key):
+				var j: int = best_at[key]
+				if done.has(j) or c2 >= float(states[j].cost):
+					continue
+				states[j] = {node = e.to, pos = exit, cost = c2, prev = cur, stair = int(e.stair), up = up}
+			else:
+				best_at[key] = states.size()
+				states.append({node = e.to, pos = exit, cost = c2, prev = cur, stair = int(e.stair), up = up})
+	if goal < 0:
 		return null
 	var hops := []
-	var cur := nb
-	while prev[cur] != null:
-		var link: Dictionary = prev[cur]
-		var s: Dictionary = stairs[link.stair]
-		var going_up := int(s.from_floor) == int(str(link.from).split(":")[0])
-		hops.push_front({stair = s, enter = s.bottom if going_up else s.top, exit = s.top if going_up else s.bottom})
-		cur = link.from
+	var k := goal
+	while int(states[k].prev) >= 0:
+		var s: Dictionary = stairs[states[k].stair]
+		var up: bool = states[k].up
+		hops.push_front({stair = s, enter = s.bottom if up else s.top, exit = s.top if up else s.bottom})
+		k = int(states[k].prev)
 	return hops
+
+
+## Walked length of the best route from a to b (INF when unreachable).
+func route_distance(a: Vector2, b: Vector2) -> float:
+	var r: Variant = route(a, b)
+	return INF if r == null else _route_len(a, r as Array, b)
 
 
 ## Index of the stair whose line p is on, strictly between its two landings; -1 if none.
