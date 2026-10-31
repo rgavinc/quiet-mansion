@@ -206,7 +206,7 @@ func _play(slot: String) -> void:
 	if _spr.sprite_frames == null:
 		var slots: Array = []
 		for s in [anim_calm, anim_startle, chase_slot(), anim_reach]:
-			if not s.is_empty():
+			if not s.is_empty() and (s != anim_reach or AnimLibrary.has_slot(s)):   # reach art may not be merged yet
 				slots.append(s)
 		_spr.sprite_frames = AnimLibrary.frames_for(slots)
 		# Startle plays once and holds its last frame (frame count from the manifest via
