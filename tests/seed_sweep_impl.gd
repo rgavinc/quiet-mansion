@@ -75,6 +75,8 @@ func _run() -> void:
 		var fallbacks := 0
 		var short := {enemies = 0, props = 0, gold = 0, chests = 0}
 		var nondet := 0
+		var worst_gold := 1 << 30   # lowest worst-roll gold (floor piles; vases/chests add 0 at worst) over the seeds
+		var cheapest := StageTable.cheapest_shop_price(stage)
 		var boots := 0
 		var boots_ok := 0
 		var bad: Array[String] = []
@@ -92,6 +94,10 @@ func _run() -> void:
 				if int(got[k]) < int(want[k]):
 					short[k] += 1
 					errs.append("short %s %d/%d" % [k, got[k], want[k]])
+			var wg := StageTable.worst_roll_gold(L)
+			worst_gold = mini(worst_gold, wg)
+			if wg < cheapest:
+				errs.append("worst-roll gold %d < cheapest shop item %d" % [wg, cheapest])
 			if L.get("fallback", false):
 				errs.append("retries exhausted, known-good layout used (%s)" % [L.get("reject_reasons", []).slice(-1)])
 			if var_to_str(LevelGenerator.generate(s, stage)) != var_to_str(L):
@@ -118,6 +124,8 @@ func _run() -> void:
 				stage, valid, o.seeds, rerolls, float(rerolls) / maxf(o.seeds, 1), max_rr, fallbacks,
 				short.enemies, short.props, short.gold, short.chests, nondet,
 				boots_ok, boots, Time.get_ticks_msec() - t0])
+		print("stage %d gold: worst-roll total min %d over %d seeds vs cheapest shop item %d (%s)" % [
+				stage, worst_gold, o.seeds, cheapest, "OK" if worst_gold >= cheapest else "UNDER"])
 		for b in bad.slice(0, 20):
 			printerr("FAIL: ", b)
 		if not bad.is_empty():

@@ -251,6 +251,10 @@ static func validate(layout: Variant) -> PackedStringArray:
 				errs.append("budget: %d/%d %s" % [(L[k] as Array).size(), int(bud.get(k, 0)), k])
 	else:
 		errs.append("budget is not a Dictionary")
+	# PD gold floor: floor piles alone reach the stage's guaranteed minimum
+	var gsum := StageTable.worst_roll_gold(L)
+	if gsum < int(L.get("gold_floor", 0)):
+		errs.append("gold floor: floor piles total %d < the stage minimum %d" % [gsum, int(L.get("gold_floor", 0))])
 	errs.append_array(table_errs)
 	return errs
 
@@ -266,6 +270,8 @@ static func _table_errors(L: Dictionary, F: int, W: int, stage: int, table: Dict
 			te.append("stage %d needs %d floors, has %d" % [stage, table.floors, F])
 		if W < int(wt[0]) or W > int(wt[wt.size() - 1]):
 			te.append("stage %d width %d tiles outside the table's %d-%d" % [stage, W, wt[0], wt[wt.size() - 1]])
+		if int(L.get("gold_floor", 0)) < StageTable.gold_floor_min(table):
+			te.append("gold floor %d below the stage table's %d" % [int(L.get("gold_floor", 0)), StageTable.gold_floor_min(table)])
 		var tb := StageTable.budget(stage)
 		if L.budget is Dictionary:
 			for k in tb:
@@ -525,13 +531,9 @@ const BODY_R := 14.0
 const JUMP_SLACK_PX := 8.0
 
 
-## (jump_velocity, gravity) at the stat caps that maximise height.
+## (jump_velocity, gravity) at the stat caps that maximise height (PlayerStats.stat_max / stat_min).
 static func capped_jump() -> Vector2:
-	var jv := float(PlayerStats.BASE[&"jump_velocity"])
-	var g := float(PlayerStats.BASE[&"gravity"])
-	var bj: Array = PlayerStats.STAT_BOUNDS.get(&"jump_velocity", [1.0, 1.0])
-	var bg: Array = PlayerStats.STAT_BOUNDS.get(&"gravity", [1.0, 1.0])
-	return Vector2(jv * float(bj[1]), g * float(bg[0]))
+	return Vector2(PlayerStats.stat_max(&"jump_velocity"), PlayerStats.stat_min(&"gravity"))
 
 
 static func max_jump_apex() -> float:
@@ -541,8 +543,7 @@ static func max_jump_apex() -> float:
 
 ## Fastest horizontal speed in the air (move_speed at its cap; carry penalties only slow him).
 static func max_run_speed() -> float:
-	var b: Array = PlayerStats.STAT_BOUNDS.get(&"move_speed", [1.0, 1.0])
-	return float(PlayerStats.BASE[&"move_speed"]) * float(b[1])
+	return PlayerStats.stat_max(&"move_speed")
 
 
 static func rail_jump_reach(h_px: float) -> float:

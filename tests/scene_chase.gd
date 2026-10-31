@@ -149,6 +149,11 @@ static func run_at(tree: SceneTree, L: Dictionary, boy_at: Vector2, en_feet: Vec
 	var nav: LevelNav = b.nav
 	var frames := 0
 	var ok := false
+	var opt := route_len(nav, en_feet, boy_at)   # LevelNav's route is the shortest by distance
+	var walked := 0.0
+	var prev_feet: Vector2 = walker.global_position + Vector2(0, float(walker.call("_foot")))
+	var unsupported := 0
+	var sinks := 0
 	var timeout_s := route_len(nav, en_feet, boy_at) / maxf(float(walker.get("chase_speed")), 1.0) * 1.5 + SLACK_S
 	var max_frames := int(timeout_s * 60.0)
 	while frames < max_frames:
@@ -161,6 +166,14 @@ static func run_at(tree: SceneTree, L: Dictionary, boy_at: Vector2, en_feet: Vec
 		if not is_instance_valid(walker):
 			break
 		var feet: Vector2 = walker.global_position + Vector2(0, float(walker.call("_foot")))
+		walked += feet.distance_to(prev_feet)
+		prev_feet = feet
+		if _supported(L, feet):
+			unsupported = 0
+		else:
+			unsupported += 1
+			if unsupported == 4:
+				sinks += 1   # 4 frames off every floor surface and stair line: sunk into a slab/stair
 		if nav.floor_of(feet) == nav.floor_of(boy_at) and absf(feet.x - boy_at.x) < REACH_PX and absf(feet.y - boy_at.y) < 8.0:
 			ok = true
 			break
@@ -173,7 +186,23 @@ static func run_at(tree: SceneTree, L: Dictionary, boy_at: Vector2, en_feet: Vec
 	world.queue_free()
 	await tree.process_frame
 	PlayerStats.reset(); GameState.reset()
-	return {ok = ok, why = why, frames = frames, skip = false}
+	return {ok = ok, why = why, frames = frames, skip = false, walked = walked, optimal = opt, sinks = sinks}
+
+
+const SUPPORT_TOL := 6.0
+
+## True when feet are on a floor surface or a stair line (within SUPPORT_TOL px).
+static func _supported(L: Dictionary, feet: Vector2) -> bool:
+	var fl := roundi(-feet.y / LevelValidator.FLOOR_PX)
+	if absf(feet.y - LevelValidator.surface_y(fl)) <= SUPPORT_TOL:
+		return true
+	for s in L.stairs:
+		var b: Vector2 = s.bottom
+		var t: Vector2 = s.top
+		var u := (feet.x - b.x) / (t.x - b.x)
+		if u >= -0.05 and u <= 1.05 and absf(feet.y - (b.y + (t.y - b.y) * u)) <= SUPPORT_TOL:
+			return true
+	return false
 
 
 ## Walking + climbing distance of LevelNav's route from a to b (px).

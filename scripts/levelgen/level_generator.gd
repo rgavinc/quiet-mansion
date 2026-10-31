@@ -75,7 +75,7 @@ static func generate(seed_value: int, stage: int, opts: Dictionary = {}) -> Dict
 static func _empty_layout(stage: int, floors: int, width_tiles: int, P: Dictionary) -> Dictionary:
 	return {stage = stage, floors = floors, width_tiles = width_tiles,
 			safe_radius = maxf(float(P.get("safe_radius", 0.0)), LevelValidator.MIN_ENEMY_DIST),
-			budget = StageTable.budget_of(P),
+			budget = StageTable.budget_of(P), gold_floor = StageTable.gold_floor_min(P),
 			rooms = [], walls = [], furniture = [], stairs = [], props = [], gold = [],
 			chests = [], enemies = [], start = Vector2.ZERO, exit = Vector2.ZERO}
 
@@ -226,6 +226,21 @@ static func _populate(rng: RandomNumberGenerator, L: Dictionary, P: Dictionary, 
 					L.chests.append({pos = Vector2(x, y)})
 				used[f].append(Vector2(x - half, x + half))
 				break
+
+	# PD gold floor: raise the smallest piles (no RNG) until the floor-pile total reaches the table's minimum
+	var gsum := 0
+	for gp in L.gold:
+		gsum += int(gp.amount)
+	var gmax := int(ga[ga.size() - 1])
+	while gsum < int(L.gold_floor):
+		var lo_i := -1
+		for gi in L.gold.size():
+			if int(L.gold[gi].amount) < gmax and (lo_i < 0 or int(L.gold[gi].amount) < int(L.gold[lo_i].amount)):
+				lo_i = gi
+		if lo_i < 0:
+			break
+		L.gold[lo_i].amount = int(L.gold[lo_i].amount) + 1
+		gsum += 1
 
 	# enemies: a screen away from the start on any floor, off the start view, out of its sight
 	var weights := {}

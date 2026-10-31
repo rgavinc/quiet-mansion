@@ -56,6 +56,11 @@ func run_all() -> Dictionary:
 		["nav_never_gives_up_across_floors", test_nav_cross_floor],
 		["rejects_unreachable_walker", test_reject_unreachable_walker],
 		["stair_upper_entry_only_from_top_landing", test_stair_upper_entry],
+		["stair_trigger_never_inside_the_floor_above", test_stair_band_trigger],
+		["nav_routes_by_distance_not_stair_count", test_nav_distance_route],
+		["rails_cannot_be_cleared_by_capped_running_jumps", test_rail_jump_rule],
+		["rejects_furniture_a_capped_jump_clears_a_rail_from", test_reject_furniture_rail],
+		["gold_floor_and_worst_roll_vs_cheapest_shop_item", test_gold_floor],
 		["build_survives_bad_input", test_build_bad_input],
 		["build_creates_level_nodes", test_build_nodes],
 	]
@@ -783,16 +788,9 @@ func test_enemy_defs() -> String:
 ## wall at its far edge (px 144 rising right / 192 rising left from the stair's left edge, on the
 ## slab), RAIL_H_PX (96px) tall, clearing the jump apex at the stat cap by >= 16px; the validator checks its placement; built rails match on every stage; the rail is painted from the atlas (stair_gallery_rail or the
 ## stair_rail_cap fallback).
-## Highest jump any item combo can produce: jump_velocity at its STAT_BOUNDS max (base if
-## uncapped) against gravity at its min (base if uncapped).
+## Highest jump any item combo can produce, via PlayerStats.stat_max(jump_velocity) / stat_min(gravity).
 static func max_jump_apex() -> float:
-	var jv := float(PlayerStats.BASE[&"jump_velocity"])
-	var g := float(PlayerStats.BASE[&"gravity"])
-	var bj: Array = PlayerStats.STAT_BOUNDS.get(&"jump_velocity", [1.0, 1.0])
-	var bg: Array = PlayerStats.STAT_BOUNDS.get(&"gravity", [1.0, 1.0])
-	jv *= float(bj[1])
-	g *= float(bg[0])
-	return jv * jv / (2.0 * g)
+	return LevelValidator.max_jump_apex()
 
 
 func test_gallery_rails() -> String:
@@ -862,3 +860,97 @@ func test_fallback_table() -> String:
 			if LevelGenerator.generate(sd, st).fallback:
 				return "stage %d seed %d hit the fallback" % [st, sd]
 	return ""
+
+
+## QA #13 b1: off the stair line, the trigger never covers the floor above the stair's top
+## (its slab and above), the upper band only from the top landing side, the lower band as BE's.
+func test_stair_band_trigger() -> String:
+	var b := Vector2(0, 0)
+	var t := Vector2(240, -192)
+	var above := Vector2(260, -192 - 40)   # standing on the floor above (to_floor + 1) isn't possible here: rise = 192
+	if LevelStair.contains_pts(b, t, Vector2(250, t.y - 192 + 10), false, true):
+		return "a boy on the slab one rise above the top counted as inside"
+	if LevelStair.contains_pts(b, t, above - Vector2(0, 200), false, true):
+		return "a point two rises above the top counted as inside"
+	if not LevelStair.contains_pts(b, t, t + Vector2(20, 0), false, false):
+		return "top landing refused"
+	if LevelStair.contains_pts(b, t, t - Vector2(120, 0), false, true):
+		return "gallery side of the opening accepted"
+	if not LevelStair.contains_pts(b, t, b - Vector2(10, 0), false, true):
+		return "lower floor refused (BE trigger)"
+	return ""
+
+
+## QA #13 b4: the route is the shortest by walked distance, not the fewest stairs.
+func test_nav_distance_route() -> String:
+	var L := LevelGenerator.fallback_layout(1)
+	var far: Dictionary = L.stairs[0]   # at the right end, floor 0 -> 1
+	var tl := LevelValidator.TILE
+	var near := {from_floor = 0, to_floor = 1,
+			bottom = Vector2(5 * tl, 0.0), top = Vector2(20 * tl, LevelValidator.surface_y(1))}
+	L.stairs = [far, near]   # far listed first: a BFS / tie-break by index would pick it
+	var nav := LevelNav.from_layout(L)
+	var a := Vector2(3 * tl, 0.0)
+	var b := Vector2(24 * tl, LevelValidator.surface_y(1))
+	var r: Variant = nav.route(a, b)
+	if not (r is Array) or (r as Array).size() != 1 or (r as Array)[0].stair != near:
+		return "route did not take the near stair: %s" % [r]
+	var d := nav.route_distance(a, b)
+	if d >= absf(a.x - (far.bottom as Vector2).x):
+		return "route_distance %.0f not shorter than walking to the far stair" % d
+	return ""
+
+
+## b2/b3: a capped running jump from the floor never clears a rail, and `rail_keepout` is positive
+## for every furniture height a jump can leave, 0 only when the surface is too high to need it.
+func test_rail_jump_rule() -> String:
+	if LevelValidator.rail_keepout(0.0) > 0.0:
+		return "a capped jump from the floor clears the rail (apex %.1f vs rail %.0f)" % [LevelValidator.max_jump_apex(), LevelValidator.RAIL_H_PX]
+	for h in range(1, 5):
+		var ko := LevelValidator.rail_keepout(h * LevelValidator.TILE)
+		if ko <= 0.0:
+			continue
+		if ko < LevelValidator.rail_jump_reach(h * LevelValidator.TILE):
+			return "keepout %.0f shorter than the jump reach at h%d" % [ko, h]
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		for sd in 40:
+			var errs := LevelValidator.rail_jump_errors(LevelGenerator.generate(sd, st))
+			if not errs.is_empty():
+				return "stage %d seed %d: %s" % [st, sd, errs[0]]
+	return ""
+
+
+func test_reject_furniture_rail() -> String:
+	var L := LevelGenerator.fallback_layout(1)
+	var s: Dictionary = L.stairs[0]
+	var rw := LevelValidator.stair_rail_walls(s)[0]
+	var tl := LevelValidator.TILE
+	var h := 2   # h1 can't reach the rail height at capped stats (apex 52 + 16 < 80); h2 can
+	var ko := LevelValidator.rail_keepout(h * tl)
+	if ko <= 0.0:
+		return "no keepout for h2"
+	var fx := int(floorf((rw.x - 3 * tl) / tl))   # a 2-wide block 1 tile from the rail wall
+	L.furniture.append({floor = int(s.to_floor), x = fx, w = 2, h = h})
+	if LevelValidator.rail_jump_errors(L).is_empty():
+		return "furniture next to a rail passed the capped-jump rule"
+	return ""
+
+
+## PD gold floor: stage 1 floor piles total >= 6 whatever the roll; every stage's worst-roll total
+## (floor piles; vases and chests add 0 at worst) is >= the cheapest offer its shop can show.
+func test_gold_floor() -> String:
+	if StageTable.gold_floor_min(StageTable.params(1)) < 6:
+		return "stage 1 gold floor %d < 6" % StageTable.gold_floor_min(StageTable.params(1))
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var cheap := StageTable.cheapest_shop_price(st)
+		for sd in 60:
+			var L := LevelGenerator.generate(sd, st)
+			var w := StageTable.worst_roll_gold(L)
+			if w < cheap or w < StageTable.gold_floor_min(StageTable.params(st)):
+				return "stage %d seed %d worst-roll gold %d vs cheapest %d" % [st, sd, w, cheap]
+	var L := LevelGenerator.fallback_layout(1)
+	if StageTable.worst_roll_gold(L) < 6:
+		return "stage 1 fallback floor gold %d" % StageTable.worst_roll_gold(L)
+	L.gold[0].amount = 0
+	L.gold[1].amount = 0
+	return "" if _has(LevelValidator.validate(L), "gold floor") else "a layout under the gold floor passed"

@@ -21,6 +21,8 @@ extends RefCounted
 ##   enemy_weights           type id (ENEMY_TYPES) -> weight
 ##   vase_ratio              share of props that are vases (rest are generic obstacles)
 ##   gold_amount             [min, max] gold per pile
+##   gold_floor_min          (optional) guaranteed floor-pile total per level; the generator raises the smallest
+##                           piles to reach it. Default piles x gold_amount min. PD: stage 1 = 6 (was 4)
 ##   safe_radius             no enemy within this many px of the start, any floor (>= 1280 = one screen)
 
 ## Enemy types. movement: `walk` = gravity + floors + stairs (LevelNav routes);
@@ -44,7 +46,7 @@ const STAGES := {
 		solid_wall_chance = 0.15, furniture_chance = 0.45, tall_furniture_chance = 0.25,
 		enemies = 4, props = 18, gold_piles = 4, chests = 1,
 		enemy_weights = {"puppet_hand": 1.0},
-		vase_ratio = 0.6, gold_amount = [1, 3],
+		vase_ratio = 0.6, gold_amount = [1, 3], gold_floor_min = 6,
 		safe_radius = 1280.0,
 	},
 	2: {
@@ -90,6 +92,29 @@ static func budget(stage: int) -> Dictionary:
 static func budget_of(P: Dictionary) -> Dictionary:
 	return {enemies = int(P.get("enemies", 0)), props = int(P.get("props", 0)),
 			gold = int(P.get("gold_piles", 0)), chests = int(P.get("chests", 0))}
+
+
+## Guaranteed floor-pile gold total for a level built with params P (PD gold floor).
+static func gold_floor_min(P: Dictionary) -> int:
+	var ga: Array = P.get("gold_amount", [1, 1])
+	return maxi(int(P.get("gold_floor_min", 0)), int(P.get("gold_piles", 0)) * int(ga[0]))
+
+
+## Worst-roll total gold of a level (PD "Gold floor"): its floor piles plus the guaranteed part of
+## vases (each hides gold only with p 0.45, so 0 at worst) and chests (they give an item, `gold_inside` 0).
+static func worst_roll_gold(L: Dictionary) -> int:
+	var t := 0
+	for g in L.get("gold", []):
+		t += int(g.amount)
+	return t
+
+
+## Cheapest offer the shop after `stage` can show: min ItemDb.shop_price over the stage's pool.
+static func cheapest_shop_price(stage: int) -> int:
+	var best := 1 << 30
+	for id in ItemDb.pool_for_stage(stage):
+		best = mini(best, ItemDb.shop_price(id, stage))
+	return best
 
 
 ## Params for `stage`, clamped to 1..5. Deep copy so callers can override keys.
