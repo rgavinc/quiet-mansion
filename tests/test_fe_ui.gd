@@ -65,7 +65,12 @@ func run_all() -> Dictionary:
 		["owned_items_strip_shows_charges", test_owned_strip_charges],
 		["arrow_hidden_beyond_reveal_distance_shown_inside", test_arrow_reveal_distance],
 		["minimap_visible_only_with_has_minimap", test_minimap_visibility],
-		["lure_hint_only_while_music_box_held", test_lure_hint],
+		["lure_hint_legacy_held_lure_without_pocket_api", test_lure_hint],
+		["lure_hint_exactly_tap_throws_lure", test_lure_hint_pocket],
+		["lure_pocket_pips_follow_lures_changed", test_lure_pocket],
+		["lure_pocket_sits_right_of_hand_slots_in_hud", test_lure_pocket_hud],
+		["lure_widgets_disconnect_on_exit_no_errors", test_lure_widgets_exit_tree],
+		["owned_strip_music_box_no_double_charges_with_pocket", test_owned_strip_pocket],
 		["hud_mounts_items_strip_minimap_and_hint", test_hud_items_widgets],
 		["items_widgets_disconnect_on_exit_no_tree_errors", test_items_widgets_exit_tree],
 		["owned_items_strip_stacks_duplicates", test_owned_strip_stacks],
@@ -97,6 +102,11 @@ func run_all() -> Dictionary:
 		])
 	if _item_db() != null:   # BE PR #27 present
 		checks.append(["shop_initials_unique_for_itemdb", test_initials_itemdb])
+	if _pocket_api():   # BE PR #41 (lure pocket) present
+		checks.append_array([
+			["lure_hint_real_player_stats_through_throw_and_refill", test_lure_pocket_real_stats],
+			["lure_pocket_pips_real_player_stats", test_lure_pocket_pips_real_stats],
+		])
 	if _global_script("LevelNav") != null:   # Lead's PR #13 (generated level) present
 		checks.append(["minimap_reads_generated_level_floors", test_minimap_level_nav])
 	for item in checks:
@@ -2085,9 +2095,47 @@ func test_minimap_level_nav() -> String:
 	return err
 
 
+## Fake of BE PR #41's lure-pocket API on PlayerStats (what the hint and pips read).
+class _FakePocket extends Node:
+	signal lures_changed(charges: int, max: int)
+	var charges := 0
+	var max_n := 0
+	var tap := false
+	func lure_charges() -> int:
+		return charges
+	func lure_max() -> int:
+		return max_n
+	func tap_throws_lure() -> bool:
+		return tap
+	func set_pocket(c: int, m: int) -> void:
+		charges = c
+		max_n = m
+		lures_changed.emit(c, m)
+
+
+## Stand-in for the live player PlayerStats.tap_throws_lure() asks.
+class _FakePlayer extends Node:
+	var tap := true
+	func tap_would_throw_lure() -> bool:
+		return tap
+
+
+func _pocket_api() -> bool:
+	var ps := _fresh_stats()
+	var ok := ps.has_method(&"tap_throws_lure") and ps.has_method(&"lure_max") and ps.has_signal(&"lures_changed")
+	ps.free()
+	return ok
+
+
+## Without BE #41's pocket API (a stats node with none of it) the hint keeps the legacy
+## behaviour: a held lure dict selected.
 func test_lure_hint() -> String:
 	var b := _bus()
-	var hint := _mount("res://scripts/ui/lure_hint.gd", b)
+	var bare := Node.new(); _root().add_child(bare)
+	var hint: Node = load("res://scripts/ui/lure_hint.gd").new()
+	hint.set("bus", b)
+	hint.set("stats", bare)
+	_root().add_child(hint)
 	var err := ""
 	if hint.text != "tap: throw lure":
 		err = "exact text 'tap: throw lure', got '%s'" % hint.text
@@ -2101,19 +2149,337 @@ func test_lure_hint() -> String:
 		err = "holding a vase -> hidden"
 	b.select_item(1)
 	if err.is_empty() and not hint.visible:
-		err = "Music Box selected -> visible"
+		err = "legacy: Music Box selected -> visible"
 	b.set_items([vase])   # thrown
 	if err.is_empty() and hint.visible:
 		err = "lure thrown -> hidden"
-	_cleanup([hint, b])
+	_cleanup([hint, bare, b])
 	return err
+
+
+## With the pocket API the hint is EXACTLY tap_throws_lure(), whatever the hands hold.
+func test_lure_hint_pocket() -> String:
+	var b := _bus()
+	var fake := _FakePocket.new(); _root().add_child(fake)
+	var hint: Node = load("res://scripts/ui/lure_hint.gd").new()
+	hint.set("bus", b)
+	hint.set("stats", fake)
+	_root().add_child(hint)
+	var err := ""
+	if hint.text != "tap: throw lure":
+		err = "exact text, got '%s'" % hint.text
+	if err.is_empty() and hint.visible:
+		err = "tap_throws_lure false -> hidden"
+	fake.charges = 1; fake.max_n = 1; fake.tap = true
+	fake.lures_changed.emit(1, 1)
+	if err.is_empty() and not hint.visible:
+		err = "lures_changed with tap_throws_lure true -> visible (hands empty, no lure item held)"
+	fake.tap = false
+	fake.lures_changed.emit(1, 1)
+	if err.is_empty() and hint.visible:
+		err = "tap_throws_lure false (e.g. hands full / prop in reach) -> hidden even with a lure left"
+	# a held lure dict no longer matters once the pocket API exists
+	b.set_items([{id = "l", slot = "music_box_world", name = "Music Box", lure = true}])
+	b.select_item(0)
+	if err.is_empty() and hint.visible:
+		err = "a legacy held lure must not show it when tap_throws_lure() is false"
+	# inventory / ring changes re-check
+	fake.tap = true
+	b.set_items([{id = "v", slot = "vase", name = "Vase", throwable = true}])
+	if err.is_empty() and not hint.visible:
+		err = "inventory_changed -> re-check -> visible"
+	fake.tap = false
+	b.select_item(0)
+	if err.is_empty() and hint.visible:
+		err = "inventory_selected -> re-check -> hidden"
+	# per frame: the knock reach flips tap_throws_lure() without any signal
+	fake.tap = true
+	hint._process(0.016)
+	if err.is_empty() and not hint.visible:
+		err = "per-frame re-check while a lure is left -> visible"
+	fake.tap = false
+	hint._process(0.016)
+	if err.is_empty() and hint.visible:
+		err = "per-frame re-check -> hidden"
+	fake.tap = true
+	fake.charges = 0
+	hint._process(0.016)
+	fake.charges = 1
+	hint._process(0.016)
+	if err.is_empty() and not hint.visible:
+		err = "visible again once a lure is back"
+	fake.tap = false   # BE's tap_throws_lure() is false with an empty pocket
+	fake.set_pocket(0, 1)   # last lure thrown
+	if err.is_empty() and hint.visible:
+		err = "last lure thrown -> hidden"
+	_cleanup([hint, fake, b])
+	return err
+
+
+## Against the real PlayerStats (needs PR #41): grant a Music Box, begin a stage with a live
+## player, and the hint follows tap_throws_lure() through a throw and a refill.
+func test_lure_pocket_real_stats() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var player := _FakePlayer.new(); _root().add_child(player)
+	var hint: Node = load("res://scripts/ui/lure_hint.gd").new()
+	hint.set("bus", b)
+	hint.set("stats", ps)
+	_root().add_child(hint)
+	var box: Object = _item_db().make("music_box")
+	ps.grant_item(box)
+	ps.begin_stage(player)
+	var err := ""
+	if ps.lure_charges() != 1 or ps.lure_max() != 1:
+		err = "setup: pocket %d/%d, want 1/1" % [ps.lure_charges(), ps.lure_max()]
+	if err.is_empty() and not hint.visible:
+		err = "Music Box owned, stage begun, tap would throw -> visible"
+	player.tap = false   # hands full / a prop in knock reach
+	hint._process(0.016)
+	if err.is_empty() and hint.visible:
+		err = "tap would knock instead -> hidden"
+	player.tap = true
+	hint._process(0.016)
+	if err.is_empty() and not hint.visible:
+		err = "knock reach cleared -> visible"
+	box.use_charge()   # the lure was thrown
+	if err.is_empty() and hint.visible:
+		err = "pocket empty -> hidden"
+	ps.begin_stage(player)
+	if err.is_empty() and not hint.visible:
+		err = "next stage refills the lure -> visible"
+	_cleanup([hint, player, b, ps])
+	return err
+
+
+func test_lure_pocket() -> String:
+	var fake := _FakePocket.new(); _root().add_child(fake)
+	var pocket: Node = load("res://scripts/ui/lure_pocket.gd").new()
+	pocket.set("stats", fake)
+	_root().add_child(pocket)
+	var err := ""
+	var pips := pocket.get_node_or_null(^"Pips")
+	if pips == null:
+		return "no Pips node"
+	if pocket.visible:
+		err = "lure_max() == 0 -> hidden"
+	fake.set_pocket(2, 3)
+	if err.is_empty() and (not pocket.visible or pips.total != 3 or pips.left != 2 or pips.dots() != 3):
+		err = "2/3 -> visible, 3 pips, 2 filled; got total %d left %d" % [pips.total, pips.left]
+	if err.is_empty() and (pips.lit(0) != true or pips.lit(1) != true or pips.lit(2) != false):
+		err = "filled pips are the left-most ones"
+	if err.is_empty() and pocket.get_node(^"Count").visible:
+		err = "up to 5 pips: no number"
+	if err.is_empty() and pocket.get_node_or_null(^"Tile/Icon") == null and pocket.get_node_or_null(^"Tile/Initials") == null:
+		err = "pocket tile needs the Music Box icon or its letter fallback"
+	if err.is_empty() and pips.get_combined_minimum_size().y < 11.0:
+		err = "pips must be >= 11 px"
+	fake.set_pocket(1, 3)   # a throw
+	if err.is_empty() and pips.left != 1:
+		err = "throw -> 1 filled"
+	fake.set_pocket(3, 3)   # refill
+	if err.is_empty() and pips.left != 3:
+		err = "refill -> 3 filled"
+	fake.set_pocket(0, 3)
+	if err.is_empty() and (pips.left != 0 or not pocket.visible):
+		err = "spent pocket stays shown with empty pips"
+	fake.set_pocket(4, 8)   # more than fit: one pip + n/max
+	if err.is_empty() and (pips.dots() != 1 or not pocket.get_node(^"Count").visible or pocket.get_node(^"Count").text != "4/8"):
+		err = "8 lures -> 1 pip + '4/8'"
+	fake.set_pocket(0, 0)
+	if err.is_empty() and pocket.visible:
+		err = "max back to 0 -> hidden"
+	# stats without the pocket API (no #41): hidden, no errors
+	var bare := Node.new(); _root().add_child(bare)
+	var p2: Node = load("res://scripts/ui/lure_pocket.gd").new()
+	p2.set("stats", bare)
+	_root().add_child(p2)
+	if err.is_empty() and p2.visible:
+		err = "no pocket API -> hidden"
+	_cleanup([pocket, p2, fake, bare])
+	return err
+
+
+## Real PlayerStats (needs #41): the pips are lure_max() copies with lure_charges() filled.
+func test_lure_pocket_pips_real_stats() -> String:
+	var ps := _fresh_stats()
+	var pocket: Node = load("res://scripts/ui/lure_pocket.gd").new()
+	pocket.set("stats", ps)
+	_root().add_child(pocket)
+	var err := ""
+	if pocket.visible:
+		err = "no Music Box -> hidden"
+	var a: Object = _item_db().make("music_box")
+	var b2: Object = _item_db().make("music_box")
+	ps.grant_item(a)
+	ps.begin_stage(null)
+	var pips := pocket.get_node(^"Pips")
+	if err.is_empty() and (not pocket.visible or pips.total != 1 or pips.left != 1):
+		err = "1 box -> 1/1"
+	ps.grant_item(b2)
+	if err.is_empty() and (pips.total != 2 or pips.left != 2):
+		err = "second box bought -> 2 pips, 2 filled (a new copy starts full), got %d/%d" % [pips.left, pips.total]
+	ps.begin_stage(null)
+	if err.is_empty() and pips.left != 2:
+		err = "begin_stage refills -> 2/2"
+	a.use_charge()
+	if err.is_empty() and (pips.left != 1 or pips.total != 2):
+		err = "one throw -> 1/2"
+	_cleanup([pocket, ps])
+	return err
+
+
+func test_lure_pocket_hud() -> String:
+	var fake := _FakePocket.new(); _root().add_child(fake)
+	var hud: Node = load("res://scripts/ui/hud.gd").new()
+	hud.stats = fake
+	_root().add_child(hud)
+	var err := ""
+	var pocket := hud.get_node_or_null(^"HudRoot/LurePocket")
+	if pocket == null:
+		_cleanup([hud, fake])
+		return "HUD missing LurePocket"
+	if pocket.anchor_strip != hud.inventory or not hud.inventory.has_method(&"slots_rect"):
+		err = "pocket should sit beside the inventory strip"
+	if err.is_empty() and hud.lure_hint.get("stats") != fake:
+		err = "HUD passes its stats to the lure hint too"
+	if err.is_empty() and pocket.visible:
+		err = "no lures -> pocket hidden"
+	fake.set_pocket(1, 1)
+	var strip := _FakeStrip.new()   # hand row at x 500..620, y 640..684
+	pocket.anchor_strip = strip
+	pocket._process(0.016)
+	if err.is_empty() and not pocket.visible:
+		err = "1/1 -> shown"
+	if err.is_empty() and absf(pocket.position.x - (620.0 + pocket.GAP)) > 0.5:
+		err = "pocket x should be hand row's right edge + gap, got %s" % pocket.position
+	if err.is_empty() and pocket.position.y + pocket.size.y > 684.5:
+		err = "pocket must not hang below the hand slots, got %s" % pocket.position
+	# the whole HUD still ignores the mouse (pocket never eats clicks)
+	if err.is_empty() and (pocket.mouse_filter != Control.MOUSE_FILTER_IGNORE or pocket.get_node(^"Tile").mouse_filter != Control.MOUSE_FILTER_IGNORE):
+		err = "pocket must be mouse-ignore"
+	_cleanup([hud, fake, strip])
+	return err
+
+
+class _FakeStrip extends Control:
+	func slots_rect() -> Rect2:
+		return Rect2(500, 640, 120, 44)
+
+
+## Lure widgets (QA B1 pattern): connected only while in the tree; after leaving it (and being
+## freed) BE signals log no errors and leave no connections.
+func test_lure_widgets_exit_tree() -> String:
+	var fake := _FakePocket.new(); _root().add_child(fake)
+	var b := _bus()
+	var hint: Node = load("res://scripts/ui/lure_hint.gd").new()
+	hint.set("bus", b); hint.set("stats", fake)
+	_root().add_child(hint)
+	var pocket: Node = load("res://scripts/ui/lure_pocket.gd").new()
+	pocket.set("stats", fake)
+	_root().add_child(pocket)
+	var widgets := [hint, pocket]
+	var err := ""
+	if _conns_into(fake, &"lures_changed", widgets) != 2:
+		err = "setup: both widgets listen to lures_changed while in the tree, got %d" % _conns_into(fake, &"lures_changed", widgets)
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	for w in widgets:
+		_root().remove_child(w)
+	var left := _conns_into(fake, &"lures_changed", widgets)
+	for sig in [&"inventory_changed", &"inventory_selected"]:
+		left += _conns_into(b, sig, widgets)
+	if err.is_empty() and left != 0:
+		err = "%d orphan connections after leaving the tree" % left
+	fake.set_pocket(1, 2)
+	b.set_items([{id = "l", slot = "x", name = "X", lure = true}])
+	for w in widgets:
+		w.free()
+	fake.set_pocket(0, 2)
+	b.set_items([])
+	OS.remove_logger(log)
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors after the lure widgets left the tree: %s" % [log.errors.slice(0, 3)]
+	# moved, not freed: re-entering reconnects exactly once
+	var p2: Node = load("res://scripts/ui/lure_pocket.gd").new()
+	p2.set("stats", fake)
+	_root().add_child(p2)
+	_root().remove_child(p2)
+	_root().add_child(p2)
+	if err.is_empty() and _conns_into(fake, &"lures_changed", [p2]) != 1:
+		err = "re-entering the tree should reconnect exactly once"
+	_cleanup([p2, fake, b])
+	return err
+
+
+class _PlainStats extends Node:
+	signal items_changed(items: Array)
+	var owned_items: Array = []
+
+
+## Music Box in owned_items (BE keeps it there): with the pocket API its tile stays but its
+## charges show only in the pocket; without it, it is an ordinary charged item.
+func test_owned_strip_pocket() -> String:
+	var db := _item_db()
+	var err := ""
+	var fake := _FakePocket.new(); _root().add_child(fake)
+	var plain := _PlainStats.new(); _root().add_child(plain)
+	var box: Object = db.make("music_box")
+	var bulb: Object = db.make("flash_bulb")
+	plain.owned_items = [box, bulb]
+	# legacy: no pocket API -> pips as before
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", plain)
+	var box_tile: Control = strip.tiles[0] if strip.entries[0].id == "music_box" else strip.tiles[1]
+	if box_tile.get_node_or_null(^"Charges") == null:
+		err = "without the pocket API the Music Box keeps its charge pips"
+	_cleanup([strip])
+	# pocket API present: the tile stays, the charges move out
+	if err.is_empty():
+		var ps2 := _PlainStats2.new(); _root().add_child(ps2)
+		ps2.owned_items = [box, bulb]
+		var s2 := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps2)
+		var ids: Array = s2.entries.map(func(e): return e.id)
+		if not ids.has("music_box") or s2.tiles.size() != 2:
+			err = "Music Box keeps its tile, got %s" % [ids]
+		var bi := ids.find("music_box")
+		var ti: Control = s2.tiles[bi]
+		if err.is_empty() and (ti.get_node_or_null(^"Charges") != null or ti.get_node_or_null(^"Tile").self_modulate.a < 0.99):
+			err = "with the pocket, Music Box tile shows no pips and no spent fade"
+		box.charges = 0   # spent: still nothing on the tile (the pocket shows it)
+		s2.refresh()
+		ti = s2.tiles[s2.entries.map(func(e): return e.id).find("music_box")]
+		if err.is_empty() and (ti.get_node_or_null(^"Charges") != null or ti.get_node_or_null(^"Tile").self_modulate.a < 0.99):
+			err = "a spent Music Box must not fade/pip on the strip when the pocket shows it"
+		var bt: Control = s2.tiles[s2.entries.map(func(e): return e.id).find("flash_bulb")]
+		if err.is_empty() and bt.get_node_or_null(^"Charges") == null:
+			err = "other charged items keep their pips"
+		_cleanup([s2, ps2])
+	# real PlayerStats (needs #41): same, end to end, and two copies still stack on one tile
+	if err.is_empty() and _pocket_api():
+		var ps := _fresh_stats()
+		var s3 := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+		ps.grant_item(db.make("music_box"))
+		ps.grant_item(db.make("music_box"))
+		ps.begin_stage(null)
+		var t3: Control = s3.tiles[0]
+		if s3.entries.size() != 1 or s3.entries[0].count != 2 or t3.get_node_or_null(^"Charges") != null:
+			err = "real: 2 Music Boxes -> one x2 tile, no pips, got %s" % [s3.entries]
+		_cleanup([s3, ps])
+	_cleanup([fake, plain])
+	return err
+
+
+## _PlainStats plus the pocket API (only the has_method signal matters to the strip).
+class _PlainStats2 extends _PlainStats:
+	func lure_max() -> int:
+		return 1
 
 
 func test_hud_items_widgets() -> String:
 	var hud: Node = load("res://scripts/ui/hud.gd").new()
 	_root().add_child(hud)
 	var err := ""
-	for n in ["OwnedItems", "Minimap", "LureHint"]:
+	for n in ["OwnedItems", "Minimap", "LureHint", "LurePocket"]:
 		if hud.get_node_or_null(NodePath("HudRoot/" + n)) == null:
 			err = "HUD missing %s" % n
 	_cleanup([hud])

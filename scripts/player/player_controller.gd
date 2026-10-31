@@ -43,6 +43,9 @@ const SHAKE_KICK_SPEED := 130.0
 const SHAKE_MAX_TIME := 1.2
 var _shake_dir: float = 0.0
 var _shake_left: float = 0.0
+var _shake_speed: float = SHAKE_PUSH_SPEED
+var _shake_target_x: float = NAN   # stop sideways here and drop straight down
+var _shake_stay: bool = false   # touchdown on a step (<= 2 tiles) ends the shake there
 var _shake_air: bool = false
 var _shake_still: float = 0.0
 var _shake_last: Vector2 = Vector2.ZERO
@@ -199,7 +202,11 @@ func tick(delta: float, dir: Vector2) -> void:
 
 ## Shaken off furniture toward `dir` (-1 / +1): input is ignored until he has left the ground
 ## and landed (or SHAKE_MAX_TIME). Collisions still apply, so he can't enter a wall or a floor.
-func shake_off(dir: float) -> void:
+## With `target_x` / `target_y` (the walker's chosen landing: x and the surface y under it) the
+## sideways speed is solved so the ballistic arc touches down there (clamped, so a wall or a floor
+## still stops him); `stay` ends the shake when he touches down on a step instead of pushing him
+## on over it (never on a tall piece: >32 px keeps pushing).
+func shake_off(dir: float, target_x: float = NAN, target_y: float = NAN, stay: bool = false, clear_x: float = NAN) -> void:
 	if not side_scroll or dir == 0.0:
 		return
 	if state == State.PICKUP:
@@ -212,12 +219,36 @@ func shake_off(dir: float) -> void:
 	facing = int(_shake_dir)
 	if _grounded():
 		velocity.y = -SHAKE_KICK_SPEED
+	_shake_speed = SHAKE_PUSH_SPEED
+	_shake_stay = stay and not is_nan(target_x)
+	_shake_target_x = NAN
+	if not is_nan(target_x) and not is_nan(target_y):
+		_solve_shake(target_x, clear_x)
 	shaken_off.emit(_shake_dir)
+
+
+## Sideways speed for a shake that must land at (target_x, target_y): fast enough to be past
+## `clear_x` (the tall piece's edge plus half his width) while still above its top, then he stops
+## sideways at target_x and drops straight down, so a 32 px step is hit even with 16 px to spare.
+func _solve_shake(target_x: float, clear_x: float) -> void:
+	_shake_target_x = target_x
+	var g := float(PlayerStats.get_stat(&"gravity"))
+	var feet := Enemy.body_feet(self)
+	var dxc := 0.0 if is_nan(clear_x) else maxf(0.0, (clear_x - feet.x) * _shake_dir)
+	var vx := SHAKE_PUSH_SPEED
+	while vx < 260.0 and dxc > 0.0:
+		var tc := dxc / vx
+		if velocity.y * tc + 0.5 * g * tc * tc <= -2.0:
+			break
+		vx += 10.0
+	_shake_speed = minf(vx, 260.0)
 
 
 func _tick_shake(delta: float) -> void:
 	_shake_left -= delta
-	velocity.x = _shake_dir * SHAKE_PUSH_SPEED
+	velocity.x = _shake_dir * _shake_speed
+	if not is_nan(_shake_target_x) and (global_position.x - _shake_target_x) * _shake_dir >= -0.5:
+		velocity.x = 0.0
 	# watchdog: wedged (no movement for 0.3 s) -> control comes back
 	if global_position.distance_to(_shake_last) < 0.5:
 		_shake_still += delta
@@ -228,7 +259,7 @@ func _tick_shake(delta: float) -> void:
 		_shake_last = global_position
 	if not _grounded():
 		_shake_air = true
-	elif _shake_air and furniture_under() <= 0.0 and not _standing_on_body():
+	elif _shake_air and (furniture_under() <= 0.0 or (_shake_stay and furniture_under() <= 33.0)) and not _standing_on_body():
 		_shake_left = 0.0   # back on a floor (landing on the piece again keeps pushing him off)
 	if _shake_left <= 0.0:
 		velocity.x = 0.0
