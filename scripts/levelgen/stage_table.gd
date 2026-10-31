@@ -95,7 +95,7 @@ const LOOKS := {
 	2: {ambient = Color(0.38, 0.33, 0.31), tint = Color(1.00, 0.96, 0.90), flashlight_energy = 1.0},
 	3: {ambient = Color(0.27, 0.26, 0.30), tint = Color(0.95, 0.97, 1.00), flashlight_energy = 1.1},
 	4: {ambient = Color(0.15, 0.17, 0.24), tint = Color(0.85, 0.93, 1.00), flashlight_energy = 1.3},
-	5: {ambient = Color(0.06, 0.07, 0.12), tint = Color(0.80, 0.90, 1.00), flashlight_energy = 1.6},
+	5: {ambient = Color(0.045, 0.055, 0.10), tint = Color(0.80, 0.90, 1.00), flashlight_energy = 1.6},
 }
 
 

@@ -8,7 +8,7 @@ func _init() -> void:
 
 
 func _run() -> void:
-	var bad := LookHash.check(200)
+	var bad: PackedStringArray = (load("res://tests/look_hash.gd") as GDScript).check(200)
 	print("LOOK HASH SWEEP: %d mismatches over 200 seeds x 5 stages" % bad.size())
 	for b in bad.slice(0, 10):
 		printerr("MISMATCH ", b)
