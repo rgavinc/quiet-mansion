@@ -52,7 +52,7 @@ func _ready() -> void:
 	_hp_seen = PlayerStats.health
 	PlayerStats.health_changed.connect(_on_health_changed)
 	# Every stage builds a fresh player: this IS stage start for item behaviour
-	# (charges refill, Music Box lure into the hands, ...).
+	# (charges refill, Music Box lures into the pocket, ...).
 	PlayerStats.begin_stage(self)
 
 
@@ -265,23 +265,38 @@ func interact_released() -> void:
 # --- tap: throw or knock ----------------------------------------------------
 func _tap() -> void:
 	var held := inventory.current()
-	if not held.is_empty():
-		var tgt: Node2D = FESignals.selected_enemy
-		if held.get("throwable", false) and is_instance_valid(tgt):
-			throw_at(tgt)
-		elif held.get("lure", false):
-			# Music Box: no target needed; flies the way the boy FACES (PRODUCT.md), never the
-			# last mouse aim (that only means something while the light is on).
-			throw_toward(global_position + Vector2(facing, 0) * LURE_THROW_DIST)
-		return  # holding something with no ringed enemy: tap does nothing
-	_try_knock()
+	var tgt: Node2D = FESignals.selected_enemy
+	if not held.is_empty() and held.get("throwable", false) and is_instance_valid(tgt):
+		throw_at(tgt)
+	elif held.is_empty() and knock_target() != null:
+		_try_knock()
+	elif PlayerStats.lure_charges() > 0:
+		throw_lure()
+	# else: holding something with no ringed enemy and no lures: tap does nothing
+
+
+## What PlayerStats.tap_throws_lure() asks: would a tap with NOTHING ringed throw a lure?
+## Yes with lures in the pocket, unless the hands are empty and a prop is in knock reach.
+func tap_would_throw_lure() -> bool:
+	if PlayerStats.lure_charges() <= 0:
+		return false
+	return not (inventory.current().is_empty() and knock_target() != null)
+
+
+## Music Box: throws one pocket lure the way the boy FACES (PRODUCT.md), never the last
+## mouse aim. Hands are untouched. Null with an empty pocket.
+func throw_lure() -> Node2D:
+	var lure := PlayerStats.next_lure()
+	if lure.is_empty():
+		return null
+	return _launch(lure, null, global_position + Vector2(facing, 0) * LURE_THROW_DIST)
 
 
 func throw_at(tgt: Node2D) -> Node2D:
 	return _throw(tgt, Vector2.INF)
 
 
-## Throws the held item toward a world point (Music Box lure with no enemy ringed).
+## Throws the held item toward a world point.
 const LURE_THROW_DIST := 320.0
 
 func throw_toward(point: Vector2) -> Node2D:
@@ -292,6 +307,10 @@ func _throw(tgt: Node2D, point: Vector2) -> Node2D:
 	var it := inventory.take_current()
 	if it.is_empty():
 		return null
+	return _launch(it, tgt, point)
+
+
+func _launch(it: Dictionary, tgt: Node2D, point: Vector2) -> Node2D:
 	PlayerStats.dispatch_throw(it, tgt if tgt != null else point)   # item hooks may tag the dict
 	var t := Node2D.new()
 	t.set_script(load("res://scripts/world/thrown_object.gd"))
@@ -307,7 +326,10 @@ func _throw(tgt: Node2D, point: Vector2) -> Node2D:
 ## where it lands is hit (calm dies, enraged is stunned). The break makes the noise, once.
 const KNOCK_FALL_DIST := 28.0
 
-func _try_knock() -> void:
+## The ONE nearest knockable prop in range on the side the boy faces (null if none).
+func knock_target() -> WorldObject:
+	if not is_inside_tree():
+		return null
 	var best: WorldObject = null
 	var best_d := INF
 	for node in get_tree().get_nodes_in_group("world_objects"):
@@ -320,6 +342,11 @@ func _try_knock() -> void:
 		if d < best_d:
 			best_d = d
 			best = node
+	return best
+
+
+func _try_knock() -> void:
+	var best := knock_target()
 	if best == null:
 		return
 	var land := best.global_position + Vector2(facing * KNOCK_FALL_DIST, 0)

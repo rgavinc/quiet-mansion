@@ -13,12 +13,15 @@ func run_all() -> Dictionary:
 	var failures: PackedStringArray = []
 	var checks := [
 		["rabbits_foot_saves_first_lethal_hit_per_stage", test_rabbits_foot],
-		["music_box_lure_in_hand_thrown_pulls_chasers", test_music_box],
+		["music_box_pocket_lure_thrown_pulls_chasers", test_music_box],
 		["music_box_world_art_slot_or_fallback", test_music_box_art],
 		["music_box_tap_throws_facing_not_last_aim", test_music_box_facing],
 		["heavy_vases_double_stun_and_carry_slow", test_heavy_vases],
 		["flash_bulb_stuns_startle_once_per_stage", test_flash_bulb],
 		["music_box_x2_one_throw_spends_one_copy", test_music_box_x2],
+		["lure_pocket_no_hand_slot_api_and_signal", test_lure_pocket],
+		["lure_charges_survive_shop_refill_on_stage", test_lure_refill_and_shop],
+		["tap_throws_lure_true_false_cases", test_tap_throws_lure],
 		["rabbits_foot_x2_one_save_per_copy", test_rabbits_foot_x2],
 		["flash_bulb_x4_one_stun_per_copy", test_flash_bulb_x4],
 		["stacked_behavior_effects_clamp_to_bounds", test_stacked_behavior_bounds],
@@ -151,16 +154,16 @@ func test_rabbits_foot() -> Variant:
 func test_music_box() -> Variant:
 	var it := _grant("music_box")
 	var p := _player(Vector2(100, 100))
-	var held: Dictionary = p.inventory.current()
-	if not held.get("lure", false): return "no lure in hand at stage start (%s)" % [held]
-	if it.charges != 1: return "charges %d, want 1 with the lure in hand" % it.charges
+	if not p.inventory.items.is_empty(): return "stage start put %s in the hands (lures live in the pocket)" % [p.inventory.items]
+	if it.charges != 1: return "charges %d, want 1 at stage start" % it.charges
+	if PlayerStats.lure_charges() != 1 or PlayerStats.lure_max() != 1: return "pocket %d/%d, want 1/1" % [PlayerStats.lure_charges(), PlayerStats.lure_max()]
 	var e := _puppet(Vector2(1100, 100), 0)   # can't see the boy
 	if e.state != e.State.CALM: return "not calm at start"
 	p.aim_dir = Vector2.RIGHT
 	FESignals.selected_enemy = null
-	p._tap()   # no ringed enemy: a lure still throws, toward the aim
-	if not p.inventory.current().is_empty(): return "lure still in hand after tap"
+	p._tap()   # no ringed enemy, empty hands, nothing to knock: a pocket lure throws
 	if it.charges != 0: return "charge not spent on throw"
+	if PlayerStats.lure_charges() != 0: return "pocket still %d after the throw" % PlayerStats.lure_charges()
 	var thrown: Array = root.get_tree().get_nodes_in_group("thrown")
 	if thrown.is_empty(): return "nothing thrown"
 	_fly(thrown[0])
@@ -407,28 +410,42 @@ func test_rows() -> Variant:
 
 
 # --- stat caps (PlayerStats.STAT_BOUNDS) -----------------------------------------
-## Every multiplier stat an item touches has its own [min, max]; noise is PD's x0.3..x3;
-## 10 stacked x2 (or x0.5) modifiers land exactly on that stat's max (min).
+## Every BASE stat (and every hook key) has [min, max] with min <= base <= max, in the stat's
+## own units; PD's numbers are exact; any stack of extreme modifiers lands on the bound.
+const PD_BOUNDS := {
+	&"max_health": [1.0, 6.0], &"invuln_time": [0.5, 2.0], &"inventory_slots": [1.0, 5.0],
+	&"light_startle_time": [0.4, 1.5], &"light_angle_deg": [10.0, 70.0], &"noise_mult": [0.3, 3.0],
+}
+
 func test_stat_bounds() -> Variant:
-	var nb: Array = PlayerStats.STAT_BOUNDS.get(&"noise_mult", [])
-	if nb != [0.3, 3.0]: return "noise bounds %s, want [0.3, 3.0]" % [nb]
+	var B: Dictionary = PlayerStats.STAT_BOUNDS
+	for st in PD_BOUNDS:
+		if B.get(st, []) != PD_BOUNDS[st]: return "%s bounds %s, want %s" % [st, B.get(st), PD_BOUNDS[st]]
+	for st in PlayerStats.BASE:
+		if not B.has(st): return "%s has no bounds" % st
+		var b: Array = B[st]
+		var base := float(PlayerStats.BASE[st])
+		if b.size() != 2 or b[0] > base or b[1] < base: return "%s bounds %s don't bracket base %s" % [st, b, base]
+		for case in [[1e6, 2.0, b[1]], [-1e6, 0.5, b[0]]]:
+			PlayerStats.reset()
+			PlayerStats.add_modifier(st, case[0], 1.0, "add")
+			for i in 10:
+				PlayerStats.add_modifier(st, 0.0, case[1], "stack%d" % i)
+			var v := PlayerStats.get_stat(st)
+			if absf(v - case[2]) > 1e-4: return "%s stacked to %.3f, want bound %.3f" % [st, v, case[2]]
 	for r in ItemDb.ITEMS:
 		for m in r.mods:
-			var st := StringName(m.stat)
-			var is_mult := float(m.get("mul", 1.0)) != 1.0 or str(st).ends_with("_mult")
-			if is_mult and not PlayerStats.STAT_BOUNDS.has(st): return "%s: %s has no bounds" % [r.id, st]
-	for st in PlayerStats.STAT_BOUNDS:
-		if not PlayerStats.BASE.has(st):
-			continue
-		var b: Array = PlayerStats.STAT_BOUNDS[st]
-		if b.size() != 2 or not (b[0] < 1.0 and b[1] > 1.0): return "%s bounds %s don't bracket x1" % [st, b]
-		var base := float(PlayerStats.BASE[st])
-		for case in [[2.0, b[1]], [0.5, b[0]]]:
-			PlayerStats.reset()
-			for i in 10:
-				PlayerStats.add_modifier(st, 0.0, case[0], "stack%d" % i)
-			var v := PlayerStats.get_stat(st)
-			if absf(v - base * case[1]) > 1e-4: return "%s x%s^10 = %.3f, want %.3f" % [st, case[0], v, base * case[1]]
+			if not B.has(StringName(m.stat)): return "%s: %s has no bounds" % [r.id, m.stat]
+	# Stacked items hit PD's caps through the real grant path.
+	PlayerStats.reset()
+	for i in 10:
+		for id in ["extra_heart", "thick_sweater", "big_pockets", "grandfathers_watch"]:
+			if not ItemDb.row(id).is_empty(): PlayerStats.grant_item(ItemDb.make(id))
+	for st in [&"max_health", &"invuln_time", &"inventory_slots", &"light_startle_time"]:
+		var v := PlayerStats.get_stat(st)
+		var hi: float = PD_BOUNDS[st][1]
+		if v > hi + 1e-4: return "10 stacked items push %s to %.3f > %.3f" % [st, v, hi]
+	if PlayerStats.max_health() > 6: return "max_health() %d > 6" % PlayerStats.max_health()
 	return ""
 
 
@@ -446,8 +463,8 @@ func test_hook_bounds() -> Variant:
 	if absf(give_up - PlayerStats.STAT_BOUNDS[&"give_up_speed"][1]) > 1e-4: return "give-up x%.3f not capped" % give_up
 	var p := _player()
 	p.inventory.items.append(vase)
-	var spd: float = p.move_speed() / float(PlayerStats.BASE[&"move_speed"])
-	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-4: return "carry speed x%.3f, want floor x%.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
+	var spd: float = p.move_speed()
+	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-3: return "carry speed %.3f, want floor %.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
 	return ""
 
 
@@ -463,33 +480,101 @@ func _stack(id: String) -> Array:
 	return [c, m]
 
 
-## QA repro: grant 2 Music Boxes, start a stage, throw once -> 1/2 and a lure still in hand.
+## QA repro: grant 2 Music Boxes, start a stage, throw once -> 1/2, one more in the pocket.
 func test_music_box_x2() -> Variant:
 	var a := _grant("music_box")
 	var b := _grant("music_box")
-	var p := _player(Vector2(600, 100))   # stage start: each copy puts its own lure in hand
+	var p := _player(Vector2(600, 100))
 	if _stack("music_box") != [2, 2]: return "stage start %s, want 2/2" % [_stack("music_box")]
-	var lures := 0
-	for d in p.inventory.items:
-		if d.get("lure", false): lures += 1
-	if lures != 2: return "%d lures in hand at stage start, want 2" % lures
+	if not p.inventory.items.is_empty(): return "lures in the hands: %s" % [p.inventory.items]
 	_watch()
 	FESignals.selected_enemy = null
-	var first: Dictionary = p.inventory.current()
+	var first := PlayerStats.next_lure()
 	p._tap()
 	if _stack("music_box") != [1, 2]: return "after one throw %s, want 1/2" % [_stack("music_box")]
 	var spent: Item = a if a.owns_lure(first) else b
 	var kept: Item = b if spent == a else a
 	if spent.charges != 0 or kept.charges != 1: return "wrong copy spent (thrown lure's box %d, other %d)" % [spent.charges, kept.charges]
 	if _changed.is_empty(): return "items_changed not fired on the first throw"
-	var second: Dictionary = p.inventory.current()
-	if not second.get("lure", false): return "no lure in hand after the first throw (%s)" % [second]
-	if not kept.owns_lure(second): return "lure in hand isn't the unspent box's"
+	var second := PlayerStats.next_lure()
+	if not kept.owns_lure(second): return "next pocket lure isn't the unspent box's"
 	var n := _changed.size()
 	p._tap()
 	if _stack("music_box") != [0, 2]: return "after two throws %s, want 0/2" % [_stack("music_box")]
 	if _changed.size() <= n: return "items_changed not fired on the second throw"
+	var thrown := root.get_tree().get_nodes_in_group("thrown").size()
+	p._tap()
+	if root.get_tree().get_nodes_in_group("thrown").size() != thrown: return "empty pocket still threw"
 	return ""
+
+
+## Lure pocket: Music Boxes never take a hand slot, so a full set of boxes doesn't block a
+## vase pickup; the pocket API sums copies; lures_changed fires on throw / refill.
+func test_lure_pocket() -> Variant:
+	for i in 3: _grant("music_box")
+	var got: Array = []
+	var cb := func(c: int, m: int): got.append([c, m])
+	PlayerStats.lures_changed.connect(cb)
+	var p := _player(Vector2(100, 100))
+	if got.is_empty() or got[-1] != [3, 3]: PlayerStats.lures_changed.disconnect(cb); return "begin_stage lures_changed %s, want [3, 3]" % [got]
+	if PlayerStats.lure_charges() != 3 or PlayerStats.lure_max() != 3: PlayerStats.lures_changed.disconnect(cb); return "pocket %d/%d" % [PlayerStats.lure_charges(), PlayerStats.lure_max()]
+	# Vase pickup with a full pocket: the hands are free.
+	var v := _vase(Vector2(110, 100))
+	p.interact_pressed()
+	for i in 240:
+		p.tick(DT, Vector2.ZERO)
+		if not p.inventory.items.is_empty(): break
+	p.interact_released()
+	if p.inventory.items.size() != 1 or p.inventory.items[0].get("lure", false): PlayerStats.lures_changed.disconnect(cb); return "vase pickup blocked/wrong (%s)" % [p.inventory.items]
+	# Holding the vase, nothing ringed: tap throws a lure, the vase stays in hand.
+	FESignals.selected_enemy = null
+	got.clear()
+	p._tap()
+	PlayerStats.lures_changed.disconnect(cb)
+	if PlayerStats.lure_charges() != 2: return "pocket %d after a throw, want 2" % PlayerStats.lure_charges()
+	if got != [[2, 3]]: return "lures_changed on throw %s, want [[2, 3]]" % [got]
+	if p.inventory.items.size() != 1: return "the lure throw took the vase from the hands"
+	if is_instance_valid(v) and not v.is_queued_for_deletion() and not v.broken: return "vase still in the world"
+	return ""
+
+
+## #38 per-copy charges kept: partial counts survive the shop (buying another copy doesn't
+## refill), next stage refills every copy.
+func test_lure_refill_and_shop() -> Variant:
+	_grant("music_box")
+	_grant("music_box")
+	var p := _player(Vector2(600, 100))
+	FESignals.selected_enemy = null
+	p._tap()
+	if PlayerStats.lure_charges() != 1: return "after a throw %d, want 1" % PlayerStats.lure_charges()
+	PlayerStats.add_gold(500)
+	var it := ItemDb.make("music_box")
+	if not Shop.buy(it): return "couldn't buy a 3rd box"
+	if PlayerStats.lure_max() != 3: return "max %d after buying, want 3" % PlayerStats.lure_max()
+	if PlayerStats.lure_charges() != 2: return "shop changed spent counts: %d, want 1 + the new box's 1" % PlayerStats.lure_charges()
+	PlayerStats.begin_stage(p)
+	return "" if PlayerStats.lure_charges() == 3 else "next stage refilled to %d, want 3" % PlayerStats.lure_charges()
+
+
+## tap_throws_lure(): true only with lures left and no knock taking the tap.
+func test_tap_throws_lure() -> Variant:
+	var p := _player(Vector2(100, 100))
+	if PlayerStats.tap_throws_lure(): return "true with no Music Box"
+	_grant("music_box")
+	PlayerStats.begin_stage(p)
+	if not PlayerStats.tap_throws_lure(): return "false with a lure and nothing in reach"
+	var v := _vase(Vector2(100 + 10 * p.facing, 100))
+	if p.knock_target() == null: return "test vase not in knock reach"
+	if PlayerStats.tap_throws_lure(): return "true while empty hands would knock the vase"
+	FESignals.selected_enemy = null
+	p._tap()
+	if PlayerStats.lure_charges() != 1: return "the knock tap spent a lure"
+	if not v.broken: return "the tap didn't knock the vase"
+	if not PlayerStats.tap_throws_lure(): return "false once the vase is gone"
+	p._tap()
+	if PlayerStats.tap_throws_lure(): return "true with an empty pocket"
+	PlayerStats.reset()
+	return "" if not PlayerStats.tap_throws_lure() else "true after reset (stale player)"
 
 
 func test_rabbits_foot_x2() -> Variant:
