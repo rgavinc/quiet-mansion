@@ -1,6 +1,6 @@
 extends Node2D
 ## World-space FE overlays in one node: selection ring, per-enemy startle
-## meters, pickup gauge, throw line and camera nudge. Drop
+## meters, pickup gauge, throw line, camera nudge and the camera rig (level limits + follow). Drop
 ## `scenes/ui/world_overlay.tscn` under the level's world root.
 ## The drawn pieces live in a child CanvasLayer that follows the camera
 ## (follow_viewport) so the level's CanvasModulate darkness never dims the UI;
@@ -18,6 +18,7 @@ var ring: Node2D
 var pickup_gauge: Node2D
 var throw_line: Node2D
 var camera_nudge: Node
+var camera_rig: CameraRig
 var layer: CanvasLayer
 var _meters: Dictionary = {}   # enemy instance_id -> meter
 
@@ -42,6 +43,10 @@ func _ready() -> void:
 	camera_nudge.skin = skin
 	camera_nudge.bus = bus
 	add_child(camera_nudge)
+	camera_rig = CameraRig.new()   # limits to the level, smooth follow, snap on a new camera
+	camera_rig.name = "CameraRig"
+	camera_rig.skin = skin
+	add_child(camera_rig)
 	if bus:
 		bus.startle_progress.connect(_on_startle)
 

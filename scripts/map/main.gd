@@ -145,5 +145,5 @@ func _build_hud() -> void:
 	if ResourceLoader.exists("res://assets/ui/hud_theme.tres"):
 		_status.theme = load("res://assets/ui/hud_theme.tres")
 	_status.add_theme_font_size_override("font_size", 14)
-	_status.text = HINT + "\n" + "Seed %d · Stage %d" % [level_seed, stage]
+	_status.text = HINT
 	$UI.add_child(_status)
