@@ -92,10 +92,10 @@ const GLINT_ALPHA_MIN := 0.6
 @export var silhouette_color: Color = Color(0.45, 0.55, 0.85)
 @export_range(0.0, 1.0) var silhouette_alpha: float = 0.2
 ## Active when the stage ambient luminance (StageLook / the level's StageAmbient CanvasModulate)
-## is BELOW this. Stage 4 is ~0.17, stage 3 ~0.27, so 0.2 means stages 4-5.
-@export var dark_ambient_threshold: float = 0.2
+## is BELOW this. StageTable: stage 4 ~0.17, stage 5 ~0.056, so 0.1 means stage 5 only (PD).
+@export var dark_ambient_threshold: float = 0.1
 ## Until a level reports an ambient: active from this stage on.
-@export var dark_fallback_stage: int = 4
+@export var dark_fallback_stage: int = 5
 ## The flashlight's soft blob also counts as light within this fraction of its radius.
 @export_range(0.0, 1.0) var blob_lit_fraction: float = 0.55
 

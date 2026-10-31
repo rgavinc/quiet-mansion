@@ -304,7 +304,7 @@ func test_blob_gate() -> String:
 
 func test_activation() -> String:
 	var err := ""
-	for pair in [[1, false], [2, false], [3, false], [4, true], [5, true]]:
+	for pair in [[1, false], [2, false], [3, false], [4, false], [5, true]]:
 		var r := _rig(pair[0])
 		var dg: Node2D = r.dg
 		if dg.current_ambient() >= 0.0:
@@ -328,6 +328,14 @@ func test_activation() -> String:
 	if not dg2.darkness_active():
 		err = "dark StageAmbient (%.3f) should activate even on stage 1" % dg2.current_ambient()
 	amb.color = Color(0.50, 0.42, 0.34)      # stage-1 look
+	# PD: with the real StageTable looks, only stage 5 is dark enough for glints.
+	if err.is_empty():
+		for s in range(1, 6):
+			amb.color = StageTable.look(s).ambient
+			if dg2.darkness_active() != (s == 5):
+				err = "real stage %d ambient (%.3f): active %s, want %s" % [s, dg2.current_ambient(), dg2.darkness_active(), s == 5]
+				break
+	amb.color = Color(0.50, 0.42, 0.34)
 	if err.is_empty() and dg2.darkness_active():
 		err = "light StageAmbient (%.3f) should deactivate even on stage 5" % dg2.current_ambient()
 	amb.color = Color(0.15, 0.17, 0.24)      # stage 4 look: just under the 0.2 threshold

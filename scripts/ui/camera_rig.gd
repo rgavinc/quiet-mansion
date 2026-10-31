@@ -11,13 +11,18 @@ extends Node
 ##      X quick, Y slower and speed capped, so a stair climb glides and never lurches. The target
 ##      is clamped to the limits BEFORE smoothing, so the view never winds up against a wall.
 ##   3. snaps (no easing) when it adopts a camera, and on `snap()`. Nothing else snaps.
-##   4. keeps `Camera2D.offset` (CameraNudge) inside the limits: Godot applies `offset` AFTER
-##      the limit clamp, so an unchecked nudge at a wall shows void past it.
+##   4. folds the flashlight nudge (CameraNudge.current) into that same smoothed target:
+##      goal = clamp(boy + nudge, limits), so the combined view eases into a wall instead of being
+##      cut dead by a clamp applied after the move (QA: 5.5x peak acceleration). `Camera2D.offset`
+##      stays 0 (Godot applies `offset` AFTER the limit clamp, which would show void at a wall).
 ## Camera2D's own limits stay set to the same rect as the safety net.
 
 const DEV_ROOM := Rect2(0, 0, 1280, 720)
 ## Longest frame (s) the follow integrates, so a hitch can't throw the view.
 const MAX_DT := 0.1
+## Group of the CameraNudge(s) whose lean is added to the follow target, and of the rig itself.
+const NUDGE_GROUP := &"fe_camera_nudge"
+const RIG_GROUP := &"fe_camera_rig"
 
 var skin: HudSkin
 ## Camera to drive. Empty = the viewport's current Camera2D.
@@ -26,7 +31,7 @@ var skin: HudSkin
 ## Level bounds the limits came from, and the camera-centre limits (>= one screen per axis).
 var bounds: Rect2 = DEV_ROOM
 var limits: Rect2 = DEV_ROOM
-## Where the (un-nudged) view is centred, and the follow velocity.
+## Where the view (follow + nudge) is centred, and its velocity.
 var center := Vector2.ZERO
 var velocity := Vector2.ZERO
 ## Where `bounds` came from: &"level_nav", &"tilemap" or &"room".
@@ -43,6 +48,7 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	add_to_group(RIG_GROUP)
 	if skin == null:
 		skin = HudSkin.load_default()
 
@@ -51,6 +57,11 @@ func get_camera() -> Camera2D:
 	if not camera_path.is_empty():
 		return get_node_or_null(camera_path) as Camera2D
 	return get_viewport().get_camera_2d() if is_inside_tree() and get_viewport() else null
+
+
+## The rig driving this tree, if any (CameraNudge defers to it).
+static func active_rig(tree: SceneTree) -> CameraRig:
+	return tree.get_first_node_in_group(RIG_GROUP) as CameraRig if tree != null else null
 
 
 # --- pure helpers (tested) -----------------------------------------------------
@@ -167,12 +178,32 @@ func refresh_limits() -> void:
 	_cam.limit_smoothed = false
 
 
-## Jump straight to the target: stage start / new run. No other path snaps.
+## Where the view would centre on the boy with no nudge (the clamped follow target).
+func follow_goal() -> Vector2:
+	var t := follow_target()
+	if _cam == null or not is_instance_valid(_cam):
+		return t.global_position if t else Vector2.ZERO
+	return clamp_center(t.global_position if t else _cam.global_position, limits, view_size(_cam))
+
+
+## The flashlight nudge to add to the follow target (0 with no CameraNudge).
+func nudge_offset() -> Vector2:
+	if not is_inside_tree():
+		return Vector2.ZERO
+	var n := get_tree().get_first_node_in_group(NUDGE_GROUP)
+	return n.get("current") if n != null else Vector2.ZERO
+
+
+## Jump straight to the target: stage start / new run. No other path snaps. The nudge starts
+## again from 0 (the new camera has no lean).
 func snap() -> void:
 	velocity = Vector2.ZERO
 	var t := follow_target()
+	if is_inside_tree():
+		for n in get_tree().get_nodes_in_group(NUDGE_GROUP):
+			n.reset()
 	if _cam != null and is_instance_valid(_cam):
-		center = clamp_center(t.global_position if t else _cam.global_position, limits, view_size(_cam))
+		center = follow_goal()
 		_cam.offset = Vector2.ZERO
 		_apply()
 
@@ -206,7 +237,9 @@ func _process(delta: float) -> void:
 	if skin == null:
 		skin = HudSkin.load_default()
 	var dt := minf(delta, MAX_DT)
-	var goal := clamp_center(t.global_position, limits, view_size(cam))
+	# The nudge goes INTO the target before the clamp: at a wall the goal stops at the wall and the
+	# spring eases the combined view in, with no hard stop.
+	var goal := clamp_center(t.global_position + nudge_offset(), limits, view_size(cam))
 	var sx := smooth_damp(center.x, goal.x, velocity.x, skin.camera_smooth_x, INF, dt)
 	var sy := smooth_damp(center.y, goal.y, velocity.y, skin.camera_smooth_y, skin.camera_max_speed_y, dt)
 	center = Vector2(sx[0], sy[0])
@@ -214,8 +247,8 @@ func _process(delta: float) -> void:
 	_apply()
 
 
-## Put the camera at `center` and keep its nudge offset inside the limits.
+## Put the camera at `center` (follow + nudge, already inside the limits); no separate offset.
 func _apply() -> void:
 	_cam.global_position = center
-	_cam.offset = clamp_offset(center, _cam.offset, camera_limits(_cam), view_size(_cam))
+	_cam.offset = Vector2.ZERO
 	_cam.force_update_scroll()
