@@ -123,7 +123,7 @@ Numbers are Lead's real generator: `tests/price_sweep.gd` builds `LevelGenerator
 |---|---|---|---|
 | 1 | 8 / 6 / 6 | 10 / 5 | 13 / 10 |
 | 2 | 15 / 13 / 10 | 10 / 5 | 20.5 / 16.5 |
-| 3 | 21 / 17 / 13 | 12 / 6 | 27 / 22.5 |
+| 3 | 21 / 17 / 14 | 12 / 6 | 27 / 22.5 |
 | 4 | 32 / 28 / 22 | 14 / 8 | 39 / 33.5 |
 | 5 (no shop after) | 48 / 43 / 36 | 14 / 8 | 55 / 49 |
 
@@ -133,10 +133,10 @@ Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`); `PRICE_SCALE =
 |---|---|---|---|---|---|
 | 1 | 6 vs 6 → 6 vs 6 | 13 / 10 | 8 → 10 | 1.62 → 1.30 | 0.36 → 0.19 |
 | 2 | 10 vs 8 → 10 vs 10 | 22 / 18 | 11 → 17 | 2.09 → 1.29 | 0.71 → 0.11 |
-| 3 | 13 vs 11 → 13 vs 12 | 30 / 25 | 15 → 22 | 2.13 → 1.36 | 0.77 → 0.16 |
+| 3 | 14 vs 11 → 14 vs 12 | 30 / 25 | 15 → 22 | 2.13 → 1.36 | 0.77 → 0.16 |
 | 4 | 22 vs 15 → 22 vs 16 | 43 / 37 | 20 → 27 | 2.30 → 1.59 | 0.88 → 0.36 |
 
-So a typical run affords about one mid-priced item per shop, and the worst roll always covers the cheapest offer. Shop 4 is held below the worst-roll limit on purpose: a player who skips every shop has about 99 gold there, enough for Greedy Sack (86) but not Shadow Cloak (101), so legendaries stay a saving goal. Tests: `shop_prices_follow_price_scale`, `price_affordability_invariants` (`tests/test_item_behaviors.gd`) and `gold_floor_and_worst_roll_vs_cheapest_shop_item` (`tests/test_levelgen.gd`). The hard limit does not depend on the layout: it is the generator's own floor `StageTable.gold_floor_min` (6 / 10 / 12 / 21 for stages 1–4 = piles × the low `gold_amount`), which `price_affordability_invariants` checks against the cheapest offer (6 / 10 / 12 / 16). Only the soft numbers above (median gold, P(two cheapest)) move when layouts change; re-run the sweep after a layout or gold-generation change. Measured on development cd07dda (after #52). Retune by re-running the sweep and the same two checks.
+So a typical run affords about one mid-priced item per shop, and the worst roll always covers the cheapest offer. Shop 4 is held below the worst-roll limit on purpose: a player who skips every shop has about 99 gold there, enough for Greedy Sack (86) but not Shadow Cloak (101), so legendaries stay a saving goal. Tests: `shop_prices_follow_price_scale`, `price_affordability_invariants` (`tests/test_item_behaviors.gd`) and `gold_floor_and_worst_roll_vs_cheapest_shop_item` (`tests/test_levelgen.gd`). The hard limit does not depend on the layout: it is the generator's own floor `StageTable.gold_floor_min` (6 / 10 / 12 / 21 for stages 1–4 = piles × the low `gold_amount`), which `price_affordability_invariants` checks against the cheapest offer (6 / 10 / 12 / 16). Only the soft numbers above (median gold, P(two cheapest)) move when layouts change; re-run the sweep after a layout or gold-generation change. Measured on development cd07dda (after #52) plus Lead's furniture-blocker-fix (#60, 30fabef); against cd07dda alone only the stage-3 worst roll differs (13 instead of 14). Retune by re-running the sweep and the same two checks.
 
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.
