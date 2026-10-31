@@ -10,6 +10,10 @@ extends RefCounted
 ##  - QA B1: feet come from the real collider, so all of the above holds for a shape centred
 ##    on the origin AND for one offset to (0,-14) with the origin at the feet (Lead's generator):
 ##    flat-floor chase actually moves, gap holds, stair climb ends with feet on the upper floor
+##  - Perch (PRODUCT.md "Perching has risk"): a walker under a boy on 1- or 2-tile furniture
+##    catches him after the ~0.6 s reach, never instantly; a hop off at 0.5 s escapes; a hop in
+##    place doesn't reset the reach; 3 tiles is out of reach; landing on furniture creaks (noise
+##    radius x noise_mult), landing on a floor doesn't, and the creak wakes a calm walker below
 
 var _holder: Node2D
 
@@ -29,6 +33,29 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["b1_gap_holds_origin_at_feet", _gap_feet.bind(-14.0)],
 		["b1_stair_feet_on_upper_floor_centred", _stair_feet.bind(0.0)],
 		["b1_stair_feet_on_upper_floor_origin_at_feet", _stair_feet.bind(-14.0)],
+		["perch_reach_delay_fallback_and_overrides", _reach_delay],
+		["perch_1_tile_caught_after_reach", _perch_catch.bind(1, -12.0)],
+		["perch_2_tile_caught_after_reach", _perch_catch.bind(2, -12.0)],
+		["perch_2_tile_caught_after_reach_centred_boy", _perch_catch.bind(2, 0.0)],
+		["perch_1_tile_hop_off_at_0_5s_escapes", _perch_hop_off.bind(1)],
+		["perch_2_tile_hop_off_at_0_5s_escapes", _perch_hop_off.bind(2)],
+		["perch_hop_in_place_does_not_reset_reach", _perch_hop_in_place],
+		["face_chasing_left_flips_right_does_not", _face_chase],
+		["face_no_flicker_at_vx_zero_reach_faces_boy", _face_reach_still],
+		["face_flip_keeps_art_pivot_on_feet", _face_flip_feet],
+		["perch_height_measured_from_walker_feet_both_shapes", _perch_height_feet],
+		["perch_2_tile_caught_walker_origin_at_feet", _perch_catch_walker_shape.bind(-14.0)],
+		["perch_2_tile_caught_walker_centred", _perch_catch_walker_shape.bind(0.0)],
+		["perch_3_tile_out_of_reach", _perch_out_of_reach],
+		["perch_creak_on_furniture_scaled_by_noise_mult", _perch_creak],
+		["perch_creak_wakes_calm_walker_below", _perch_creak_wakes],
+		["perch_creak_vfx_hook_on_landing", _perch_creak_vfx],
+		["sprite_feet_on_collider_feet_centred", _sprite_feet.bind(0.0)],
+		["sprite_feet_on_collider_feet_origin_at_feet", _sprite_feet.bind(-14.0)],
+		["sprite_feet_floater_every_slot", _sprite_feet_floater],
+		["sprite_art_bottom_pixel_on_floor_centred", _sprite_floor.bind(0.0)],
+		["sprite_art_bottom_pixel_on_floor_origin_at_feet", _sprite_floor.bind(-14.0)],
+		["sprite_follows_collider_swapped_after_ready", _sprite_swapped_shape],
 	]
 	for c in checks:
 		PlayerStats.reset(); GameState.reset(); FESignals.reset()
@@ -338,3 +365,517 @@ func _stair_feet(tree: SceneTree, off: float) -> Variant:
 			return "" if p != null else "no boy"
 	if not climbed: return "never climbed (at %s, feet %s)" % [e.global_position, _bottom(e)]
 	return "did not land on the upper floor (feet %s, climbing %s)" % [_bottom(e), e.climbing]
+
+
+# --- perch -------------------------------------------------------------------------------
+const PERCH_FLOOR := 400.0
+const PERCH_X := 312.0
+
+
+## Floor slab + a 4-tile-wide furniture block h tiles (16px) tall at x 280..344, its own WORLD
+## body (like #13's LowFurniture). Returns the furniture body.
+func _furniture(h_tiles: int) -> StaticBody2D:
+	_slab(-400, 1600, PERCH_FLOOR)
+	var b := StaticBody2D.new()
+	b.collision_layer = PlayerStats.LAYER_WORLD
+	b.collision_mask = 0
+	var cs := CollisionShape2D.new(); var r := RectangleShape2D.new()
+	r.size = Vector2(64, h_tiles * 16); cs.shape = r
+	b.add_child(cs)
+	_holder.add_child(b); b.global_position = Vector2(PERCH_X, PERCH_FLOOR - h_tiles * 8)
+	return b
+
+
+## Real side-scroll boy whose r=12 circle sits at (0, off) (-12 = #13's feet origin), feet at `feet`.
+func _perch_boy(feet: Vector2, off := -12.0) -> CharacterBody2D:
+	var p: CharacterBody2D = load("res://scripts/player/player_controller.gd").new()
+	p.side_scroll = true
+	var cs := CollisionShape2D.new(); var c := CircleShape2D.new(); c.radius = 12; cs.shape = c
+	cs.position = Vector2(0, off)
+	p.add_child(cs)
+	_holder.add_child(p); p.global_position = feet - Vector2(0, off + 12.0)
+	return p
+
+
+## Walker 40px left of the furniture's middle, walking in under it (passes through it, like
+## #13's walkers); on 1 tile its head meets the boy and it stops ~22px short, still in reach.
+func _under_walker(furn: StaticBody2D, chase := true, woff := 0.0) -> CharacterBody2D:
+	var e := _walker_feet(Vector2(PERCH_X - 40.0, PERCH_FLOOR), woff)
+	e.add_collision_exception_with(furn)
+	e.sight_override = 1
+	if chase:
+		e._enter_chase(9999)
+	return e
+
+
+class Watch:
+	var started := -1
+	var ended: Array = []   # [frame, caught]
+	var frame := 0
+	func on_start() -> void: started = frame
+	func on_end(caught: bool) -> void: ended.append([frame, caught])
+
+
+func _watch(e: CharacterBody2D) -> Watch:
+	var w := Watch.new()
+	e.reach_started.connect(w.on_start)
+	e.reach_ended.connect(w.on_end)
+	return w
+
+
+## Catch timing and reach height: reach_time / perch_reach_height overrides, else the reach
+## slot's manifest hit_frame / fps and reach_height_px, else 0.6 s / 40 px. The puppet's own
+## slot is checked against whatever the manifest on this branch says (#40 adds it).
+func _reach_delay(_tree: SceneTree) -> Variant:
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	_holder.add_child(e)
+	if e.anim_reach != "puppet_reach_up": return "puppet anim_reach is %s" % e.anim_reach
+	var m: Dictionary = AnimLibrary.meta("puppet_reach_up")
+	var want_t := 0.6
+	var want_h := 40.0
+	if m.has("hit_frame") and float(m.get("fps", 0)) > 0.0: want_t = int(m.hit_frame) / float(m.fps)
+	if float(m.get("reach_height_px", 0)) > 0.0: want_h = float(m.reach_height_px)
+	if absf(e.reach_delay() - want_t) > 1e-6: return "puppet reach %.3fs, want %.3f" % [e.reach_delay(), want_t]
+	if absf(e.reach_height() - want_h) > 1e-6: return "puppet reach height %.1f, want %.1f" % [e.reach_height(), want_h]
+	e.anim_reach = "no_such_slot"
+	if absf(e.reach_delay() - 0.6) > 1e-6: return "no reach anim: delay %.3f, want 0.6 fallback" % e.reach_delay()
+	if absf(e.reach_height() - 40.0) > 1e-6: return "no reach anim: height %.1f, want 40 fallback" % e.reach_height()
+	AnimLibrary.meta("puppet_calm")   # make sure the manifest is loaded before injecting
+	AnimLibrary._entries["__test_reach"] = {"slot": "__test_reach", "frames": 12, "fps": 12, "hit_frame": 9, "reach_height_px": 37}
+	e.anim_reach = "__test_reach"
+	var t: float = e.reach_delay()
+	var h: float = e.reach_height()
+	e.reach_time = 0.9
+	e.perch_reach_height = 50.0
+	var t2: float = e.reach_delay()
+	var h2: float = e.reach_height()
+	AnimLibrary._entries.erase("__test_reach")
+	if absf(t - 0.75) > 1e-6: return "manifest hit_frame 9 @12fps: delay %.3f, want 0.75" % t
+	if absf(h - 37.0) > 1e-6: return "manifest reach_height_px 37: height %.1f" % h
+	if absf(t2 - 0.9) > 1e-6: return "reach_time override ignored (%.3f)" % t2
+	if absf(h2 - 50.0) > 1e-6: return "perch_reach_height override ignored (%.1f)" % h2
+	return ""
+
+
+## Boy perched h tiles up, walker right under him chasing: no hit at all until the reach lands
+## at 0.6 s (36 frames), then exactly one hit.
+func _perch_catch(tree: SceneTree, h_tiles: int, off: float) -> Variant:
+	var furn := _furniture(h_tiles)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - h_tiles * 16), off)
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn)
+	var w := _watch(e)
+	var hit_at := -1
+	for f in 120:
+		w.frame = f
+		await tree.physics_frame
+		if PlayerStats.health < hp:
+			hit_at = f
+			break
+	if w.started < 0: return "never started a reach (h %.1f, boy standing %s, hit_at %d)" % [e.perch_height(p), p._grounded(), hit_at]
+	if hit_at < 0: return "reach never caught him (ended %s)" % [w.ended]
+	var t := (hit_at - w.started) / float(Engine.physics_ticks_per_second)
+	if absf(t - 0.6) > 2.5 / Engine.physics_ticks_per_second: return "caught %.3fs after the reach started, want 0.6" % t
+	if w.ended.is_empty() or not w.ended[0][1]: return "reach_ended(true) not sent (%s)" % [w.ended]
+	if PlayerStats.health != hp - 1: return "health %d, want %d" % [PlayerStats.health, hp - 1]
+	return ""
+
+
+## Hop off to the right at 0.5 s into the reach: the reach is cancelled, never lands, and the
+## boy gets away clean for a full second.
+func _perch_hop_off(tree: SceneTree, h_tiles: int) -> Variant:
+	var furn := _furniture(h_tiles)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - h_tiles * 16))
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn)
+	var w := _watch(e)
+	var f := 0
+	while w.started < 0 and f < 30:
+		w.frame = f; await tree.physics_frame; f += 1
+	if w.started < 0: return "never started a reach"
+	for i in 30:   # 0.5 s of reach
+		w.frame = f; await tree.physics_frame; f += 1
+	if PlayerStats.health < hp: return "hit before the hop (frame %d)" % f
+	Input.action_press(&"move_right")
+	p.jump()
+	var err := ""
+	for i in 60:
+		w.frame = f; await tree.physics_frame; f += 1
+		if PlayerStats.health < hp:
+			err = "hit %d frames after hopping off (reach ended %s)" % [i, w.ended]
+			break
+	Input.action_release(&"move_right")
+	if not err.is_empty(): return err
+	if w.ended.is_empty() or w.ended[0][1]: return "reach not cancelled (ended %s)" % [w.ended]
+	return ""
+
+
+## A hop straight up at 0.5 s and back down onto the same perch resumes the reach: caught
+## within ~0.2 s of landing, not a fresh 0.6 s later.
+func _perch_hop_in_place(tree: SceneTree) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32))
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn)
+	var w := _watch(e)
+	var f := 0
+	while w.started < 0 and f < 30:
+		w.frame = f; await tree.physics_frame; f += 1
+	for i in 30:
+		w.frame = f; await tree.physics_frame; f += 1
+	p.jump()
+	var landed := -1
+	var airborne := false
+	for i in 120:
+		w.frame = f; await tree.physics_frame; f += 1
+		if not p.is_on_floor(): airborne = true
+		if airborne and landed < 0 and p.is_on_floor(): landed = f
+		if PlayerStats.health < hp:
+			if landed < 0: return "hit in mid-air (frame %d)" % f
+			var after := (f - landed) / float(Engine.physics_ticks_per_second)
+			return "" if after <= 0.2 else "reach restarted: caught %.2fs after landing back" % after
+	return "never caught after hopping in place (airborne %s, landed %d, ended %s)" % [airborne, landed, w.ended]
+
+
+## 3 tiles up (48px) is out of reach: no reach, no hit, for 2 s with the walker right under.
+func _perch_out_of_reach(tree: SceneTree) -> Variant:
+	var furn := _furniture(3)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 48))
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn)
+	var w := _watch(e)
+	var under := 0
+	for f in 120:
+		w.frame = f
+		await tree.physics_frame
+		if absf(e._feet().x - PERCH_X) < 20.0: under += 1
+	if under < 60: return "walker wasn't under him (only %d frames)" % under
+	if not p._grounded(): return "boy not standing on the 3-tile piece"
+	if w.started >= 0: return "reached for a 3-tile perch (h %.1f)" % e.perch_height(p)
+	if PlayerStats.health < hp: return "hit on a 3-tile perch"
+	return ""
+
+
+class NoiseLog:
+	var got: Array = []   # [at, radius, source]
+	func on_noise(at: Vector2, radius: float, _l: float, source: Node) -> void: got.append([at, radius, source])
+
+
+## Landing on 1/2/3-tile furniture creaks once at his feet, radius furniture_creak_radius x
+## noise_mult (x2 with a +100% modifier); landing on the bare floor doesn't.
+func _perch_creak(tree: SceneTree) -> Variant:
+	var log := NoiseLog.new()
+	NoiseBus.noise.connect(log.on_noise)
+	var err: String = await _creak_case(tree, log, 0, 1.0)
+	for h in [1, 2, 3]:
+		if err.is_empty(): err = await _creak_case(tree, log, h, 1.0)
+	if err.is_empty():
+		PlayerStats.add_modifier(&"noise_mult", 0.0, 2.0, "perch_test")
+		err = await _creak_case(tree, log, 2, 2.0)
+	NoiseBus.noise.disconnect(log.on_noise)
+	return err
+
+
+func _creak_case(tree: SceneTree, log: NoiseLog, h_tiles: int, mult: float) -> String:
+	var root := Node2D.new()
+	var keep := _holder
+	_holder.add_child(root)
+	_holder = root
+	if h_tiles > 0:
+		_furniture(h_tiles)
+	else:
+		_slab(-400, 1600, PERCH_FLOOR)
+	var top := PERCH_FLOOR - h_tiles * 16
+	var p := _perch_boy(Vector2(PERCH_X, top - 30))   # dropped from 30px above
+	var heard := []
+	p.creaked.connect(func(px): heard.append(px))
+	var want: float = p.furniture_creak_radius * mult
+	log.got.clear()
+	var landed := false
+	for i in 60:
+		await tree.physics_frame
+		if p.is_on_floor(): landed = true
+	_holder = keep
+	root.queue_free()
+	await tree.physics_frame
+	if not landed: return "%d tiles: never landed" % h_tiles
+	var mine := log.got.filter(func(n): return is_instance_valid(n[2]) == false or n[2] is CharacterBody2D)
+	if h_tiles == 0:
+		return "" if mine.is_empty() and heard.is_empty() else "creaked on the bare floor (%s)" % [heard]
+	if mine.size() != 1 or heard.size() != 1: return "%d tiles: %d creaks / %d noises, want 1" % [h_tiles, heard.size(), mine.size()]
+	if absf(float(heard[0]) - h_tiles * 16) > 3.0: return "%d tiles: measured furniture %.1fpx" % [h_tiles, heard[0]]
+	if absf(float(mine[0][1]) - want) > 0.5: return "%d tiles x%.1f: creak radius %.1f, want %.1f" % [h_tiles, mult, mine[0][1], want]
+	if absf((mine[0][0] as Vector2).y - top) > 2.0: return "creak not at his feet (%s)" % mine[0][0]
+	return ""
+
+
+## End to end: a CALM walker idles under 2-tile furniture; the boy drops onto it, the creak
+## sets it chasing, it reaches and catches him (no light, no sight).
+func _perch_creak_wakes(tree: SceneTree) -> Variant:
+	var furn := _furniture(2)
+	var e := _under_walker(furn, false)
+	e.sight_override = 0
+	await tree.physics_frame
+	var hp := PlayerStats.health
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32 - 20))
+	var w := _watch(e)
+	for f in 150:
+		w.frame = f
+		await tree.physics_frame
+		if PlayerStats.health < hp: break
+	if w.started < 0: return "creak didn't lead to a reach (state %d, boy grounded %s)" % [e.state, p._grounded()]
+	return "" if PlayerStats.health < hp else "reached but never caught (ended %s)" % [w.ended]
+
+
+## vfx_creak hook: landing on furniture spawns the manifest vfx_creak one-shot at his feet and
+## frees it after the last frame; a bare floor spawns none. Without the slot (art PR #40 not
+## merged) nothing spawns and nothing errors.
+func _perch_creak_vfx(tree: SceneTree) -> Variant:
+	_furniture(2)
+	var top := PERCH_FLOOR - 32
+	var p := _perch_boy(Vector2(PERCH_X, top - 30))
+	var has_art := AnimLibrary.has_slot("vfx_creak")
+	var seen := false
+	for i in 60:
+		await tree.physics_frame
+		var v := _holder.get_node_or_null("VfxCreak") as AnimatedSprite2D
+		if v != null and not seen:
+			seen = true
+			if v.animation != &"vfx_creak": return "wrong anim %s" % v.animation
+			if absf(v.global_position.y - top) > 2.0: return "vfx at y %.1f, furniture top %d" % [v.global_position.y, top]
+			if v.sprite_frames.get_animation_loop(&"vfx_creak"): return "vfx_creak loops"
+	if not has_art:
+		return "" if not seen else "vfx spawned without a manifest slot"
+	if not seen: return "no vfx_creak on landing on furniture"
+	for i in 60:
+		await tree.physics_frame
+	if _holder.get_node_or_null("VfxCreak") != null: return "vfx_creak not freed after its last frame"
+	if p == null: return "no boy"
+	return ""
+
+
+# --- sprite anchored to the real feet (QA: walkers floated 14px on #13 levels) --------------
+## Manifest pivot = feet of the art. The node origin is NOT the feet when the collider is
+## centred (feet 14px below), so the sprite offset = AnimLibrary.offset_for(slot) + origin->feet.
+
+## Where the art's pivot lands in world space, measured from the sprite's actual offset.
+func _pivot_world(e: CharacterBody2D, slot: String) -> Vector2:
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	var fs: Array = AnimLibrary.meta(slot).get("frame_size", [0, 0])
+	return e.global_position + spr.position + spr.offset + AnimLibrary.pivot(slot) - Vector2(fs[0], fs[1]) * 0.5
+
+
+## Lowest opaque row (inclusive) over every frame of the slot's strip, measured from the PNG.
+func _art_bottom_row(slot: String) -> int:
+	var m := AnimLibrary.meta(slot)
+	var tex: Texture2D = load("res://" + str(m.path))
+	var img := tex.get_image()
+	var fs: Array = m.get("frame_size")
+	var low := -1
+	for f in int(m.get("frames", 1)):
+		for y in range(int(fs[1]) - 1, -1, -1):
+			var hit := false
+			for x in int(fs[0]):
+				if img.get_pixel(f * int(fs[0]) + x, y).a > 0.0:
+					hit = true
+					break
+			if hit:
+				low = maxi(low, y)
+				break
+	return low
+
+
+func _slots_of(e: CharacterBody2D) -> Array:
+	var out: Array = []
+	for s in [e.anim_calm, e.anim_startle, e.chase_slot()]:
+		if not str(s).is_empty() and AnimLibrary.has_slot(s):
+			out.append(s)
+	return out
+
+
+func _sprite_feet(tree: SceneTree, off: float) -> Variant:
+	var e := _walker_feet(Vector2(200, 100), off)
+	await tree.physics_frame
+	var want := _bottom(e)
+	for slot in _slots_of(e):
+		e._play(slot)
+		var got := _pivot_world(e, slot)
+		if got.distance_to(want) > 0.01:
+			return "%s: art pivot at %s, collider feet at %s (off %.0f)" % [slot, got, want, off]
+	return ""
+
+
+func _sprite_feet_floater(tree: SceneTree) -> Variant:
+	for off in [0.0, -14.0]:
+		var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+		e.movement = e.MOVE_FLOAT
+		var cs := CollisionShape2D.new(); var c := CircleShape2D.new(); c.radius = 14; cs.shape = c
+		cs.position = Vector2(0, off); cs.name = "Body"
+		e.add_child(cs)
+		_holder.add_child(e); e.global_position = Vector2(200, 100)
+		await tree.physics_frame
+		var want := _bottom(e)
+		if not e.chase_slot().ends_with("_float"):
+			return "floater chase slot is %s" % e.chase_slot()
+		for slot in _slots_of(e):
+			e._play(slot)
+			var got := _pivot_world(e, slot)
+			if got.distance_to(want) > 0.01:
+				return "floater %s: art pivot at %s, collider feet at %s (off %.0f)" % [slot, got, want, off]
+	return ""
+
+
+## Real physics: the walker stands on a slab; the lowest opaque pixel of every frame of every
+## slot is on the floor (within 0.5px of the physics rest margin, and the 1px the manifest pivot row 63 sinks in), never floating.
+func _sprite_floor(tree: SceneTree, off: float) -> Variant:
+	_slab(0, 600, 200)
+	var e := _walker_feet(Vector2(300, 150), off)
+	for i in 90:
+		await tree.physics_frame
+	if not e.is_on_floor(): return "walker not on floor"
+	var floor_y := 200.0
+	for slot in _slots_of(e):
+		e._play(slot)
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var fs: Array = AnimLibrary.meta(slot).get("frame_size")
+		var bottom_edge := e.global_position.y + spr.position.y + spr.offset.y + float(_art_bottom_row(slot) + 1) - float(fs[1]) * 0.5
+		var gap := bottom_edge - floor_y   # > 0 sinks in, < 0 floats
+		if gap < -0.5 or gap > 1.5:
+			return "%s: lowest art pixel edge %.2f vs floor %.2f (gap %.2f, off %.0f)" % [slot, bottom_edge, floor_y, gap, off]
+	return ""
+
+
+## The collider can be (re)built after _ready (tests, runtime generators): the sprite catches up.
+func _sprite_swapped_shape(tree: SceneTree) -> Variant:
+	var e := _walker_feet(Vector2(200, 100), -14.0)   # origin at the feet at _ready
+	await tree.physics_frame
+	await tree.physics_frame
+	var cs: CollisionShape2D = e.get_node("Body")
+	cs.position = Vector2(0, 0)                      # collider recentred: feet now 14px below the origin
+	e.global_position -= Vector2(0, 14)
+	for i in 3:
+		await tree.physics_frame
+	var got := _pivot_world(e, e.anim_calm)
+	if got.distance_to(_bottom(e)) > 0.01:
+		return "after swap art pivot %s vs feet %s" % [got, _bottom(e)]
+	return ""
+
+
+## Reach height is measured from the walker's real feet (the floor) to the boy's feet, whatever
+## the walker's collider offset: 1 / 2 / 3 tiles read 16 / 32 / 48 against reach_height() 40.
+func _perch_height_feet(tree: SceneTree) -> Variant:
+	for woff in [0.0, -14.0]:
+		for h in [1, 2, 3]:
+			var furn := _furniture(h)
+			var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - h * 16), -12.0)
+			for i in 3: await tree.physics_frame
+			var e := _under_walker(furn, false, woff)
+			for i in 20: await tree.physics_frame
+			var want: float = h * 16.0
+			if absf(e.perch_height(p) - want) > 1.0:
+				return "walker shape off %.0f, %d tiles: perch_height %.2f, want %.1f" % [woff, h, e.perch_height(p), want]
+			if (e.perch_height(p) <= e.reach_height()) != (h <= 2):
+				return "walker shape off %.0f, %d tiles: reach_height %.1f gives wrong in-reach" % [woff, h, e.reach_height()]
+			p.free(); furn.free(); e.free()
+	return ""
+
+
+func _perch_catch_walker_shape(tree: SceneTree, woff: float) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32.0), -12.0)
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn, true, woff)
+	var w := _watch(e)
+	var hit := -1
+	for f in 120:
+		w.frame = f
+		await tree.physics_frame
+		if PlayerStats.health < hp:
+			hit = f
+			break
+	if w.started < 0: return "never started a reach (walker off %.0f)" % woff
+	if hit < 0: return "no catch (walker off %.0f)" % woff
+	if absf((hit - w.started) / 60.0 - e.reach_delay()) > 0.1: return "catch %.2fs after start, want %.2fs" % [(hit - w.started) / 60.0, e.reach_delay()]
+	return ""
+
+
+# --- sprite facing (QA: enemies never mirrored; chase art faces right, "flip_h for left") ----
+func _face_chase(tree: SceneTree) -> Variant:
+	_slab(0, 900, 200)
+	for side in [-1, 1]:
+		var e := _walker_feet(Vector2(450, 200), 0.0)
+		var p := _boy(Vector2(450 + side * 250, 188), true)
+		e.sight_override = 1
+		e._enter_chase(9999)
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var flips := 0
+		var last := spr.flip_h
+		for i in 40:
+			await tree.physics_frame
+			if spr.flip_h != last: flips += 1
+			last = spr.flip_h
+		if spr.flip_h != (side < 0): return "chasing a boy to the %s: flip_h %s" % ["left" if side < 0 else "right", spr.flip_h]
+		if flips > 1: return "flip flickered %d times on a straight chase" % flips
+		e.free(); p.free()
+	return ""
+
+
+## Standing under the boy in REACH (vx 0): faces him, and wobbling the boy a few px around the
+## walker's x (inside the deadzone) never flips it.
+func _face_reach_still(tree: SceneTree) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X - 26.0, PERCH_FLOOR - 32.0), -12.0)   # boy 20px left of the walker
+	for i in 3: await tree.physics_frame
+	var e := _walker_feet(Vector2(PERCH_X - 6.0, PERCH_FLOOR), 0.0)
+	e.add_collision_exception_with(furn)
+	e.sight_override = 1
+	e._enter_chase(9999)
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	var f := 0
+	while e.state != e.State.REACH and f < 90:
+		await tree.physics_frame
+		f += 1
+	if e.state != e.State.REACH: return "no reach (state %d)" % e.state
+	for i in 3: await tree.physics_frame
+	if not spr.flip_h: return "reaching a boy on its left: not flipped"
+	var base := p.global_position
+	var flips := 0
+	var last := spr.flip_h
+	for k in 24:
+		p.global_position = base + Vector2(((k % 4) - 1.5) * 2.0, 0)   # wobble within the deadzone
+		p.global_position.x = e.global_position.x + (3.0 if k % 2 == 0 else -3.0)
+		await tree.physics_frame
+		if e.state != e.State.REACH: break
+		if spr.flip_h != last: flips += 1
+		last = spr.flip_h
+	if flips > 0: return "flipped %d times with the boy within the deadzone" % flips
+	return ""
+
+
+## flip_h on/off keeps the pivot on the feet and the lowest art pixel on the floor: puppet slots
+## are x-symmetric about the pivot (offset.x = 0), so the mirror happens about the feet column.
+func _face_flip_feet(tree: SceneTree) -> Variant:
+	_slab(0, 600, 200)
+	var e := _walker_feet(Vector2(300, 150), 0.0)
+	for i in 90:
+		await tree.physics_frame
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	for dir in [1, -1]:
+		e.face_dir = dir
+		for slot in _slots_of(e):
+			e._play(slot)
+			e._apply_flip()
+			if spr.flip_h != (dir < 0): return "%s: flip_h %s for face_dir %d" % [slot, spr.flip_h, dir]
+			if absf(spr.offset.x) > 0.01: return "%s: offset.x %.2f, mirror would move the feet column" % [slot, spr.offset.x]
+			if absf(AnimLibrary.pivot(slot).x * 2.0 - float(AnimLibrary.meta(slot).frame_size[0])) > 0.01: return "%s pivot not centred" % slot
+			var fs: Array = AnimLibrary.meta(slot).get("frame_size")
+			var edge := e.global_position.y + spr.position.y + spr.offset.y + float(_art_bottom_row(slot) + 1) - float(fs[1]) * 0.5
+			if edge - 200.0 < -0.5 or edge - 200.0 > 1.5: return "%s flipped %d: art bottom %.2f vs floor 200" % [slot, dir, edge]
+			if _pivot_world(e, slot).distance_to(_bottom(e)) > 0.01: return "%s flipped %d: pivot off the feet" % [slot, dir]
+	if e.art_faces_left("puppet_chase"): return "puppet_chase should face right"
+	return ""
