@@ -170,6 +170,9 @@ Lead's stair-opening rail (#13) is the real fix; this is a backup that holds any
 - `_foot_half_width()` is the shape's half width (circle/capsule radius, rect half x), scaled.
 - Before the fix, an offset shape put the ray start 10 px inside the slab, so `_ledge_ahead()` was true every frame and every generated walker froze; stair feet checks were 14 px low.
 
+### Sprite anchored to the real feet
+The manifest pivot is the art's feet, so `_play()` sets `Anim.offset = AnimLibrary.offset_for(slot) + _feet_offset()` (origin -> feet from the collider, same math as `_feet()`), for every slot, walkers and floaters. A centred r=14 circle (tests, the old map, #13's generator) puts the feet 14px below the origin; without the term the art floated 14px. `tick()` re-applies the offset if the collider changes after `_ready`. Pivot row 63 sinks the bottom art row 1px into the floor. Tests: `sprite_feet_*`, `sprite_art_bottom_pixel_on_floor_*` in `tests/scene_enemy.gd` (pivot lands on the collider bottom for centred and (0,-14) shapes; the lowest opaque PNG row of every slot sits within 1px of the slab top).
+
 ### EnemyDef plug-in
 Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copies every field in `DEF_FIELDS` the resource actually has, duck-typed, so an `EnemyDef` class (not written yet) just has to use these names. `movement = &"float"` (stage 4+) makes the enemy ignore gravity and drift straight through slabs and walls; its chase art is `<anim_chase>_float` (`puppet_chase_float`) when the manifest has that slot, else `anim_chase`.
 

@@ -29,6 +29,12 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["b1_gap_holds_origin_at_feet", _gap_feet.bind(-14.0)],
 		["b1_stair_feet_on_upper_floor_centred", _stair_feet.bind(0.0)],
 		["b1_stair_feet_on_upper_floor_origin_at_feet", _stair_feet.bind(-14.0)],
+		["sprite_feet_on_collider_feet_centred", _sprite_feet.bind(0.0)],
+		["sprite_feet_on_collider_feet_origin_at_feet", _sprite_feet.bind(-14.0)],
+		["sprite_feet_floater_every_slot", _sprite_feet_floater],
+		["sprite_art_bottom_pixel_on_floor_centred", _sprite_floor.bind(0.0)],
+		["sprite_art_bottom_pixel_on_floor_origin_at_feet", _sprite_floor.bind(-14.0)],
+		["sprite_follows_collider_swapped_after_ready", _sprite_swapped_shape],
 	]
 	for c in checks:
 		PlayerStats.reset(); GameState.reset(); FESignals.reset()
@@ -338,3 +344,110 @@ func _stair_feet(tree: SceneTree, off: float) -> Variant:
 			return "" if p != null else "no boy"
 	if not climbed: return "never climbed (at %s, feet %s)" % [e.global_position, _bottom(e)]
 	return "did not land on the upper floor (feet %s, climbing %s)" % [_bottom(e), e.climbing]
+
+
+# --- sprite anchored to the real feet (QA: walkers floated 14px on #13 levels) --------------
+## Manifest pivot = feet of the art. The node origin is NOT the feet when the collider is
+## centred (feet 14px below), so the sprite offset = AnimLibrary.offset_for(slot) + origin->feet.
+
+## Where the art's pivot lands in world space, measured from the sprite's actual offset.
+func _pivot_world(e: CharacterBody2D, slot: String) -> Vector2:
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	var fs: Array = AnimLibrary.meta(slot).get("frame_size", [0, 0])
+	return e.global_position + spr.position + spr.offset + AnimLibrary.pivot(slot) - Vector2(fs[0], fs[1]) * 0.5
+
+
+## Lowest opaque row (inclusive) over every frame of the slot's strip, measured from the PNG.
+func _art_bottom_row(slot: String) -> int:
+	var m := AnimLibrary.meta(slot)
+	var tex: Texture2D = load("res://" + str(m.path))
+	var img := tex.get_image()
+	var fs: Array = m.get("frame_size")
+	var low := -1
+	for f in int(m.get("frames", 1)):
+		for y in range(int(fs[1]) - 1, -1, -1):
+			var hit := false
+			for x in int(fs[0]):
+				if img.get_pixel(f * int(fs[0]) + x, y).a > 0.0:
+					hit = true
+					break
+			if hit:
+				low = maxi(low, y)
+				break
+	return low
+
+
+func _slots_of(e: CharacterBody2D) -> Array:
+	var out: Array = []
+	for s in [e.anim_calm, e.anim_startle, e.chase_slot()]:
+		if not str(s).is_empty() and AnimLibrary.has_slot(s):
+			out.append(s)
+	return out
+
+
+func _sprite_feet(tree: SceneTree, off: float) -> Variant:
+	var e := _walker_feet(Vector2(200, 100), off)
+	await tree.physics_frame
+	var want := _bottom(e)
+	for slot in _slots_of(e):
+		e._play(slot)
+		var got := _pivot_world(e, slot)
+		if got.distance_to(want) > 0.01:
+			return "%s: art pivot at %s, collider feet at %s (off %.0f)" % [slot, got, want, off]
+	return ""
+
+
+func _sprite_feet_floater(tree: SceneTree) -> Variant:
+	for off in [0.0, -14.0]:
+		var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+		e.movement = e.MOVE_FLOAT
+		var cs := CollisionShape2D.new(); var c := CircleShape2D.new(); c.radius = 14; cs.shape = c
+		cs.position = Vector2(0, off); cs.name = "Body"
+		e.add_child(cs)
+		_holder.add_child(e); e.global_position = Vector2(200, 100)
+		await tree.physics_frame
+		var want := _bottom(e)
+		if not e.chase_slot().ends_with("_float"):
+			return "floater chase slot is %s" % e.chase_slot()
+		for slot in _slots_of(e):
+			e._play(slot)
+			var got := _pivot_world(e, slot)
+			if got.distance_to(want) > 0.01:
+				return "floater %s: art pivot at %s, collider feet at %s (off %.0f)" % [slot, got, want, off]
+	return ""
+
+
+## Real physics: the walker stands on a slab; the lowest opaque pixel of every frame of every
+## slot is on the floor (within 0.5px of the physics rest margin, and the 1px the manifest pivot row 63 sinks in), never floating.
+func _sprite_floor(tree: SceneTree, off: float) -> Variant:
+	_slab(0, 600, 200)
+	var e := _walker_feet(Vector2(300, 150), off)
+	for i in 90:
+		await tree.physics_frame
+	if not e.is_on_floor(): return "walker not on floor"
+	var floor_y := 200.0
+	for slot in _slots_of(e):
+		e._play(slot)
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var fs: Array = AnimLibrary.meta(slot).get("frame_size")
+		var bottom_edge := e.global_position.y + spr.position.y + spr.offset.y + float(_art_bottom_row(slot) + 1) - float(fs[1]) * 0.5
+		var gap := bottom_edge - floor_y   # > 0 sinks in, < 0 floats
+		if gap < -0.5 or gap > 1.5:
+			return "%s: lowest art pixel edge %.2f vs floor %.2f (gap %.2f, off %.0f)" % [slot, bottom_edge, floor_y, gap, off]
+	return ""
+
+
+## The collider can be (re)built after _ready (tests, runtime generators): the sprite catches up.
+func _sprite_swapped_shape(tree: SceneTree) -> Variant:
+	var e := _walker_feet(Vector2(200, 100), -14.0)   # origin at the feet at _ready
+	await tree.physics_frame
+	await tree.physics_frame
+	var cs: CollisionShape2D = e.get_node("Body")
+	cs.position = Vector2(0, 0)                      # collider recentred: feet now 14px below the origin
+	e.global_position -= Vector2(0, 14)
+	for i in 3:
+		await tree.physics_frame
+	var got := _pivot_world(e, e.anim_calm)
+	if got.distance_to(_bottom(e)) > 0.01:
+		return "after swap art pivot %s vs feet %s" % [got, _bottom(e)]
+	return ""
