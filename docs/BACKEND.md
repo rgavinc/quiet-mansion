@@ -109,36 +109,34 @@ Removed (PD's binding decision): dim_filter, lucky_coin, strong_arm, wide_lens, 
 
 | Rarity | Items (base price) |
 |---|---|
-| common (6) | bright_bulb 7, soft_shoes 7, quick_hands 6, sneakers 6, banister_gloves 5, heavy_vases 6 |
+| common (6) | bright_bulb 7, soft_shoes 7, quick_hands 6, sneakers 6, banister_gloves 4, heavy_vases 6 |
 | uncommon (7) | extra_heart 10, minimap 12, big_pockets 10, thick_sweater 9, gold_magnet 11, music_box 9, cracked_mirror 9 |
 | rare (5) | night_eyes 15, ghost_slippers 16, grandfather_watch 15, rabbits_foot 14, flash_bulb 14 |
 | legendary (2) | shadow_cloak 26, greedy_sack 22 |
 
 Art: the Music Box uses ONE slot, `music_box_world` (Designer PR #30), in flight and landed (`MusicBoxLure.add_visual`: AnimatedSprite2D via AnimLibrary with the manifest pivot, or an amber 12×10 ColorRect when the slot is missing). Icons are `item_icon_<id>`; FE's letter tile covers missing ones.
 
-## Gold economy — PROVISIONAL (pending Lead's per-stage numbers from the #13 sweep)
-Model (`StageTable` stages 1–5 as of #13 @316edf3; Monte Carlo, 20k runs): ground floor = rand(rooms_min..max) rooms of 5–10 units × 4 tiles; every floor has the same width; props per room = round(width_tiles × prop_density); a prop is a vase with p = vase_ratio; a vase holds gold with p 0.45, amount 1–3; loose piles = count × rand(amount range); chests give items, not gold; gold_find_mult 1. Lead's rework (≥3 floors / ~240 tiles on stage 1) will raise these.
+## Gold economy (measured; retuned in `be/price-retune`)
+Numbers are Lead's real generator: `tests/price_sweep.gd` builds `LevelGenerator.generate(seed, stage)` for 1000 seeds × stages 1–5, reads the floor piles, rolls vase gold like `Vase._ready` (global RNG seeded with the level's `build_seed`, p 0.45 of 1–3 each) and rolls each shop's stock with `Shop.roll_stock`. Chests give items, not gold. "Typical income" = all piles + half the vase gold. Run: `godot --headless --path . -s res://tests/price_sweep.gd -- --out /tmp/gold.json --seeds 1000`.
 
-Everything collected:
+| Stage | Piles med / p10 / worst | Vase gold med / p10 | Typical income med / p10 |
+|---|---|---|---|
+| 1 | 8 / 6 / 6 | 10 / 5 | 13 / 9.5 |
+| 2 | 15 / 12 / 10 | 11 / 5 | 20.5 / 17 |
+| 3 | 21 / 18 / 12 | 12 / 6 | 27.5 / 22.5 |
+| 4 | 31 / 28 / 23 | 14 / 8 | 38.5 / 33.5 |
+| 5 (no shop after) | 48 / 42 / 35 | 14 / 8 | 55 / 49 |
 
-| Stage | Vases | Vase gold | Pile gold | Mean | p10 | p90 | Cumulative mean |
-|---|---|---|---|---|---|---|---|
-| 1 | 9.0 | 8.1 | 6.0 | 14.1 | 9 | 20 | 14.1 |
-| 2 | 12.4 | 11.1 | 12.0 | 23.2 | 17 | 30 | 37.2 |
-| 3 | 19.0 | 17.1 | 17.5 | 34.6 | 26 | 44 | 71.9 |
-| 4 | 24.7 | 22.2 | 27.0 | 49.2 | 40 | 59 | 121.1 |
-| 5 | 33.0 | 29.6 | 42.0 | 71.6 | 60 | 84 | 192.7 |
+Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`); `PRICE_SCALE = [1.4, 2.4, 3.1, 3.9]` (was `[1.1, 1.6, 2.2, 2.9]`) and `banister_gloves` 5 → 4. The cheapest pool row is the binding limit: the worst roll (floor piles only) must cover the cheapest offer, so the scale can't exceed worst ÷ cheapest row price; lowering that one row from 5 to 4 let every other price rise. Simulation (4000 runs, carry-over, one purchase per shop = the priciest affordable offer):
 
-Prices: offer = round(row price × `ItemDb.PRICE_SCALE[shop-1]`), `PRICE_SCALE = [1.1, 1.6, 2.2, 2.9]` for the shops after stages 1–4 (stage 5 is the win; no shop). Retune that one array (or row prices) when real numbers land. Check with "realistic" income = all piles + ~50% of vase gold, 4-offer stock rolled with the real weights:
-
-| Shop | Realistic income mean (p10–p90) | Mean offer | Mean cheapest of 4 | P(afford ≥1 from this stage's gold) | P(≥1 with carry, buying the cheapest each shop) |
+| Shop | Worst gold vs cheapest (before → after) | Gold at shop med / p10 (after) | Median offer (before → after) | Gold ÷ median offer (before → after) | P(two cheapest affordable) (before → after) |
 |---|---|---|---|---|---|
-| 1 | 10.1 (7–14) | 8.7 | 6.7 | 0.92 | 0.92 |
-| 2 | 17.6 (13–22) | 13.6 | 9.5 | 1.0 | 1.0 |
-| 3 | 26.1 (20–32) | 18.6 | 12.7 | 1.0 | 1.0 |
-| 4 | 38.1 (32–45) | 25.4 | 16.5 | 1.0 | 1.0 |
+| 1 | 6 vs 6 → 6 vs 6 | 13 / 9 | 8 → 10 | 1.62 → 1.30 | 0.33 → 0.16 |
+| 2 | 10 vs 8 → 10 vs 10 | 22 / 18 | 11 → 17 | 2.09 → 1.29 | 0.71 → 0.11 |
+| 3 | 12 vs 11 → 12 vs 12 | 31 / 25 | 15 → 22 | 2.13 → 1.41 | 0.77 → 0.18 |
+| 4 | 23 vs 15 → 23 vs 16 | 43 / 37 | 20 → 27 | 2.30 → 1.59 | 0.88 → 0.36 |
 
-So ≈1 item per shop (income / mean offer 1.16, 1.29, 1.40, 1.50); a rare (shop 2: 22–26 g, shop 3: 31–35 g) or legendary (shop 4: 64–75 g) needs saving across shops. (Scale was lowered from [1.2, 1.8, 2.5, 3.3] when the 6/7/5/2 mix made the average offer pricier.) Greedy Sack adds ≈1.1 g per vase (≈+27 g on stage 4, +36 on stage 5) but can only be bought at shop 4, where little is left to spend on — flag for Designer. Script: re-run the Monte Carlo with the real per-stage numbers and adjust `PRICE_SCALE` so income/mean offer ≈ 1.2–1.5.
+So a typical run affords about one mid-priced item per shop, and the worst roll always covers the cheapest offer. Shop 4 is held below the worst-roll limit on purpose: a player who skips every shop has about 99 gold there, enough for Greedy Sack (86) but not Shadow Cloak (101), so legendaries stay a saving goal. Tests: `shop_prices_follow_price_scale`, `price_affordability_invariants` (`tests/test_item_behaviors.gd`) and `gold_floor_and_worst_roll_vs_cheapest_shop_item` (`tests/test_levelgen.gd`). Retune by re-running the sweep and the same two checks.
 
 ## Jump, stairs, animation (foundation step 3)
 - `PlayerController.side_scroll` turns on gravity (`PlayerStats.gravity` 980), the Space jump (`jump_velocity` 320, about 52px, so you can't jump to the floor above), and stairs. The generator sets it to true. The old top-down map leaves it off.

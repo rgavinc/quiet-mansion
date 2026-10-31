@@ -24,11 +24,13 @@ const MIX := {"common": 6, "uncommon": 7, "rare": 5, "legendary": 2}
 ## Offers per shop visit.
 const STOCK_SIZE := 4
 
-## PROVISIONAL (pending Lead's per-stage gold from the #13 sweep): shop price
-## multiplier for the shop after stage N (index N-1). Offer price =
-## round(row price * PRICE_SCALE[N-1]); see docs/BACKEND.md "Gold economy" for the math.
-## Retune here (one array) once real numbers land; row prices are relative values.
-const PRICE_SCALE: Array[float] = [1.1, 1.6, 2.2, 2.9]
+## Shop price multiplier for the shop after stage N (index N-1). Offer price =
+## round(row price * PRICE_SCALE[N-1]). Retuned from Lead's real per-stage gold (1000 seeds x
+## stages 1-5, tests/price_sweep.gd; table in docs/BACKEND.md "Gold economy"): the worst roll
+## (every floor pile, no vase gold) covers the cheapest offer at every shop, and a typical run
+## (all piles + half the vase gold, carry-over, one purchase per shop) holds ~1.3x the median
+## offer, i.e. one mid-priced item per shop, not two. Row prices are relative values.
+const PRICE_SCALE: Array[float] = [1.4, 2.4, 3.1, 3.9]
 
 ## Price of `id` in the shop after `stage` (clamps past the table's ends).
 static func shop_price(id: String, stage: int) -> int:
@@ -66,7 +68,7 @@ const ITEMS: Array[Dictionary] = [
 	{id = "sneakers", name = "Sneakers", icon = "item_icon_sneakers", price = 6, rarity = "common",
 		desc = "Move {mul:move_speed} faster. Squeaky: your noise carries {mul:noise_mult} farther.",
 		mods = [{stat = &"move_speed", mul = 1.15}, {stat = &"noise_mult", mul = 1.15}]},
-	{id = "banister_gloves", name = "Banister Gloves", icon = "item_icon_banister_gloves", price = 5, rarity = "common",
+	{id = "banister_gloves", name = "Banister Gloves", icon = "item_icon_banister_gloves", price = 4, rarity = "common",
 		desc = "Climb stairs {mul:climb_speed} faster, but your reach is {mul:pickup_range} shorter.",
 		mods = [{stat = &"climb_speed", mul = 1.35}, {stat = &"pickup_range", mul = 0.9}]},
 	{id = "heavy_vases", name = "Heavy Vases", icon = "item_icon_heavy_vases", price = 6, rarity = "common",

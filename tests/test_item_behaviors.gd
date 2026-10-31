@@ -30,6 +30,7 @@ func run_all() -> Dictionary:
 		["charges_and_items_changed_on_use_and_stage_start", test_charges_signal],
 		["at_most_3_items_pay_with_noise", test_noise_budget],
 		["shop_prices_follow_price_scale", test_price_scale],
+		["price_affordability_invariants", test_price_affordability],
 		["behaviour_rows_load_their_script", test_rows],
 		["each_stat_clamps_to_its_own_bounds_x10", test_stat_bounds],
 		["item_hooks_clamp_to_stat_bounds_x10", test_hook_bounds],
@@ -383,6 +384,42 @@ func test_noise_budget() -> Variant:
 		if loud:
 			louder.append(str(r.id))
 	return "" if louder.size() <= 3 else "%d noise-cost items: %s" % [louder.size(), louder]
+
+
+## Affordability invariants (retune from the measured gold, docs/BACKEND.md "Gold economy").
+## Guaranteed side: StageTable's floor-pile gold (generator-enforced for every level) covers the
+## cheapest offer of the shop after every stage 1-4, with the shop's own rounding. Typical side
+## (from the stage table, no level builds): income = piles x mean amount + half the vase gold
+## (vases = props x vase_ratio, 0.45 x mean 2 gold each) must sit at 0.8-1.6 x the rarity-weighted
+## mean offer, so a typical run affords about one item per shop, not two; and the gold a
+## shop-skipping player has gathered by shop 4 reaches the cheapest legendary (a saving goal).
+func test_price_affordability() -> Variant:
+	var cum := 0.0
+	for st in [1, 2, 3, 4]:
+		var P := StageTable.params(st)
+		var cheap := StageTable.cheapest_shop_price(st)
+		var floor_gold := StageTable.gold_floor_min(P)
+		if floor_gold < cheap: return "shop %d: worst-roll gold %d < cheapest offer %d" % [st, floor_gold, cheap]
+		var ga: Array = P.gold_amount
+		var piles := float(P.gold_piles) * (float(ga[0]) + float(ga[ga.size() - 1])) / 2.0
+		var vases := float(P.props) * float(P.vase_ratio)
+		var income := piles + 0.5 * vases * 0.45 * 2.0
+		cum += income
+		var wsum := 0.0
+		var psum := 0.0
+		for id in ItemDb.pool_for_stage(st):
+			var w := float(ItemDb.RARITY[ItemDb.row(id).rarity].weight)
+			wsum += w
+			psum += w * ItemDb.shop_price(id, st)
+		var mean_offer := psum / wsum
+		var ratio := income / mean_offer
+		if ratio < 0.8 or ratio > 1.6: return "shop %d: typical income %.1f / mean offer %.1f = %.2f, want 0.8-1.6 (one item per shop)" % [st, income, mean_offer, ratio]
+	var legendary := 1 << 30
+	for r in ItemDb.ITEMS:
+		if r.rarity == "legendary":
+			legendary = mini(legendary, ItemDb.shop_price(str(r.id), 4))
+	if cum < float(legendary): return "a saver's gold by shop 4 (%.0f) can't reach the cheapest legendary (%d)" % [cum, legendary]
+	return ""
 
 
 func test_price_scale() -> Variant:
