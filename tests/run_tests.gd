@@ -10,7 +10,7 @@ func _run() -> void:
 	var total_passed := 0
 	var total_checks := 0
 	var all_fail: PackedStringArray = []
-	for path in ["res://tests/test_game_state.gd", "res://tests/test_provenance.gd", "res://tests/test_player_stats.gd", "res://tests/test_fe_ui.gd", "res://tests/test_anim_library.gd", "res://tests/test_pickup_throw.gd", "res://tests/test_jump_stairs.gd", "res://tests/test_enemy_fsm.gd", "res://tests/test_items.gd", "res://tests/test_item_behaviors.gd", "res://tests/test_levelgen.gd"]:
+	for path in ["res://tests/test_game_state.gd", "res://tests/test_provenance.gd", "res://tests/test_player_stats.gd", "res://tests/test_fe_ui.gd", "res://tests/test_anim_library.gd", "res://tests/test_pickup_throw.gd", "res://tests/test_jump_stairs.gd", "res://tests/test_enemy_fsm.gd", "res://tests/test_items.gd", "res://tests/test_item_behaviors.gd", "res://tests/test_levelgen.gd", "res://tests/test_fe_camera.gd"]:
 		var script: Script = load(path)
 		if script == null:
 			printerr("FAIL: load ", path)
@@ -25,7 +25,7 @@ func _run() -> void:
 			printerr("FAIL: ", f)
 	# Scene suites: real physics frames (await).
 	for path in ["res://tests/scene_catch.gd", "res://tests/scene_enemy.gd", "res://tests/scene_rail.gd",
-			"res://tests/scene_chase.gd", "res://tests/scene_determinism.gd"]:
+			"res://tests/scene_chase.gd", "res://tests/scene_determinism.gd", "res://tests/scene_camera.gd"]:
 		var ss: RefCounted = load(path).new()
 		var r: Dictionary = await ss.run_async(self)
 		total_passed += int(r["passed"])
