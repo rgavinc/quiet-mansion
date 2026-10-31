@@ -657,6 +657,20 @@ func _tick_rattle_wait(delta: float, p: Node2D) -> bool:
 	return _rattle_unreach >= rattle_wait - 1e-4
 
 
+## Counting down to the rattle: stay at the piece, pressed toward the boy (no LevelNav detour: with
+## the boy on a tall piece the graph may put him in the far segment and walk it away mid-count).
+func _rattle_hold(delta: float, p: Node2D) -> void:
+	last_known = p.global_position
+	var dx := body_feet(p).x - _feet().x
+	if absf(dx) > 6.0:
+		velocity.x = signf(dx) * chase_speed
+		if _ledge_ahead(signf(dx), chase_speed * delta):
+			velocity.x = 0.0
+	else:
+		velocity.x = 0.0
+	_apply_gravity(delta)
+
+
 func rattle_loop_time() -> float:
 	return anim_length(anim_rattle, RATTLE_SLOT_FALLBACK_LOOP) if not anim_rattle.is_empty() else RATTLE_SLOT_FALLBACK_LOOP
 
@@ -944,6 +958,8 @@ func tick(delta: float) -> void:
 			elif p != null and _tick_rattle_wait(delta, p):
 				_enter_rattle(p)
 				_stop_x(delta)
+			elif p != null and _rattle_unreach > 0.0:
+				_rattle_hold(delta, p)
 			else:
 				_tick_hunt(delta, p, sees)
 		State.REACH:
