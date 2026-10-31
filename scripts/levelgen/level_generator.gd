@@ -154,7 +154,7 @@ static func _furnish(rng: RandomNumberGenerator, L: Dictionary, P: Dictionary, u
 		var w := rng.randi_range(2, 3)
 		var h := rng.randi_range(3, 4) if rng.randf() < float(P.get("tall_furniture_chance", 0.0)) else rng.randi_range(1, 2)
 		for _try in 12:
-			if _place_piece(rng, L, used, r, w, h):
+			if (_place_cluster(rng, L, used, r, w) if h == LevelValidator.MOUNT_TILES else _place_piece(rng, L, used, r, w, h)):
 				break
 
 
@@ -192,6 +192,42 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 	return true
 
 
+## A climb-over piece: a MOUNT_TILES-tall piece of width `w` with a 1-2 tile step touching it on
+## each side, placed as one block (step, tall, step; the steps are plain furniture). Every single
+## climb on the way over is <= 32px, so no stat combo that slows the boy can strand him (the bare
+## 48px piece clears a capped jump by only 4px). False (nothing placed) if it doesn't fit, breaks a
+## rail rule, or isn't mount_passable there.
+static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary, r: Dictionary, w: int) -> bool:
+	var f: int = r.floor
+	var wl := rng.randi_range(2, 3)
+	var wr := rng.randi_range(2, 3)
+	var hl := rng.randi_range(1, LevelValidator.MOUNT_STEP_MAX_TILES)
+	var hr := rng.randi_range(1, LevelValidator.MOUNT_STEP_MAX_TILES)
+	var total := wl + w + wr
+	var lo := int(r.x0) + 3
+	var hi := int(r.x1) - 3 - total
+	if hi < lo:
+		return false
+	var fx := rng.randi_range(lo, hi)
+	var a := float((fx - 1) * TILE)
+	var b := float((fx + total + 1) * TILE)
+	for s in used[f]:
+		if b > s.x and a < s.y:
+			return false
+	var parts := [{floor = f, x = fx, w = wl, h = hl}, {floor = f, x = fx + wl, w = w, h = LevelValidator.MOUNT_TILES},
+			{floor = f, x = fx + wl + w, w = wr, h = hr}]
+	for q in parts:
+		if not LevelValidator.furniture_rail_ok(L, f, int(q.x) * TILE, (int(q.x) + int(q.w)) * TILE, int(q.h)):
+			return false
+	var n: int = L.furniture.size()
+	L.furniture.append_array(parts)
+	if not LevelValidator.mount_passable(L, parts[1]):
+		L.furniture.resize(n)
+		return false
+	used[f].append(Vector2(a, b))
+	return true
+
+
 static func _solid_wall_at(L: Dictionary, f: int, x: int) -> bool:
 	for wl in L.walls:
 		if int(wl.floor) == f and int(wl.x) == x:
@@ -220,8 +256,8 @@ static func _unreached(L: Dictionary) -> int:
 	return n
 
 
-## Every floor gets a piece the boy can climb over (LevelValidator.mount_passable): a 3-tile
-## piece needs no flanking tricks - it does not split the floor - only open floor on both sides.
+## Every floor gets a climb-over piece (LevelValidator.mount_passable, placed by _place_cluster
+## with a step on each side): it does not split the floor.
 static func _ensure_mountable(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary) -> void:
 	for f in int(L.floors):
 		if _has_mountable(L, f):
@@ -234,7 +270,7 @@ static func _ensure_mountable(rng: RandomNumberGenerator, L: Dictionary, used: D
 			var r: Dictionary = rooms[rng.randi_range(0, rooms.size() - 1)]
 			var n: int = used[f].size()
 			var fn: int = L.furniture.size()
-			if _place_piece(rng, L, used, r, rng.randi_range(2, 3), LevelValidator.MOUNT_TILES):
+			if _place_cluster(rng, L, used, r, rng.randi_range(2, 3)):
 				if _has_mountable(L, f):
 					break
 				L.furniture.resize(fn)

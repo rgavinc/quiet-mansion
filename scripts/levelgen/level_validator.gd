@@ -39,9 +39,10 @@ const FLOOR_PX := 160.0
 const MIN_FLOORS := 3
 const MAX_FLOORS := 4
 const MAX_JUMP_TILES := 2
-const MOUNT_TILES := 3             # tallest piece the boy can jump onto at the stat caps (apex ~52px > 48px)
-const MOUNT_MARGIN_PX := 2.0
-const MOUNT_RUN_TILES := 2        # open floor wanted on both sides of a climbable piece       # apex clearance over the top edge needed to count as climbable
+const MOUNT_TILES := 3             # the climb-over piece: 48px, above one capped jump from the floor (apex 52.2px, margin 4.2px) - never climbed directly
+const MOUNT_STEP_MAX_TILES := 2   # steps touching it are 1-2 tiles, so every single climb is <= 2 tiles (32px)
+const MOUNT_MARGIN_PX := 16.0     # apex clearance over the tallest single climb required (actual margin: 52.2 - 32 = 20.2px)
+const MOUNT_RUN_TILES := 2        # open floor wanted beyond the steps on both sides
 const MIN_ROOM_TILES := 24
 const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
@@ -395,21 +396,54 @@ static func hard_blockers(L: Dictionary, f: int) -> Array:
 	return out
 
 
-## A MOUNT_TILES-tall piece does not split its segment: the boy jumps onto it (can_mount) and
-## walks off the far side. Needs MOUNT_RUN_TILES of open floor on both sides - to take the
-## jump from, and to be able to jump back - and no other MOUNT_TILES piece closer than that.
+## The two steps of a climb-over piece: furniture of 1..MOUNT_STEP_MAX_TILES tiles touching it
+## on each side. {left, right} or {} if either is missing.
+static func step_pieces(L: Dictionary, fu: Dictionary) -> Dictionary:
+	var out := {}
+	var f := int(fu.floor)
+	for o in L.get("furniture", []):
+		if o == fu or int(o.floor) != f or int(o.h) < 1 or int(o.h) > MOUNT_STEP_MAX_TILES:
+			continue
+		if int(o.x) + int(o.w) == int(fu.x):
+			out["left"] = o
+		elif int(fu.x) + int(fu.w) == int(o.x):
+			out["right"] = o
+	return out if out.has("left") and out.has("right") else {}
+
+
+## Tallest single climb (px) on the way over a climb-over piece: floor -> step -> top, either side.
+static func max_single_climb_px(fu: Dictionary, steps: Dictionary) -> float:
+	var m := 0.0
+	for k in ["left", "right"]:
+		var sh := float(int(steps[k].h) * TILE)
+		m = maxf(m, maxf(sh, float(int(fu.h) * TILE) - sh))
+	return m
+
+
+## px of capped-jump apex left over the tallest single climb (20.2px with 2-tile steps).
+static func climb_margin_px(fu: Dictionary, steps: Dictionary) -> float:
+	return max_jump_apex() - max_single_climb_px(fu, steps)
+
+
+## A MOUNT_TILES-tall piece with a step on each side does not split its segment: the boy climbs
+## step -> top -> step (no single climb over 2 tiles = 32px, so item combos that slow him cannot
+## strand him) and walks off the far side. Needs MOUNT_RUN_TILES of open floor beyond both steps
+## and no other MOUNT_TILES piece closer than that.
 static func mount_passable(L: Dictionary, fu: Dictionary) -> bool:
-	if int(fu.h) != MOUNT_TILES or not can_mount(MOUNT_TILES * TILE):
+	if int(fu.h) != MOUNT_TILES:
+		return false
+	var st := step_pieces(L, fu)
+	if st.is_empty() or climb_margin_px(fu, st) < MOUNT_MARGIN_PX:
 		return false
 	var f := int(fu.floor)
-	var a := float(fu.x * TILE)
-	var b := float((fu.x + fu.w) * TILE)
 	var run := MOUNT_RUN_TILES * TILE
+	var a := float(int(st.left.x) * TILE)
+	var b := float((int(st.right.x) + int(st.right.w)) * TILE)
 	for bl in hard_blockers(L, f):
 		if bl.y > a - run and bl.x < b + run:
 			return false
 	for o in L.get("furniture", []):
-		if o != fu and int(o.floor) == f and int(o.h) == MOUNT_TILES:
+		if o != fu and o != st.left and o != st.right and int(o.floor) == f and int(o.h) == MOUNT_TILES:
 			if (o.x + o.w) * TILE > a - run and o.x * TILE < b + run:
 				return false
 	return true
@@ -660,7 +694,8 @@ static func in_line_of_sight(L: Dictionary, a: Vector2, b: Vector2) -> bool:
 	return true
 
 
-## True if a jump at the stat caps lifts the feet at least MOUNT_MARGIN_PX over a top h_px high.
+## True if a jump at the stat caps lifts the feet at least MOUNT_MARGIN_PX over a top h_px high
+## (kinematic bound; the real climb is simulated in tests/climb_sim.gd).
 static func can_mount(h_px: float) -> bool:
 	return max_jump_apex() - h_px >= MOUNT_MARGIN_PX
 
