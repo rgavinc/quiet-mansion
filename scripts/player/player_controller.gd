@@ -37,6 +37,16 @@ signal creaked(furniture_px: float)
 ## Furniture = something he lands on with another world surface below it within this many px
 ## (4-tile furniture is 64px; a 16px slab over a room has 144px of air below).
 const FURNITURE_PROBE_PX := 80.0
+## Rattle shake-off (Enemy.RATTLE): a small kick and a push off the piece's edge, real physics.
+const SHAKE_PUSH_SPEED := 110.0
+const SHAKE_KICK_SPEED := 130.0
+const SHAKE_MAX_TIME := 1.2
+var _shake_dir: float = 0.0
+var _shake_left: float = 0.0
+var _shake_air: bool = false
+var _shake_still: float = 0.0
+var _shake_last: Vector2 = Vector2.ZERO
+signal shaken_off(dir: float)
 var _was_grounded: bool = true
 
 const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry",
@@ -174,15 +184,73 @@ func tick(delta: float, dir: Vector2) -> void:
 				facing = 1 if dir.x > 0.0 else -1
 			if side_scroll:
 				velocity.x = dir.x * move_speed()
+				if _shake_left > 0.0:
+					_tick_shake(delta)
 				_apply_gravity(delta)
-				if _jump_queued and _grounded():
+				if _jump_queued and _grounded() and _shake_left <= 0.0:
 					velocity.y = -PlayerStats.get_stat(&"jump_velocity")
-				if absf(dir.y) > 0.5:
+				if absf(dir.y) > 0.5 and _shake_left <= 0.0:
 					_try_enter_stair(dir.y)
 			else:
 				velocity = dir * move_speed()
 			_update_hover_select()
 	_jump_queued = false
+
+
+## Shaken off furniture toward `dir` (-1 / +1): input is ignored until he has left the ground
+## and landed (or SHAKE_MAX_TIME). Collisions still apply, so he can't enter a wall or a floor.
+func shake_off(dir: float) -> void:
+	if not side_scroll or dir == 0.0:
+		return
+	if state == State.PICKUP:
+		_cancel_pickup()
+	_shake_dir = signf(dir)
+	_shake_left = SHAKE_MAX_TIME
+	_shake_air = false
+	_shake_still = 0.0
+	_shake_last = global_position
+	facing = int(_shake_dir)
+	if _grounded():
+		velocity.y = -SHAKE_KICK_SPEED
+	shaken_off.emit(_shake_dir)
+
+
+func _tick_shake(delta: float) -> void:
+	_shake_left -= delta
+	velocity.x = _shake_dir * SHAKE_PUSH_SPEED
+	# watchdog: wedged (no movement for 0.3 s) -> control comes back
+	if global_position.distance_to(_shake_last) < 0.5:
+		_shake_still += delta
+		if _shake_still >= 0.3:
+			_shake_left = 0.0
+	else:
+		_shake_still = 0.0
+		_shake_last = global_position
+	if not _grounded():
+		_shake_air = true
+	elif _shake_air and furniture_under() <= 0.0 and not _standing_on_body():
+		_shake_left = 0.0   # back on a floor (landing on the piece again keeps pushing him off)
+	if _shake_left <= 0.0:
+		velocity.x = 0.0
+
+
+## Landed on a walker's head rather than the floor: keep pushing, he walks off it.
+func _standing_on_body() -> bool:
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y < -0.5 and c.get_collider() is CharacterBody2D:
+			return true
+	return false
+
+
+## Hands control back at once (the walker's watchdog when a shake wedges him).
+func end_shake() -> void:
+	_shake_left = 0.0
+	velocity.x = 0.0
+
+
+func is_shaken() -> bool:
+	return _shake_left > 0.0
 
 
 ## Walk speed now: the stat, times item carry penalties for what is held (Heavy Vases).
