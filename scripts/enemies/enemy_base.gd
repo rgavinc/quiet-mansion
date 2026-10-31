@@ -42,7 +42,7 @@ const MOVE_FLOAT := &"float"
 @export var hear_radius: float = 160.0       # legacy GameState.noise_made path only
 @export var hearing_mult: float = 1.0        # scales NoiseBus radius for this enemy
 @export var sight_range: float = 560.0
-@export var memory_time: float = 4.0         # s of lost sight before giving up
+@export var memory_time: float = 3.0         # s of lost sight before giving up (at give_up_distance)
 ## PRODUCT.md: the gauge drains faster the farther the boy is. Drain rate while searching =
 ## (1 / memory_time) * clamp(distance / give_up_distance, 0.25, 4): at give_up_distance it
 ## empties in memory_time; right next to him it takes 4x longer.
