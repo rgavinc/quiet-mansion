@@ -186,14 +186,14 @@ func test_run_over_flag() -> String:
 	return "" if ok else "death did not set run_over"
 
 
-## Lead (#13): stat_max / stat_min return BASE x bound in the stat's units (BASE when unbounded).
+## Lead (#13): stat_max / stat_min return the bound in the stat's own units (STAT_BOUNDS rows are absolute; BASE when unbounded).
 func test_stat_caps_abs() -> String:
 	var ps: Script = load("res://scripts/autoload/player_stats.gd")
 	for st in ps.STAT_BOUNDS:
 		if not ps.BASE.has(st):
 			continue
 		var b: Array = ps.STAT_BOUNDS[st]
-		if not is_equal_approx(ps.stat_max(st), float(ps.BASE[st]) * float(b[1])) or not is_equal_approx(ps.stat_min(st), float(ps.BASE[st]) * float(b[0])):
+		if not is_equal_approx(ps.stat_max(st), float(b[1])) or not is_equal_approx(ps.stat_min(st), float(b[0])):
 			return "%s: cap %s..%s vs bound %s" % [st, ps.stat_min(st), ps.stat_max(st), b]
 	if not is_equal_approx(ps.stat_max(&"move_speed"), 280.0) or not is_equal_approx(ps.stat_min(&"move_speed"), 70.0):
 		return "move_speed caps %s..%s, want 70..280" % [ps.stat_min(&"move_speed"), ps.stat_max(&"move_speed")]

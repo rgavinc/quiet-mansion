@@ -94,12 +94,12 @@ static func clamp_mult(stat: StringName, m: float) -> float:
 ## so a later switch of STAT_BOUNDS to absolute rows only changes these two functions.
 static func stat_max(stat: StringName) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
-	return float(BASE[stat]) * (float(b[1]) if b.size() == 2 else 1.0)
+	return float(b[1]) if b.size() == 2 else float(BASE[stat])
 
 
 static func stat_min(stat: StringName) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
-	return float(BASE[stat]) * (float(b[0]) if b.size() == 2 else 1.0)
+	return float(b[0]) if b.size() == 2 else float(BASE[stat])
 
 
 var health: int = 3
