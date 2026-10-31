@@ -121,6 +121,8 @@ func _stacks() -> Array:
 			order.append(by_id[id])
 		var e: Dictionary = by_id[id]
 		e.count += 1
+		if _in_pocket(it):
+			e.pocket = true   # still counted (and ordered) as charged, but drawn without pips
 		e.charges += int(it.get("charges")) if "charges" in it else 0
 		e.max_charges += int(it.get("max_charges")) if "max_charges" in it else 0
 	# stable: group key, then first-owned index
@@ -189,6 +191,14 @@ func max_width() -> float:
 	return per_row * tile_size + (per_row - 1) * sep
 
 
+## Music Box copies keep a tile here, but with PR #41's lure pocket (PlayerStats.lure_max())
+## their charges live in the pocket pips next to the hand strip, so the tile shows none: no
+## pips and no "spent" fade (it keeps its charged-first place in the order). Without #41 they
+## stay ordinary charged items.
+func _in_pocket(it: Object) -> bool:
+	return it.has_method(&"lure_dict") and stats != null and stats.has_method(&"lure_max")
+
+
 func _rim(rarity: String) -> Color:
 	return skin.rarity_colors.get(rarity, skin.rarity_colors.get("common", Color.WHITE))
 
@@ -226,7 +236,7 @@ func hidden_entries() -> Array:
 ## One line per stack: "Name", "Name ×N", plus " (c/max charges)" for charged items.
 static func entry_line(e: Dictionary) -> String:
 	var t: String = e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]
-	if e.max_charges > 0:
+	if e.max_charges > 0 and not e.get("pocket", false):
 		t += " (%d/%d charges)" % [e.charges, e.max_charges]
 	return t
 
@@ -289,7 +299,7 @@ func _make_entry(e: Dictionary) -> Control:
 	var art: Control = box.get_child(box.get_child_count() - 1)
 	if e.count > 1:
 		box.add_child(_badge(e.count))
-	if e.max_charges > 0:
+	if e.max_charges > 0 and not e.get("pocket", false):   # pocketed Music Box: the lure pocket shows its charges
 		var row := HBoxContainer.new()
 		row.name = "Charges"
 		row.alignment = BoxContainer.ALIGNMENT_CENTER

@@ -37,6 +37,19 @@ signal creaked(furniture_px: float)
 ## Furniture = something he lands on with another world surface below it within this many px
 ## (4-tile furniture is 64px; a 16px slab over a room has 144px of air below).
 const FURNITURE_PROBE_PX := 80.0
+## Rattle shake-off (Enemy.RATTLE): a small kick and a push off the piece's edge, real physics.
+const SHAKE_PUSH_SPEED := 110.0
+const SHAKE_KICK_SPEED := 130.0
+const SHAKE_MAX_TIME := 1.2
+var _shake_dir: float = 0.0
+var _shake_left: float = 0.0
+var _shake_speed: float = SHAKE_PUSH_SPEED
+var _shake_target_x: float = NAN   # stop sideways here and drop straight down
+var _shake_stay: bool = false   # touchdown on a step (<= 2 tiles) ends the shake there
+var _shake_air: bool = false
+var _shake_still: float = 0.0
+var _shake_last: Vector2 = Vector2.ZERO
+signal shaken_off(dir: float)
 var _was_grounded: bool = true
 
 const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry",
@@ -62,7 +75,7 @@ func _ready() -> void:
 	_hp_seen = PlayerStats.health
 	PlayerStats.health_changed.connect(_on_health_changed)
 	# Every stage builds a fresh player: this IS stage start for item behaviour
-	# (charges refill, Music Box lure into the hands, ...).
+	# (charges refill, Music Box lures into the pocket, ...).
 	PlayerStats.begin_stage(self)
 
 
@@ -174,15 +187,101 @@ func tick(delta: float, dir: Vector2) -> void:
 				facing = 1 if dir.x > 0.0 else -1
 			if side_scroll:
 				velocity.x = dir.x * move_speed()
+				if _shake_left > 0.0:
+					_tick_shake(delta)
 				_apply_gravity(delta)
-				if _jump_queued and _grounded():
+				if _jump_queued and _grounded() and _shake_left <= 0.0:
 					velocity.y = -PlayerStats.get_stat(&"jump_velocity")
-				if absf(dir.y) > 0.5:
+				if absf(dir.y) > 0.5 and _shake_left <= 0.0:
 					_try_enter_stair(dir.y)
 			else:
 				velocity = dir * move_speed()
 			_update_hover_select()
 	_jump_queued = false
+
+
+## Shaken off furniture toward `dir` (-1 / +1): input is ignored until he has left the ground
+## and landed (or SHAKE_MAX_TIME). Collisions still apply, so he can't enter a wall or a floor.
+## With `target_x` / `target_y` (the walker's chosen landing: x and the surface y under it) the
+## sideways speed is solved so the ballistic arc touches down there (clamped, so a wall or a floor
+## still stops him); `stay` ends the shake when he touches down on a step instead of pushing him
+## on over it (never on a tall piece: >32 px keeps pushing).
+func shake_off(dir: float, target_x: float = NAN, target_y: float = NAN, stay: bool = false, clear_x: float = NAN) -> void:
+	if not side_scroll or dir == 0.0:
+		return
+	if state == State.PICKUP:
+		_cancel_pickup()
+	_shake_dir = signf(dir)
+	_shake_left = SHAKE_MAX_TIME
+	_shake_air = false
+	_shake_still = 0.0
+	_shake_last = global_position
+	facing = int(_shake_dir)
+	if _grounded():
+		velocity.y = -SHAKE_KICK_SPEED
+	_shake_speed = SHAKE_PUSH_SPEED
+	_shake_stay = stay and not is_nan(target_x)
+	_shake_target_x = NAN
+	if not is_nan(target_x) and not is_nan(target_y):
+		_solve_shake(target_x, clear_x)
+	shaken_off.emit(_shake_dir)
+
+
+## Sideways speed for a shake that must land at (target_x, target_y): fast enough to be past
+## `clear_x` (the tall piece's edge plus half his width) while still above its top, then he stops
+## sideways at target_x and drops straight down, so a 32 px step is hit even with 16 px to spare.
+func _solve_shake(target_x: float, clear_x: float) -> void:
+	_shake_target_x = target_x
+	var g := float(PlayerStats.get_stat(&"gravity"))
+	var feet := Enemy.body_feet(self)
+	var dxc := 0.0 if is_nan(clear_x) else maxf(0.0, (clear_x - feet.x) * _shake_dir)
+	var vx := SHAKE_PUSH_SPEED
+	while vx < 260.0 and dxc > 0.0:
+		var tc := dxc / vx
+		if velocity.y * tc + 0.5 * g * tc * tc <= -2.0:
+			break
+		vx += 10.0
+	_shake_speed = minf(vx, 260.0)
+
+
+func _tick_shake(delta: float) -> void:
+	_shake_left -= delta
+	velocity.x = _shake_dir * _shake_speed
+	if not is_nan(_shake_target_x) and (global_position.x - _shake_target_x) * _shake_dir >= -0.5:
+		velocity.x = 0.0
+	# watchdog: wedged (no movement for 0.3 s) -> control comes back
+	if global_position.distance_to(_shake_last) < 0.5:
+		_shake_still += delta
+		if _shake_still >= 0.3:
+			_shake_left = 0.0
+	else:
+		_shake_still = 0.0
+		_shake_last = global_position
+	if not _grounded():
+		_shake_air = true
+	elif _shake_air and (furniture_under() <= 0.0 or (_shake_stay and furniture_under() <= 33.0)) and not _standing_on_body():
+		_shake_left = 0.0   # back on a floor (landing on the piece again keeps pushing him off)
+	if _shake_left <= 0.0:
+		velocity.x = 0.0
+
+
+## Landed on a walker's head rather than the floor: keep pushing, he walks off it.
+func _standing_on_body() -> bool:
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y < -0.5 and c.get_collider() is CharacterBody2D:
+			return true
+	return false
+
+
+## Hands control back at once (the walker's watchdog when a shake wedges him).
+func end_shake() -> void:
+	_shake_left = 0.0
+	velocity.x = 0.0
+
+
+func is_shaken() -> bool:
+	return _shake_left > 0.0
 
 
 ## Walk speed now: the stat, times item carry penalties for what is held (Heavy Vases).
@@ -333,23 +432,38 @@ func interact_released() -> void:
 # --- tap: throw or knock ----------------------------------------------------
 func _tap() -> void:
 	var held := inventory.current()
-	if not held.is_empty():
-		var tgt: Node2D = FESignals.selected_enemy
-		if held.get("throwable", false) and is_instance_valid(tgt):
-			throw_at(tgt)
-		elif held.get("lure", false):
-			# Music Box: no target needed; flies the way the boy FACES (PRODUCT.md), never the
-			# last mouse aim (that only means something while the light is on).
-			throw_toward(global_position + Vector2(facing, 0) * LURE_THROW_DIST)
-		return  # holding something with no ringed enemy: tap does nothing
-	_try_knock()
+	var tgt: Node2D = FESignals.selected_enemy
+	if not held.is_empty() and held.get("throwable", false) and is_instance_valid(tgt):
+		throw_at(tgt)
+	elif held.is_empty() and knock_target() != null:
+		_try_knock()
+	elif PlayerStats.lure_charges() > 0:
+		throw_lure()
+	# else: holding something with no ringed enemy and no lures: tap does nothing
+
+
+## What PlayerStats.tap_throws_lure() asks: would a tap with NOTHING ringed throw a lure?
+## Yes with lures in the pocket, unless the hands are empty and a prop is in knock reach.
+func tap_would_throw_lure() -> bool:
+	if PlayerStats.lure_charges() <= 0:
+		return false
+	return not (inventory.current().is_empty() and knock_target() != null)
+
+
+## Music Box: throws one pocket lure the way the boy FACES (PRODUCT.md), never the last
+## mouse aim. Hands are untouched. Null with an empty pocket.
+func throw_lure() -> Node2D:
+	var lure := PlayerStats.next_lure()
+	if lure.is_empty():
+		return null
+	return _launch(lure, null, global_position + Vector2(facing, 0) * LURE_THROW_DIST)
 
 
 func throw_at(tgt: Node2D) -> Node2D:
 	return _throw(tgt, Vector2.INF)
 
 
-## Throws the held item toward a world point (Music Box lure with no enemy ringed).
+## Throws the held item toward a world point.
 const LURE_THROW_DIST := 320.0
 
 func throw_toward(point: Vector2) -> Node2D:
@@ -360,6 +474,10 @@ func _throw(tgt: Node2D, point: Vector2) -> Node2D:
 	var it := inventory.take_current()
 	if it.is_empty():
 		return null
+	return _launch(it, tgt, point)
+
+
+func _launch(it: Dictionary, tgt: Node2D, point: Vector2) -> Node2D:
 	PlayerStats.dispatch_throw(it, tgt if tgt != null else point)   # item hooks may tag the dict
 	var t := Node2D.new()
 	t.set_script(load("res://scripts/world/thrown_object.gd"))
@@ -375,7 +493,10 @@ func _throw(tgt: Node2D, point: Vector2) -> Node2D:
 ## where it lands is hit (calm dies, enraged is stunned). The break makes the noise, once.
 const KNOCK_FALL_DIST := 28.0
 
-func _try_knock() -> void:
+## The ONE nearest knockable prop in range on the side the boy faces (null if none).
+func knock_target() -> WorldObject:
+	if not is_inside_tree():
+		return null
 	var best: WorldObject = null
 	var best_d := INF
 	for node in get_tree().get_nodes_in_group("world_objects"):
@@ -388,6 +509,11 @@ func _try_knock() -> void:
 		if d < best_d:
 			best_d = d
 			best = node
+	return best
+
+
+func _try_knock() -> void:
+	var best := knock_target()
 	if best == null:
 		return
 	var land := best.global_position + Vector2(facing * KNOCK_FALL_DIST, 0)

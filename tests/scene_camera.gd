@@ -5,6 +5,8 @@ extends RefCounted
 ##  - the rig snaps on a new level and eases afterwards
 ##  - the view never leaves the limits, through a stair climb and with the flashlight nudge pressed
 ##    into each edge (Camera2D applies `offset` after its limit clamp, so this needs the rig)
+##  - the flashlight nudge held into a wall eases in (no hard stop: peak acceleration <= 1.5x the
+##    normal follow peak) on several seeds and stages
 ##  - the seed readout matches the run seed + stage and hides under every end screen
 
 const VIEW := Vector2(1280, 720)
@@ -18,6 +20,7 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["limits_equal_level_bounds_on_seeds_and_stages", _limits_on_levels],
 		["rig_snaps_on_stage_start_then_eases", _snap_then_ease],
 		["nudge_at_every_edge_stays_inside_limits", _nudge_edges],
+		["nudge_held_into_a_wall_eases_in_without_a_hard_stop", _nudge_eases_into_walls],
 		["stair_climb_on_real_level_stays_inside_limits", _real_stair],
 		["stair_climb_tall_level_glides_inside_limits", _tall_stair],
 		["seed_readout_matches_run_and_hides_under_end_screens", _readout],
@@ -186,7 +189,10 @@ func _nudge_edges(tree: SceneTree) -> String:
 			if not err.is_empty():
 				err = "%s, frame %d: %s" % [c[0], i, err]
 				break
-			max_off = max_off.max(cam.offset.abs())
+			max_off = max_off.max((cam.get_screen_center_position() - rig.follow_goal()).abs())
+			if cam.offset != Vector2.ZERO:
+				err = "%s, frame %d: the rig keeps Camera2D.offset at 0, got %s" % [c[0], i, cam.offset]
+				break
 		bus.select_enemy(null)
 		e.queue_free()
 		if not err.is_empty():
@@ -202,14 +208,111 @@ func _nudge_edges(tree: SceneTree) -> String:
 		bus.select_enemy(e2)
 		for i in 90:
 			await tree.process_frame
-		if cam.offset.x < 8.0:
-			err = "mid-level nudge toward an enemy should still lean the view, offset %s" % cam.offset
+		var lean := cam.get_screen_center_position().x - rig.follow_goal().x
+		if lean < 8.0:
+			err = "mid-level nudge toward an enemy should still lean the view, lean %.1f" % lean
 		if err.is_empty():
 			err = _inside(cam)
 		bus.select_enemy(null)
 		e2.queue_free()
 	await _unload(tree, m)
 	return err
+
+
+## Seeds/stages the wall-ease test walks (QA's repro first: seed 1 stage 1).
+const EASE_LEVELS := [[1, 1], [7, 2], [1003, 3], [42, 5]]
+## Walking speed (px/s) the boy is scripted at. The camera is critically damped, so its peak
+## acceleration scales with this; a slower walk would only make the check easier.
+const EASE_WALK := 140.0
+## The view's per-frame acceleration with the nudge held into a wall may be at most this multiple
+## of the same walk with no nudge (the normal follow peak). The old after-the-fact clamp stopped
+## the view dead in one frame: ~5.5x.
+const EASE_MAX_RATIO := 1.5
+
+
+## Stand 700px inside a wall for 2s, then walk the boy into it and stand there; `nudge` = a (fake)
+## enemy far beyond that wall is selected the whole time (so the nudge is fully on when the boy
+## walks into the wall). Returns {accel, err}: `accel` = the largest
+## per-frame change of the view's centre velocity (px/s^2), `err` = the first view-outside-limits.
+func _ease_run(tree: SceneTree, built: Dictionary, rig: CameraRig, side: int, nudge: bool) -> Dictionary:
+	var b: Rect2 = built.bounds
+	var p: CharacterBody2D = built.player
+	var cam := tree.root.get_viewport().get_camera_2d()
+	var bus := UiArt.bus()
+	var dt := 1.0 / 60.0
+	var wall_x := b.position.x if side < 0 else b.end.x
+	var y := p.global_position.y
+	var x := wall_x - side * 700.0   # 700px inside the wall
+	var stop_x := wall_x + (40.0 if side < 0 else -40.0)
+	p.global_position = Vector2(x, y)
+	p.velocity = Vector2.ZERO
+	bus.select_enemy(null)
+	for i in 90:   # an earlier run's nudge eases away
+		await tree.process_frame
+	rig.snap()
+	var e: Node2D = null
+	if nudge:
+		e = _fake_enemy(tree, Vector2(wall_x + side * 900.0, y))
+		bus.select_enemy(e)
+	var prev := cam.get_screen_center_position().x
+	var prev_v := 0.0
+	var accel := 0.0
+	var err := ""
+	for i in 540:
+		if i >= 120 and (stop_x - x) * side > 0.0:   # stand 2s first: the nudge is fully on before the walk
+			x += side * EASE_WALK * dt
+			x = maxf(x, stop_x) if side < 0 else minf(x, stop_x)
+		p.global_position = Vector2(x, y)
+		p.velocity = Vector2.ZERO
+		await tree.process_frame
+		var c := cam.get_screen_center_position().x
+		var v := (c - prev) / dt
+		if i > 0:   # frame 0 only measures the rig's own start, from the snap
+			accel = maxf(accel, absf(v - prev_v) / dt)
+		prev = c
+		prev_v = v
+		if err.is_empty():
+			err = _inside(cam)
+			if not err.is_empty():
+				err = "frame %d: %s" % [i, err]
+	bus.select_enemy(null)
+	if e != null:
+		e.queue_free()
+	return {accel = accel, err = err}
+
+
+## Nudge held into each wall of real levels: the combined view must ease into the wall (its
+## acceleration stays within EASE_MAX_RATIO of the un-nudged walk) and never leave the limits.
+func _nudge_eases_into_walls(tree: SceneTree) -> String:
+	for lv in EASE_LEVELS:
+		var m: Node = await _boot(tree, lv[0], lv[1])
+		var built: Dictionary = m.get("built")
+		var rig := _rig(m)
+		var err := ""
+		# Only the camera is under test: no enemy may catch the boy, no exit may end the stage and no
+		# furniture may shove him while he is walked (teleported) to each wall.
+		(built.player as CharacterBody2D).set_physics_process(false)
+		for grp in [&"enemies", &"puppets", &"exit"]:
+			for n in tree.get_nodes_in_group(grp):
+				n.queue_free()
+		await tree.process_frame
+		for side in [-1, 1]:
+			var base: Dictionary = await _ease_run(tree, built, rig, side, false)
+			var held: Dictionary = await _ease_run(tree, built, rig, side, true)
+			var label := "seed %d stage %d %s wall" % [lv[0], lv[1], "left" if side < 0 else "right"]
+			if not base.err.is_empty() or not held.err.is_empty():
+				err = "%s: %s" % [label, base.err if not base.err.is_empty() else held.err]
+			elif base.accel < 1.0:
+				err = "%s: no baseline follow acceleration measured (%.2f)" % [label, base.accel]
+			elif held.accel > EASE_MAX_RATIO * base.accel:
+				err = "%s: nudge held into the wall peaks at %.0f px/s^2, %.2fx the normal follow peak (%.0f), limit %.1fx" \
+						% [label, held.accel, held.accel / base.accel, base.accel, EASE_MAX_RATIO]
+			if not err.is_empty():
+				break
+		await _unload(tree, m)
+		if not err.is_empty():
+			return err
+	return ""
 
 
 ## The real boy climbing a real generated stair: the view stays inside the limits every frame
@@ -367,9 +470,9 @@ func _tall_stair(tree: SceneTree) -> String:
 	if err.is_empty():
 		for i in 240:
 			await tree.process_frame
-		var goal := CameraRig.clamp_center(boy.global_position, rig.limits, VIEW)
+		var goal := CameraRig.clamp_center(boy.global_position + rig.nudge_offset(), rig.limits, VIEW)   # nudge still held
 		if rig.center.distance_to(goal) > 1.0:
-			err = "view should settle on the boy at the top: %s vs %s" % [rig.center, goal]
+			err = "view should settle on the boy (+ nudge) at the top: %s vs %s" % [rig.center, goal]
 		if err.is_empty():
 			err = _inside(cam)
 	bus.select_enemy(null)

@@ -2,7 +2,8 @@ class_name Chest
 extends WorldObject
 ## Treasure chest. Hold LMB on it (the same pickup channel as a vase, but slower:
 ## "chests take time to open") and it opens instead of going into your hands:
-## one random item from ItemDb (deterministic from loot_seed + stage), plus any
+## one random item from ItemDb (deterministic from loot_seed + stage + what is owned; never a
+## copy that adds nothing, ItemDb.fallback_gold instead when nothing is left), plus any
 ## gold_inside, art swaps prop_chest_closed → prop_chest_open, and a modest noise.
 ## Opens exactly once. Generator: set `stage` and `loot_seed` before adding it.
 
@@ -56,9 +57,12 @@ func open(_by: Node = null) -> Item:
 	is_open = true
 	can_pick_up = false
 	var ps := Item._stats(stats)
-	granted = ItemDb.roll_chest(maxi(stage, 1), _seed())
+	granted = ItemDb.roll_chest(maxi(stage, 1), _seed(), ps)
 	if granted and ps:
 		ps.grant_item(granted)
+	elif ps:
+		# Nothing left that another copy would help with: gold instead (never empty).
+		gold_inside += ItemDb.fallback_gold(maxi(stage, 1))
 	if gold_inside > 0 and ps:
 		ps.add_gold(gold_inside)
 		gold_inside = 0

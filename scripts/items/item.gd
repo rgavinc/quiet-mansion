@@ -23,6 +23,8 @@ extends Resource
 @export var params: Dictionary = {}
 ## Uses per stage (Flash Bulb, Rabbit's Foot, Music Box). 0 = no charges (FE hides the pip).
 @export var max_charges: int = 0
+## Copies worth owning (ItemDb.max_copies): shops and chests stop offering it past this.
+@export var max_copies: int = 1
 ## Runtime: uses left this stage. Refilled by PlayerStats.begin_stage(); every change
 ## re-emits PlayerStats.items_changed(owned_items) so FE can redraw the pips.
 var charges: int = 0
@@ -170,7 +172,7 @@ static func is_vase(x: Variant) -> bool:
 func to_dict() -> Dictionary:
 	return {id = id, display_name = display_name, description = description,
 		icon_slot = icon_slot, price = price, rarity = rarity,
-		charges = charges, max_charges = max_charges, behavior = has_behavior()}
+		charges = charges, max_charges = max_charges, max_copies = max_copies, behavior = has_behavior()}
 
 
 static func _stats(stats: Node) -> Node:
