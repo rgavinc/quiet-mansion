@@ -11,6 +11,15 @@ extends UiScreen
 ## (y≈110). Offer cards sit in the LEFT column and the title/gold/Continue in the
 ## RIGHT column, so nothing covers the merchant band. Missing art → dim + panels
 ## + a drawn silhouette in the same spot.
+##
+## Under the offer cards: a compact owned-items row (the HUD's OwnedItemsStrip in
+## make_compact() mode: same stacking / tiles), live on PlayerStats.items_changed; hearts
+## sit next to the gold. Bus / stats signals are connected to methods while in the tree
+## only, and disconnected in _exit_tree (a shop left behind by a stage change never reacts).
+
+## Loaded at build time, not preloaded: the strip preloads this script (initials), and a
+## preload cycle leaks both scripts at exit.
+const OWNED_STRIP_PATH := "res://scripts/ui/owned_items_strip.gd"
 
 const BACKDROP_SIZE := Vector2(320, 180)
 ## Most offer cards the left column holds (4 cards with 2-line descriptions + the
@@ -28,6 +37,13 @@ var continue_button: Button
 var merchant: Node2D
 var merchant_anchor: Control
 var has_backdrop := false
+## PlayerStats for the owned row (tests); null = /root/PlayerStats.
+var stats: Node
+var owned_row: HBoxContainer
+var owned_label: Label
+var owned_strip: Control
+var hearts_box: HBoxContainer
+var hearts: Array[HudIcon] = []
 
 var offers: Array[Dictionary] = []
 var cards: Array[Control] = []
@@ -95,6 +111,24 @@ func _build() -> void:
 	message.name = "Message"
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	lcol.add_child(message)
+	if stats == null:
+		stats = get_node_or_null(^"/root/PlayerStats")
+	owned_row = HBoxContainer.new()
+	owned_row.name = "OwnedRow"
+	owned_row.add_theme_constant_override(&"separation", 8)
+	owned_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	owned_label = UiScreen.label("Owned", 16, Color(0.85, 0.8, 0.72))
+	owned_label.name = "OwnedLabel"
+	owned_label.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	owned_row.add_child(owned_label)
+	owned_strip = load(OWNED_STRIP_PATH).new()
+	owned_strip.name = "OwnedItems"
+	owned_strip.skin = skin
+	owned_strip.stats = stats
+	owned_strip.make_compact(11, 1)
+	owned_strip.popover_bounds = left   # the overflow list stays inside OffersPanel   # one row of 11 (+N): fits OffersPanel's 460 px under 4 cards
+	owned_row.add_child(owned_strip)
+	lcol.add_child(owned_row)
 
 	# RIGHT column: stage clear title, gold, Continue.
 	var right := PanelContainer.new()
@@ -118,7 +152,17 @@ func _build() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rcol.add_child(title)
 	var gold_row := HBoxContainer.new()
+	gold_row.name = "StatsRow"
 	gold_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	gold_row.add_theme_constant_override(&"separation", 6)
+	hearts_box = HBoxContainer.new()
+	hearts_box.name = "Hearts"
+	hearts_box.add_theme_constant_override(&"separation", 2)
+	hearts_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gold_row.add_child(hearts_box)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(10, 0)
+	gold_row.add_child(gap)
 	gold_row.add_child(UiScreen.coin_icon(skin.coin_slot, 28))
 	gold_label = UiScreen.label("", 26, skin.gold_color)
 	gold_label.name = "Gold"
@@ -131,11 +175,56 @@ func _build() -> void:
 	rcol.add_child(continue_button)
 
 
-func _connect_bus(b: Node) -> void:
-	if b.has_signal(&"stage_cleared"):
-		b.stage_cleared.connect(func(_s): open_shop())
-	if b.has_signal(&"gold_changed"):
-		b.gold_changed.connect(func(_g, _d): _refresh())
+func _connect_bus(_b: Node) -> void:
+	_wire(true)
+	_refresh()
+
+
+func _enter_tree() -> void:
+	if is_node_ready():
+		_wire(true)   # re-entering: reconnect + catch up
+		_refresh()
+
+
+func _exit_tree() -> void:
+	super._exit_tree()
+	_wire(false)
+
+
+## Methods only (no lambdas); connected while in the tree.
+func _wire(on: bool) -> void:
+	var pairs := []
+	if bus and is_instance_valid(bus):
+		pairs.append([bus, &"stage_cleared", _on_stage_cleared])
+		pairs.append([bus, &"gold_changed", _on_gold_changed])
+		pairs.append([bus, &"health_changed", _on_health_changed])
+	if stats and is_instance_valid(stats):
+		pairs.append([stats, &"items_changed", _on_items_changed])
+	for p in pairs:
+		var o: Object = p[0]
+		if not o.has_signal(p[1]):
+			continue
+		var connected := o.is_connected(p[1], p[2])
+		if on and not connected:
+			o.connect(p[1], p[2])
+		elif not on and connected:
+			o.disconnect(p[1], p[2])
+
+
+func _on_stage_cleared(_stage: int) -> void:
+	open_shop()
+
+
+func _on_gold_changed(_amount: int, _delta: int) -> void:
+	_refresh()
+
+
+func _on_health_changed(_current: int, _max_hp: int) -> void:
+	_refresh()
+
+
+func _on_items_changed(_items: Array) -> void:
+	_refresh()
 
 
 ## Merchant feet at backdrop (merchant_x, counter_y), scaled like the cover backdrop.
@@ -159,6 +248,8 @@ func merchant_band() -> Vector2:
 ## `count` > 0 asks for at most that many. The demo stub gets the same cap.
 func open_shop(count: int = -1) -> void:
 	var n := clampi(count if count > 0 else skin.shop_offer_count, 1, MAX_CARDS)
+	if owned_strip:
+		owned_strip.close_overflow()
 	offers = bus.get_shop_offer(n) if bus and bus.has_method(&"get_shop_offer") else ([] as Array[Dictionary])
 	_tile_text = unique_initials(_catalogue_names(offers))
 	sold.clear()
@@ -354,8 +445,12 @@ func is_sold(i: int) -> bool:
 
 
 func _refresh() -> void:
-	if gold_label == null:
+	if gold_label == null or not is_inside_tree():
 		return
+	_refresh_hearts()
+	if owned_label:
+		var owned: Array = stats.get("owned_items") if stats and is_instance_valid(stats) and "owned_items" in stats else []
+		owned_label.text = "Owned" if not owned.is_empty() else "Owned: nothing yet"
 	var g: int = int(bus.gold) if bus and "gold" in bus else 0
 	gold_label.text = " %d gold" % g
 	for i in cards.size():
@@ -375,6 +470,32 @@ func _refresh() -> void:
 			buy.add_theme_color_override(&"font_color", Color.WHITE if price <= g else Color(1, 0.45, 0.4))
 
 
+## Hearts next to the gold: one per max heart, filled = current (bus.health / max_health).
+func _refresh_hearts() -> void:
+	if hearts_box == null:
+		return
+	var cur: int = int(bus.health) if bus and "health" in bus else 0
+	var mx: int = int(bus.max_health) if bus and "max_health" in bus else cur
+	mx = clampi(mx, 0, 12)
+	while hearts.size() < mx:
+		var h := HudIcon.new()
+		h.kind = HudIcon.Kind.HEART
+		h.slot = "ui_heart_full"
+		h.skin = skin
+		hearts_box.add_child(h)
+		hearts.append(h)
+	while hearts.size() > mx:
+		var h: HudIcon = hearts.pop_back()
+		hearts_box.remove_child(h)
+		h.queue_free()
+	for i in hearts.size():
+		hearts[i].filled = i < cur
+
+
+func filled_hearts() -> int:
+	return hearts.filter(func(h): return h.filled).size()
+
+
 func _sparkle(card: Control) -> void:
 	var sf := UiArt.frames(skin.sparkle_slot)
 	if sf == null:
@@ -390,6 +511,8 @@ func _sparkle(card: Control) -> void:
 
 
 func _on_continue() -> void:
+	if owned_strip:
+		owned_strip.close_overflow()
 	close()
 	if bus and bus.has_method(&"next_stage"):
 		bus.next_stage()
