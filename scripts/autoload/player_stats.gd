@@ -89,6 +89,19 @@ static func clamp_mult(stat: StringName, m: float) -> float:
 	return clamp_stat(stat, m * base) / base
 
 
+## Absolute value of `stat` at its upper / lower cap (in the stat's own units): BASE x bound
+## (unbounded stats: BASE). Lead (#13): LevelValidator reads the jump/run caps only through these,
+## so a later switch of STAT_BOUNDS to absolute rows only changes these two functions.
+static func stat_max(stat: StringName) -> float:
+	var b: Array = STAT_BOUNDS.get(stat, [])
+	return float(BASE[stat]) * (float(b[1]) if b.size() == 2 else 1.0)
+
+
+static func stat_min(stat: StringName) -> float:
+	var b: Array = STAT_BOUNDS.get(stat, [])
+	return float(BASE[stat]) * (float(b[0]) if b.size() == 2 else 1.0)
+
+
 var health: int = 3
 var gold: int = 0
 ## Bought and chest items (Item resources) this run. Survives stage Continue (this

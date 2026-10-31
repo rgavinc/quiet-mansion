@@ -216,7 +216,153 @@ frames = 5
 fps = 12
 loop = false
 pivot = [16, 15]
-notes = "32x16 creak puff for climbing onto any furniture: 0 impact tick + dust burst on the top, 1-2 dust spreads sideways while three short squiggly creak lines rise, 3-4 dust thins (dithered) and the creak lines break up and fade at the top. Play once with the bottom-centre pivot on the furniture top where the boy lands; free after the last frame"
+notes = "32x16 creak puff for climbing onto any furniture: 0 impact tick + dust burst on the top, 1-2 dust spreads sideways while three short squiggly creak lines rise, 3-4 dust thins (dithered) and the creak lines break up and fade at the top. Every frame keeps a >= 1px transparent margin on all four sides (content inside cols 1-30 / rows 1-14; the dust is flat-bottomed on row 14, the row just above the surface). Play once with the bottom-centre pivot on the furniture top where the boy lands; free after the last frame"
+
+[[asset]]
+path = "assets/art/characters/puppet_rattle.png"
+slot = "puppet_rattle"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 12
+loop = true
+pivot = [32, 63]
+facing = "right"
+grip_x_px = 26
+grip_heights_px = [16, 22, 28]
+furniture_wobble_px = [-1, 1, -1, 1, -1, 1]
+notes = "64x64 walker (scuttle form, same design as puppet_chase) RATTLING tall furniture it cannot reach over: the telegraph before the boy is shaken off (PD rule: 3s unreachable -> rattle, 3s later the boy is shaken off). Loop 6f @12fps = 0.5s. Art faces RIGHT (the furniture is to its right; flip_h for a piece on the left, facing = "right", same as puppet_chase). It stands braced on thumb + pinky (feet planted on pivot row 63, x 16 and 36 in frame) and hooks three claws over the furniture's near vertical edge at 16 / 22 / 28 px above the floor (grip band 16-28 px, so it works for any 2-3 tile piece); the near edge sits grip_x_px = 26 px right of the pivot (frame x 58 at furniture dx 0) and all three claws overlap 1-3 px into the piece on EVERY frame, wobble included (measured against the furniture sprites left column: top 28 px grip +1/+2/+1/+2/+1/+2 px, 22 px grip +1, 16 px grip +2): the top finger has a longer forearm and reaches a little past the edge target, so it no longer falls short on the pull frames (0, 2, 4). The body heaves 2-4 px against the claws and the arms flex: 0 pull (body back, jaw gritted), 1 shove (red eye glint), 2 PULL HARD (dust ticks beside the grip, mouth opens), 3 shove (glint), 4 pull, 5 SHOVE HARD (roar with drool, dust ticks). The furniture it grips moves +-1 px per frame in step: furniture_wobble_px = [-1, 1, -1, 1, -1, 1] (art facing right; negate for a flipped walker) - the claws are drawn on the shaken edge, so apply that offset to the furniture piece (and anything standing on it, i.e. the boy) on frame change; if the wobble runs unsynced the claws still overlap the edge. No pixel is higher than 39 px above the pivot (the raised top-finger elbow, frame y 24), still below the top of a 3-tile (48 px) piece. Pair with vfx_rattle on the furniture top; play on a loop while the rattle lasts (each rattle = one loud noise)"
+
+[[asset]]
+path = "assets/art/props/vfx_rattle.png"
+slot = "vfx_rattle"
+status = "ai"
+frame_size = [48, 16]
+frames = 4
+fps = 12
+loop = true
+pivot = [24, 15]
+notes = "48x16 looping shake overlay for rattled furniture (the overlay itself does not wobble the furniture: shift the furniture_h*_* sprite in code): bottom-centre pivot sits on the furniture top (row 14 is the last row above the surface, row 15 empty). Two brackets flank the piece at +-18-19 px from the pivot and alternate small / large (large beats add an echo arc) = the shake, dust motes pop off the top edge and fade, and a flat dust puff resting on the surface flips side each beat. 4f @12fps loop (0.33s), every pixel inside rows 5-14 / cols 2-46. Centre it on the top of any 1-3 tile wide piece (brackets clear a 2 tile = 32 px piece; on 3 tile = 48 px wide pieces they overlap the corners, which still reads). Play it while puppet_rattle plays, and free it when the rattle ends. CODE WOBBLE: the wobble offsets are NOT stored on this slot; read furniture_wobble_px from the puppet_rattle slot (single source) and apply it to the furniture sprite and the boy standing on it, keeping the collision body fixed (visuals only). Overlay and walker are independent: the overlay can be the only feedback on a piece that has no walker beside it"
+
+[[asset]]
+path = "assets/art/props/furniture_h1_a.png"
+slot = "furniture_h1_a"
+status = "ai"
+frame_size = [32, 16]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 15]
+height_class = 1
+collision_height_px = 16
+width_px = 32
+width_tiles = 2
+notes = "32x16 solid furniture sprite (stool, height class 1 = 16 px, 2 tiles wide). Stool: a wide footstool / ottoman, plum velvet tufted cushion with gold piping on four turned legs (open gap between the legs). Fits a 2-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 2 x 1 tiles = 32 x 16 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (15) stands on the floor, bottom-centre pivot [16, 15]. Place it with the sprite's top-left at (collision x, floor surface y - 16). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h1_b.png"
+slot = "furniture_h1_b"
+status = "ai"
+frame_size = [48, 16]
+frames = 1
+fps = 1
+loop = false
+pivot = [24, 15]
+height_class = 1
+collision_height_px = 16
+width_px = 48
+width_tiles = 3
+notes = "48x16 solid furniture sprite (low chest, height class 1 = 16 px, 3 tiles wide). Low chest: a weathered teal toy trunk with brass straps, lock plate and bun feet. Fits a 3-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 3 x 1 tiles = 48 x 16 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (15) stands on the floor, bottom-centre pivot [24, 15]. Place it with the sprite's top-left at (collision x, floor surface y - 16). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h2_a.png"
+slot = "furniture_h2_a"
+status = "ai"
+frame_size = [32, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 31]
+height_class = 2
+collision_height_px = 32
+width_px = 32
+width_tiles = 2
+notes = "32x32 solid furniture sprite (table, height class 2 = 32 px, 2 tiles wide). Table: dark mahogany side table with a drawer in the apron, turned legs, a stretcher and a moth-eaten green cloth runner hanging in front (open gap between the legs). Fits a 2-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 2 x 2 tiles = 32 x 32 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (31) stands on the floor, bottom-centre pivot [16, 31]. Place it with the sprite's top-left at (collision x, floor surface y - 32). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h2_b.png"
+slot = "furniture_h2_b"
+status = "ai"
+frame_size = [48, 32]
+frames = 1
+fps = 1
+loop = false
+pivot = [24, 31]
+height_class = 2
+collision_height_px = 32
+width_px = 48
+width_tiles = 3
+notes = "48x32 solid furniture sprite (desk, height class 2 = 32 px, 3 tiles wide). Desk: writing desk with a green leather inlay top and a light tan top lip (rows 0-1, so the boy standing on it reads against the wainscot), lighter red-brown wood than the wainscot, two drawer pedestals, brass pulls and a dark cobwebbed knee recess. Fits a 3-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 3 x 2 tiles = 48 x 32 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (31) stands on the floor, bottom-centre pivot [24, 31]. Place it with the sprite's top-left at (collision x, floor surface y - 32). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h3_a.png"
+slot = "furniture_h3_a"
+status = "ai"
+frame_size = [48, 48]
+frames = 1
+fps = 1
+loop = false
+pivot = [24, 47]
+height_class = 3
+collision_height_px = 48
+width_px = 48
+width_tiles = 3
+notes = "48x48 solid furniture sprite (dresser, height class 3 = 48 px, 3 tiles wide). Dresser: faded mid-brown oak chest of drawers (value pulled into the room mid range so the puppets stay the brightest thing) (two small drawers over two long ones), brass pulls, a dimmed lace runner on the top and short feet. Fits a 3-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 3 x 3 tiles = 48 x 48 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (47) stands on the floor, bottom-centre pivot [24, 47]. Place it with the sprite's top-left at (collision x, floor surface y - 48). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h3_b.png"
+slot = "furniture_h3_b"
+status = "ai"
+frame_size = [32, 48]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 47]
+height_class = 3
+collision_height_px = 48
+width_px = 32
+width_tiles = 2
+notes = "32x48 solid furniture sprite (bookshelf, height class 3 = 48 px, 2 tiles wide). Bookshelf: dark narrow bookcase with a cornice, three shelves of faded books (one fallen, one missing) and a plinth, cool moonlight-blue edge highlight on the left/top/right silhouette edge so it separates from the wainscot when unlit. Fits a 2-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 2 x 3 tiles = 32 x 48 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (47) stands on the floor, bottom-centre pivot [16, 47]. Place it with the sprite's top-left at (collision x, floor surface y - 48). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h4_a.png"
+slot = "furniture_h4_a"
+status = "ai"
+frame_size = [48, 64]
+frames = 1
+fps = 1
+loop = false
+pivot = [24, 63]
+height_class = 4
+collision_height_px = 64
+width_px = 48
+width_tiles = 3
+notes = "48x64 solid furniture sprite (wardrobe, height class 4 = 64 px, 3 tiles wide). Wardrobe: black-cherry two-door wardrobe with a cracked mirror panel and brass knobs; a dark crack between the doors with two red eyes looking out, cool moonlight-blue edge highlight on the left/top/right silhouette edge so it separates from the wainscot when unlit. Fits a 3-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 3 x 4 tiles = 48 x 64 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (63) stands on the floor, bottom-centre pivot [24, 63]. Place it with the sprite's top-left at (collision x, floor surface y - 64). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
+
+[[asset]]
+path = "assets/art/props/furniture_h4_b.png"
+slot = "furniture_h4_b"
+status = "ai"
+frame_size = [32, 64]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 63]
+height_class = 4
+collision_height_px = 64
+width_px = 32
+width_tiles = 2
+notes = "32x64 solid furniture sprite (grandfather clock, height class 4 = 64 px, 2 tiles wide). Grandfather clock: solid flat-topped clock (separate from the decorative prop_grandfather_clock, which has a pointed hood): pale round face, narrower waist, flared lower case that reaches both side edges from the floor up to about 30 px (so the puppet_rattle claws at 16/22/28 px overlap it), glass case with a brass pendulum, plinth. Fits a 2-tile-wide piece. RATTLE GRIP: the body reaches both side edges (full-width carcass/legs) over heights 12-32 px from the floor, so puppet_rattle claws overlap the visible piece by >= 1 px on every frame, either flip (h2+ pieces; h1 pieces are below the 16 px grip and are not rattled). CONTACT SHADOW: the bottom two rows are darkened (row h-1 hard, h-2 soft) and the gaps between legs in the last row carry a semi-transparent dark pixel, all inside the sprite bounds; no shadow is drawn outside them (a separate code-drawn floor shadow ellipse would look slightly softer, optional). SIZE RULE: the sprite is exactly the piece's collision box, 2 x 4 tiles = 32 x 64 px. Row 0 (the top opaque row, an outline row) is the walkable top surface = the collision top, the last row (63) stands on the floor, bottom-centre pivot [16, 63]. Place it with the sprite's top-left at (collision x, floor surface y - 64). The sprite never changes the collision; pick one by height class from the seed, and prefer the one whose width_px equals the rolled width x 16 (every class has a 32 px and a 48 px piece); a mismatched width is still fine if centred on the box. Play vfx_creak / vfx_rattle at the top-centre; for the rattle wobble shift the sprite (and the boy) by furniture_wobble_px from puppet_rattle"
 
 [[asset]]
 path = "assets/art/props/vase_idle.png"

@@ -29,6 +29,16 @@ var _anim: AnimatedSprite2D
 ## Test hook: when set, used instead of is_on_floor().
 var floor_override: int = -1  # -1 real, 0 airborne, 1 grounded
 
+## Landing on furniture creaks (PRODUCT.md "Perching has risk"): a NoiseBus noise at his feet,
+## radius x the noise_mult stat (items) and the item noise hooks, like the chest creak.
+signal creaked(furniture_px: float)
+@export var furniture_creak_radius: float = NoiseBus.DEFAULT_RADIUS * 0.5   # about half a screen
+@export var furniture_creak_loudness: float = 0.6
+## Furniture = something he lands on with another world surface below it within this many px
+## (4-tile furniture is 64px; a 16px slab over a room has 144px of air below).
+const FURNITURE_PROBE_PX := 80.0
+var _was_grounded: bool = true
+
 const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry",
 		"boy_throw", "boy_climb_stairs", "boy_hurt"]
 
@@ -83,7 +93,65 @@ func _physics_process(delta: float) -> void:
 	tick(delta, Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down"))
 	if state != State.CLIMB:
 		move_and_slide()
+	_check_landing()
 	_update_anim(delta)
+
+
+## Just landed (side-scroll, not on a stair): creak if it's furniture.
+func _check_landing() -> void:
+	var g := side_scroll and state != State.CLIMB and _grounded()
+	if g and not _was_grounded:
+		var h := furniture_under()
+		if h > 0.0:
+			creak(h)
+	_was_grounded = g
+
+
+## Height (px) of the furniture he's standing on, 0 if he's on a floor. Generic: a ray from
+## just inside what's under his feet straight down; another world surface close below means
+## he's on top of a piece of furniture (any size, any body), not a slab.
+func furniture_under() -> float:
+	if not is_inside_tree():
+		return 0.0
+	var feet := Enemy.body_feet(self)
+	var q := PhysicsRayQueryParameters2D.create(feet + Vector2(0, 2), feet + Vector2(0, FURNITURE_PROBE_PX),
+			PlayerStats.LAYER_WORLD, [get_rid()])
+	q.hit_from_inside = false   # skip the piece we stand on, find the floor under it
+	var hit := get_world_2d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return 0.0
+	return (hit.position as Vector2).y - feet.y
+
+
+func creak(furniture_px: float) -> void:
+	NoiseBus.emit_noise(Enemy.body_feet(self), furniture_creak_radius * PlayerStats.get_stat(&"noise_mult"), furniture_creak_loudness, self)
+	_spawn_creak_vfx()
+	creaked.emit(furniture_px)
+
+
+const VFX_CREAK_SLOT := "vfx_creak"
+
+
+## vfx_creak (manifest, 5f @12fps, one-shot): a dust puff + creak lines at the furniture top,
+## pivot on his feet, freed after the last frame. No slot / no art yet (PR #40): nothing spawns.
+func _spawn_creak_vfx() -> Node2D:
+	if not AnimLibrary.has_slot(VFX_CREAK_SLOT) or get_parent() == null:
+		return null
+	var sf := AnimLibrary.frames_for([VFX_CREAK_SLOT])
+	if not sf.has_animation(VFX_CREAK_SLOT):
+		return null   # texture missing
+	sf.set_animation_loop(VFX_CREAK_SLOT, false)
+	var v := AnimatedSprite2D.new()
+	v.name = "VfxCreak"
+	v.sprite_frames = sf
+	v.offset = AnimLibrary.offset_for(VFX_CREAK_SLOT)
+	v.z_index = 5
+	v.top_level = true
+	v.animation_finished.connect(v.queue_free)
+	get_parent().add_child(v)
+	v.global_position = Enemy.body_feet(self)
+	v.play(VFX_CREAK_SLOT)
+	return v
 
 
 ## All per-frame logic, separate from input polling so tests can drive it.

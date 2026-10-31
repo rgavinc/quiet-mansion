@@ -6,13 +6,20 @@ extends CharacterBody2D
 ##   CHASE ──loses sight──▶ SEARCH (memory drains, faster when farther: memory_time, give_up_distance) ──0──▶ RETURN ──home──▶ CALM
 ##   CHASE/SEARCH ──lands a hit──▶ RECOVER (backs off, can't hit) ──▶ CHASE/SEARCH
 ##   aroused + throw/knock ──▶ STUNNED ──▶ CHASE/SEARCH;  calm (CALM/RETURN) + throw ──▶ dies
+##   CHASE/SEARCH walker under a perched boy ──▶ REACH (telegraphed reach_time) ──▶ hit + RECOVER,
+##     or ──boy leaves reach──▶ CHASE (PRODUCT.md "Perching has risk")
 ##
 ## Movement: top-down (old map) moves freely in 2D. Side-scroll (player.side_scroll or our own
 ## `side_scroll`) walkers obey gravity, stay on slabs and change floors only by `Stair`s
 ## (LEVELGEN.md). `movement == &"float"` (stage 4+) ignores gravity and drifts through slabs.
 ## Enemies always simulate, on screen or not.
 
-enum State { CALM, STARTLED, CHASE, SEARCH, RETURN, RECOVER, STUNNED }
+enum State { CALM, STARTLED, CHASE, SEARCH, RETURN, RECOVER, STUNNED, REACH }
+
+## Perch reach telegraph for FE / Designer: REACH starts, then ends caught (hit landed) or not
+## (boy hopped off / out of reach, or the reach was interrupted by a stun).
+signal reach_started
+signal reach_ended(caught: bool)
 
 const MOVE_WALK := &"walk"
 const MOVE_FLOAT := &"float"
@@ -51,8 +58,27 @@ const MOVE_FLOAT := &"float"
 @export var anim_calm: String = ""
 @export var anim_startle: String = ""
 @export var anim_chase: String = ""
+## Perch reach (walkers only). The catch lands reach_time after the reach starts if > 0, else
+## on the anim_reach slot's manifest catch frame (hit_frame / fps), else REACH_FALLBACK_TIME.
+@export var anim_reach: String = ""
+@export var reach_time: float = 0.0
+## Boy's feet above our feet (px) we can still reach: > 0 overrides, else the anim_reach slot's
+## manifest reach_height_px, else REACH_HEIGHT_FALLBACK (40: 2 tiles = 32 in, 3 tiles = 48 out).
+@export var perch_reach_height: float = 0.0
+## Horizontal feet-to-feet distance (px) that counts as "under him".
+@export var perch_reach_x: float = 30.0
 
 const STARTLE_FALLBACK_TIME := 0.5   # startle slot missing / no frames / no fps
+const REACH_FALLBACK_TIME := 0.6     # PD: a clear ~0.6 s reach when there's no reach anim
+const REACH_HEIGHT_FALLBACK := 40.0  # PD: 8 px margin over 2 tiles (32) and under 3 (48)
+## Boy's feet at least this far above ours (and standing) = perched, not on our floor.
+const PERCH_MIN_PX := 8.0
+## A cancelled reach resumes (not restarts) if he's back in reach within this many seconds.
+const REACH_RESUME_TIME := 1.0
+## Sprite facing: walk art faces right (manifest: "flip_h for left"). Below the velocity deadzone the
+## walker keeps its facing, or turns to the boy while it is hunting / reaching (no flicker at vx ~ 0).
+const FACE_VEL_DEADZONE := 8.0
+const FACE_TARGET_DEADZONE := 6.0
 ## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
 const LEDGE_PROBE_DEPTH := 24.0
 const LEDGE_PROBE_LIFT := 4.0     # ray starts this far above the feet
@@ -61,7 +87,8 @@ const DEF_FIELDS := [&"type_id", &"movement", &"walk_speed", &"chase_speed", &"f
 	&"climb_speed", &"hear_radius", &"hearing_mult", &"sight_range", &"memory_time",
 	&"noise_track_time", &"light_track_time", &"startle_reaction_time", &"recover_time",
 	&"backoff_speed", &"stun_time", &"patrol_radius", &"shove_distance", &"hit_radius",
-	&"anim_calm", &"anim_startle", &"anim_chase", &"give_up_distance"]
+	&"anim_calm", &"anim_startle", &"anim_chase", &"give_up_distance",
+	&"anim_reach", &"reach_time", &"perch_reach_height", &"perch_reach_x"]
 
 var state: State = State.CALM
 var home: Vector2 = Vector2.ZERO
@@ -86,7 +113,7 @@ var enraged: bool:
 	get: return is_chasing()
 ## Not calm: hunting, or startled by light (a throw stuns instead of killing).
 func is_aroused() -> bool:
-	return state in [State.STARTLED, State.CHASE, State.SEARCH, State.RECOVER, State.STUNNED]
+	return state in [State.STARTLED, State.CHASE, State.SEARCH, State.RECOVER, State.STUNNED, State.REACH]
 
 ## Test hooks (like PlayerController.floor_override): -1 real, 0 false, 1 true.
 var sight_override: int = -1
@@ -103,9 +130,20 @@ var _reported_chase: bool = false
 var _reported_startle: float = -1.0
 var _home_set: bool = false
 var _spr: AnimatedSprite2D
+var face_dir := 1               # 1 = looking right, -1 = left (sprite flip_h from this)
+var _spr_slot := ""           # slot whose manifest offset the sprite uses
+var _spr_feet := Vector2.ZERO   # origin -> feet the sprite offset was last built with
 var _stun_calm: bool = false        # Flash Bulb stun: back to CALM afterwards, never chase
 ## True when the last _move_to stopped at a floor edge (ledge backstop). Read-only for tests.
 var ledge_stopped: bool = false
+## 0..1 progress of the current perch reach (0 when not reaching). FE telegraph.
+var reach_progress: float = 0.0
+var _reach_total: float = 0.0
+var _reach_landing: bool = false
+var _reach_saved: float = 0.0
+## He was last standing perched above us and hasn't stood anywhere since (hop off / in place).
+var _boy_off_perch: bool = false
+var _reach_resume_left: float = 0.0
 
 
 func _ready() -> void:
@@ -174,20 +212,64 @@ func _play(slot: String) -> void:
 		return
 	if _spr.sprite_frames == null:
 		var slots: Array = []
-		for s in [anim_calm, anim_startle, chase_slot()]:
-			if not s.is_empty():
+		for s in [anim_calm, anim_startle, chase_slot(), anim_reach]:
+			if not s.is_empty() and (s != anim_reach or AnimLibrary.has_slot(s)):   # reach art may not be merged yet
 				slots.append(s)
 		_spr.sprite_frames = AnimLibrary.frames_for(slots)
 		# Startle plays once and holds its last frame (frame count from the manifest via
 		# AnimLibrary; works for the 5-frame and the 7-frame strips).
 		if not anim_startle.is_empty() and _spr.sprite_frames.has_animation(anim_startle):
 			_spr.sprite_frames.set_animation_loop(anim_startle, false)
+		if not anim_reach.is_empty() and _spr.sprite_frames.has_animation(anim_reach):
+			_spr.sprite_frames.set_animation_loop(anim_reach, false)   # one reach, holds the grab
 	if not _spr.sprite_frames.has_animation(slot):
 		return
 	if slot == anim_startle and _spr.animation == slot:
 		return   # STARTLED -> STUNNED (or re-startle): keep playing / holding, never restart
 	_spr.play(slot)
-	_spr.offset = AnimLibrary.offset_for(slot)
+	_spr_slot = slot
+	_apply_spr_offset()
+	_apply_flip()
+
+
+## Turn the sprite toward the way it moves (vx past the deadzone) or, standing still while
+## startled / chasing / searching / reaching, toward the boy. The art faces right unless the
+## slot's manifest entry says `facing = "left"` (or `flip = true`); flip_h mirrors about the
+## pivot column (x = frame centre for every puppet slot, so the feet don't move).
+func update_facing(vx: float) -> void:
+	if absf(vx) > FACE_VEL_DEADZONE:
+		face_dir = 1 if vx > 0.0 else -1
+	elif state in [State.STARTLED, State.CHASE, State.SEARCH, State.REACH, State.STUNNED, State.RECOVER]:
+		var p := _player()
+		if p != null:
+			var dx := p.global_position.x - global_position.x
+			if absf(dx) > FACE_TARGET_DEADZONE:
+				face_dir = 1 if dx > 0.0 else -1
+	_apply_flip()
+
+
+func _apply_flip() -> void:
+	if _spr != null:
+		_spr.flip_h = (face_dir < 0) != art_faces_left(_spr_slot)
+
+
+## Manifest: `facing = "left"` / -1, or `flip = true`, marks art drawn facing left.
+static func art_faces_left(slot: String) -> bool:
+	var m := AnimLibrary.meta(slot)
+	if bool(m.get("flip", false)):
+		return true
+	var f: Variant = m.get("facing", "right")
+	return (f is String and str(f).to_lower() == "left") or ((f is int or f is float) and float(f) < 0.0)
+
+
+## Art pivot = feet (manifest), so the sprite is anchored to the REAL feet: the pivot offset
+## plus origin -> feet from the collision shape (same math as _feet()). A centred r=14 circle
+## (old map, tests, #13's generator) has its feet 14px below the origin, a feet-origin shape 0.
+func _apply_spr_offset() -> void:
+	if _spr == null or _spr_slot.is_empty():
+		return
+	_spr_feet = _feet_offset()
+	_spr.offset = AnimLibrary.offset_for(_spr_slot) + _spr_feet
 
 
 # --- senses -------------------------------------------------------------------
@@ -249,7 +331,7 @@ func _on_noise(level: float, at: Vector2) -> void:
 
 
 func hear_noise() -> void:
-	if state in [State.RECOVER, State.STUNNED]:
+	if state in [State.RECOVER, State.STUNNED, State.REACH]:
 		_track_left = maxf(_track_left, noise_track_time)
 		return
 	_enter_chase(noise_track_time)
@@ -258,7 +340,7 @@ func hear_noise() -> void:
 ## A lure (Music Box) plays at `at`: hunt toward IT, not the boy (SEARCH with last_known =
 ## the lure; each pulse refills memory). Sight of the boy still wins in _tick_hunt.
 func hear_lure(at: Vector2) -> void:
-	if state in [State.RECOVER, State.STUNNED]:
+	if state in [State.RECOVER, State.STUNNED, State.REACH]:
 		return
 	_enter_chase(0.0)
 	_track_left = 0.0
@@ -288,12 +370,21 @@ func _alert() -> void:
 
 # --- transitions --------------------------------------------------------------
 func _set_state(s: State) -> void:
+	if state == State.REACH and s != State.REACH:
+		reach_progress = 0.0
+		reach_ended.emit(_reach_landing)
+		_reach_landing = false
 	state = s
 	match s:
 		State.CALM, State.RETURN:
 			_play(anim_calm)
 		State.STARTLED, State.STUNNED:
 			_play(anim_startle)   # once, then hold the last frame while startled / stunned
+		State.REACH:
+			if not anim_reach.is_empty() and AnimLibrary.has_slot(anim_reach):
+				_play(anim_reach)
+			else:
+				_play(chase_slot())   # no reach art yet: FE telegraphs from reach_started / reach_progress
 		_:
 			_play(chase_slot())
 
@@ -328,14 +419,124 @@ func startle_delay() -> float:
 
 
 static func startle_anim_length(slot: String) -> float:
+	return anim_length(slot, STARTLE_FALLBACK_TIME)
+
+
+## Manifest length of a one-shot slot (frames / fps), else `fallback`.
+static func anim_length(slot: String, fallback: float) -> float:
 	if slot.is_empty() or not AnimLibrary.has_slot(slot):
-		return STARTLE_FALLBACK_TIME
+		return fallback
 	var m := AnimLibrary.meta(slot)
 	var n := int(m.get("frames", 0))
 	var fps := float(m.get("fps", 0.0))
 	if n <= 0 or fps <= 0.0:
-		return STARTLE_FALLBACK_TIME
+		return fallback
 	return n / fps
+
+
+## Seconds from reach start to the catch: reach_time if > 0, else the reach slot's catch frame
+## from the manifest (hit_frame / fps; puppet_reach_up: 6 / 10 = 0.6 s), else 0.6 s.
+func reach_delay() -> float:
+	if reach_time > 0.0:
+		return reach_time
+	var m := _reach_meta()
+	var hf := int(m.get("hit_frame", -1))
+	var fps := float(m.get("fps", 0.0))
+	if hf >= 0 and fps > 0.0:
+		return hf / fps
+	return REACH_FALLBACK_TIME
+
+
+## Highest perch (boy's feet above ours, px) the reach catches: perch_reach_height if > 0,
+## else the reach slot's manifest reach_height_px, else 40.
+func reach_height() -> float:
+	if perch_reach_height > 0.0:
+		return perch_reach_height
+	var h := float(_reach_meta().get("reach_height_px", 0.0))
+	return h if h > 0.0 else REACH_HEIGHT_FALLBACK
+
+
+func _reach_meta() -> Dictionary:
+	if anim_reach.is_empty() or not AnimLibrary.has_slot(anim_reach):
+		return {}
+	return AnimLibrary.meta(anim_reach)
+
+
+func is_reaching() -> bool:
+	return state == State.REACH
+
+
+# --- perch reach (PRODUCT.md "Perching has risk") -------------------------------------
+## Boy's feet height above OUR feet (px, + = higher), measured from both real colliders, so it
+## works for any furniture (no layout classes needed). NAN when he isn't standing on something
+## (airborne, on a stair).
+func perch_height(p: Node2D) -> float:
+	if p == null or not _boy_standing(p):
+		return NAN
+	return _feet().y - body_feet(p).y
+
+
+func _boy_standing(p: Node2D) -> bool:
+	if "stair" in p and p.get("stair") != null:
+		return false   # on (or walking onto) a stair
+	if p.has_method(&"_grounded"):
+		return bool(p.call(&"_grounded"))
+	return p is CharacterBody2D and (p as CharacterBody2D).is_on_floor()
+
+
+## Boy standing on something above our floor: contact hits are off, only the reach catches.
+func boy_perched(p: Node2D) -> bool:
+	if not is_side_scroll() or is_floating():
+		return false
+	var h := perch_height(p)
+	return not is_nan(h) and h >= PERCH_MIN_PX
+
+
+## Under a perched boy and he's low enough to grab (1-2 tiles; 3 tiles is out of reach).
+func perch_in_reach(p: Node2D) -> bool:
+	if not boy_perched(p) or climbing or not _grounded():
+		return false
+	if perch_height(p) > reach_height():
+		return false
+	return absf(body_feet(p).x - _feet().x) <= perch_reach_x
+
+
+func _note_perch(p: Node2D) -> void:
+	if p == null:
+		_boy_off_perch = false
+	elif _boy_standing(p):
+		_boy_off_perch = boy_perched(p)
+
+
+func _enter_reach() -> void:
+	_reach_total = maxf(reach_delay(), 0.0)
+	_state_left = _reach_saved if _reach_resume_left > 0.0 else _reach_total
+	_reach_resume_left = 0.0
+	reach_progress = 0.0
+	_set_state(State.REACH)
+	reach_started.emit()
+
+
+## The reach holds while he stands perched within reach (perch_in_reach). Leaving it in any
+## way (hop / walk off, onto a stair, out of x) cancels at once; back in reach within
+## REACH_RESUME_TIME resumes the remaining time, so hopping in place can't reset the reach.
+func _tick_reach(delta: float, p: Node2D) -> void:
+	_stop_x(delta)
+	if p == null or not perch_in_reach(p):
+		_reach_saved = _state_left
+		_reach_resume_left = REACH_RESUME_TIME
+		_set_state(State.CHASE)   # hopped off / out of reach in time: reach_ended(false)
+		return
+	_state_left -= delta
+	reach_progress = clampf(1.0 - _state_left / maxf(_reach_total, 1e-4), 0.0, 1.0)
+	if _state_left > 1e-4:   # same float slack as STARTLED (36 x 1/60 ends a 0.6 s reach)
+		return
+	_reach_landing = true
+	_reach_resume_left = 0.0
+	if PlayerStats.take_hit(1):
+		on_landed_hit(p)   # -> RECOVER, reach_ended(true)
+	else:
+		_set_state(State.CHASE)   # invulnerable: reach still landed (reach_ended(true))
 
 
 func _enter_return() -> void:
@@ -394,6 +595,7 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector2.ZERO
 		return
 	tick(delta)
+	update_facing(velocity.x)   # intended velocity, before the slide zeroes it against a wall
 	if not climbing:
 		move_and_slide()
 	_try_hit()
@@ -401,12 +603,16 @@ func _physics_process(delta: float) -> void:
 
 ## All per-frame logic (no move_and_slide), so tests can drive it.
 func tick(delta: float) -> void:
+	if _spr != null and _feet_offset() != _spr_feet:
+		_apply_spr_offset()   # collider swapped/moved after _ready: keep the art on the feet
 	if not _home_set:
 		_home_set = true
 		home = global_position
 	var p := _player()
 	var sees := p != null and can_see(p)
 	_track_left = maxf(_track_left - delta, 0.0)
+	_reach_resume_left = maxf(_reach_resume_left - delta, 0.0)
+	_note_perch(p)
 	match state:
 		State.CALM, State.RETURN:
 			_tick_startle(delta, p)
@@ -425,7 +631,13 @@ func tick(delta: float) -> void:
 			if _state_left <= 1e-4 and not PlayerStats.startle_handled(self):
 				_enter_chase(light_track_time)
 		State.CHASE, State.SEARCH:
-			_tick_hunt(delta, p, sees)
+			if p != null and perch_in_reach(p):
+				_enter_reach()
+				_stop_x(delta)
+			else:
+				_tick_hunt(delta, p, sees)
+		State.REACH:
+			_tick_reach(delta, p)
 		State.RECOVER:
 			_state_left -= delta
 			if p and not climbing:
@@ -519,6 +731,8 @@ func _try_hit() -> void:
 	var p := _player()
 	if p == null or not hitbox.overlaps_body(p):
 		return  # polled every frame, so a boy who stays in contact is hit again later
+	if boy_perched(p) or (_boy_off_perch and not _boy_standing(p)):
+		return  # perched (or hopping off / in place): only the telegraphed reach catches him
 	if PlayerStats.take_hit(1):
 		on_landed_hit(p)
 
@@ -710,12 +924,22 @@ static func shape_half_extents(sh: Shape2D) -> Vector2:
 ## centred on the origin (old map, tests) and for one offset so the origin is the feet
 ## (Lead's generator: circle at (0,-r)). No collider -> the origin.
 func _feet() -> Vector2:
-	var cs := _body_shape()
+	return body_feet(self)
+
+
+## Bottom-centre of any body's first enabled CollisionShape2D child (global); its origin if none.
+## Used for our own feet and the boy's (player shape is offset to his feet in #13, centred in tests).
+static func body_feet(b: Node2D) -> Vector2:
+	var cs: CollisionShape2D = null
+	for c in b.get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape != null and not (c as CollisionShape2D).disabled:
+			cs = c
+			break
 	if cs == null:
-		return global_position
+		return b.global_position
 	var he := shape_half_extents(cs.shape)
 	if not cs.is_inside_tree():
-		return global_position + cs.position + Vector2(0, he.y)
+		return b.global_position + cs.position + Vector2(0, he.y)
 	return cs.global_transform * Vector2(0, he.y)
 
 
