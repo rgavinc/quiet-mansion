@@ -207,11 +207,63 @@ static func describe(r: Dictionary, stats: Node = null) -> String:
 	var ps := _ps(stats)
 	var toks := _tokens(r, ps)
 	var out := str(r.get("desc", ""))
+	var dropped := false
 	for t in toks:
-		out = out.replace(t.raw, t.text)
+		if t.get("zero", false):
+			out = out.replace(t.raw, ZERO_MARK)
+			dropped = true
+		else:
+			out = out.replace(t.raw, t.text)
+	if dropped:
+		out = _drop_zero_clauses(out)
 	if not _adds_from(r, toks, ps):
-		out = NOTHING_TEXT + out
+		out = NOTHING_TEXT + (out if out != "" else "Nothing else changes.")
 	return out
+
+
+## PRODUCT.md: at a cap the text never shows "0%" / "-0" / "+0 s": a clause whose number is zero
+## is dropped (the "adds nothing" line already says when the upside is capped).
+const ZERO_MARK := "\u0001"
+
+## Removes every clause of `text` holding ZERO_MARK. Sentences split on ". "; clauses within a
+## sentence split on ", but " / ", " / " and " (never inside a "(...)" aside).
+static func _drop_zero_clauses(text: String) -> String:
+	var sentences: PackedStringArray = text.trim_suffix(".").split(". ")
+	var kept: Array = []
+	var delim := RegEx.create_from_string(", but |, | and ")
+	for sent in sentences:
+		if not sent.contains(ZERO_MARK):
+			kept.append(sent)
+			continue
+		var segs: Array = []
+		var seps: Array = []
+		var at := 0
+		for m in delim.search_all(sent):
+			segs.append(sent.substr(at, m.get_start() - at))
+			seps.append(m.get_string())
+			at = m.get_end()
+		segs.append(sent.substr(at))
+		var out := ""
+		var first := true
+		for i in segs.size():
+			if str(segs[i]).contains(ZERO_MARK):
+				continue
+			if first:
+				out = str(segs[i])
+				first = false
+			else:
+				# Joiner before this clause; a dropped lead clause leaves its successor to open the sentence.
+				out += str(seps[i - 1]) + str(segs[i])
+		if out == "":
+			continue
+		if out.begins_with("but ") or out.begins_with("and "):
+			out = out.substr(4)
+		# After dropping a leading clause, the joiner we kept started the string.
+		out = out.lstrip(", ")
+		kept.append(out.substr(0, 1).to_upper() + out.substr(1))
+	if kept.is_empty():
+		return ""
+	return ". ".join(kept) + "."
 
 
 ## Each token of `r`'s desc, measured against `ps` + one more copy:
@@ -253,6 +305,7 @@ static func _tokens(r: Dictionary, ps: Node) -> Array:
 		t.text = shown
 		var good := int(GOOD.get("uses" if kind == "uses" else key, 0))
 		var nonzero := shown != "0%" and shown != "0"
+		t.zero = not nonzero
 		t.upside = nonzero and good != 0 and signf(v1 - v0) == signf(good)
 		out.append(t)
 	return out

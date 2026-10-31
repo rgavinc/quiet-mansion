@@ -29,6 +29,26 @@ var _anim: AnimatedSprite2D
 ## Test hook: when set, used instead of is_on_floor().
 var floor_override: int = -1  # -1 real, 0 airborne, 1 grounded
 
+## Landing on furniture creaks (PRODUCT.md "Perching has risk"): a NoiseBus noise at his feet,
+## radius x the noise_mult stat (items) and the item noise hooks, like the chest creak.
+signal creaked(furniture_px: float)
+@export var furniture_creak_radius: float = NoiseBus.DEFAULT_RADIUS * 0.5   # about half a screen
+@export var furniture_creak_loudness: float = 0.6
+## Furniture = something he lands on with another world surface below it within this many px
+## (4-tile furniture is 64px; a 16px slab over a room has 144px of air below).
+const FURNITURE_PROBE_PX := 80.0
+## Rattle shake-off (Enemy.RATTLE): a small kick and a push off the piece's edge, real physics.
+const SHAKE_PUSH_SPEED := 110.0
+const SHAKE_KICK_SPEED := 130.0
+const SHAKE_MAX_TIME := 1.2
+var _shake_dir: float = 0.0
+var _shake_left: float = 0.0
+var _shake_air: bool = false
+var _shake_still: float = 0.0
+var _shake_last: Vector2 = Vector2.ZERO
+signal shaken_off(dir: float)
+var _was_grounded: bool = true
+
 const ANIM_SLOTS := ["boy_idle", "boy_run", "boy_jump", "boy_pickup", "boy_carry",
 		"boy_throw", "boy_climb_stairs", "boy_hurt"]
 
@@ -83,7 +103,65 @@ func _physics_process(delta: float) -> void:
 	tick(delta, Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down"))
 	if state != State.CLIMB:
 		move_and_slide()
+	_check_landing()
 	_update_anim(delta)
+
+
+## Just landed (side-scroll, not on a stair): creak if it's furniture.
+func _check_landing() -> void:
+	var g := side_scroll and state != State.CLIMB and _grounded()
+	if g and not _was_grounded:
+		var h := furniture_under()
+		if h > 0.0:
+			creak(h)
+	_was_grounded = g
+
+
+## Height (px) of the furniture he's standing on, 0 if he's on a floor. Generic: a ray from
+## just inside what's under his feet straight down; another world surface close below means
+## he's on top of a piece of furniture (any size, any body), not a slab.
+func furniture_under() -> float:
+	if not is_inside_tree():
+		return 0.0
+	var feet := Enemy.body_feet(self)
+	var q := PhysicsRayQueryParameters2D.create(feet + Vector2(0, 2), feet + Vector2(0, FURNITURE_PROBE_PX),
+			PlayerStats.LAYER_WORLD, [get_rid()])
+	q.hit_from_inside = false   # skip the piece we stand on, find the floor under it
+	var hit := get_world_2d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return 0.0
+	return (hit.position as Vector2).y - feet.y
+
+
+func creak(furniture_px: float) -> void:
+	NoiseBus.emit_noise(Enemy.body_feet(self), furniture_creak_radius * PlayerStats.get_stat(&"noise_mult"), furniture_creak_loudness, self)
+	_spawn_creak_vfx()
+	creaked.emit(furniture_px)
+
+
+const VFX_CREAK_SLOT := "vfx_creak"
+
+
+## vfx_creak (manifest, 5f @12fps, one-shot): a dust puff + creak lines at the furniture top,
+## pivot on his feet, freed after the last frame. No slot / no art yet (PR #40): nothing spawns.
+func _spawn_creak_vfx() -> Node2D:
+	if not AnimLibrary.has_slot(VFX_CREAK_SLOT) or get_parent() == null:
+		return null
+	var sf := AnimLibrary.frames_for([VFX_CREAK_SLOT])
+	if not sf.has_animation(VFX_CREAK_SLOT):
+		return null   # texture missing
+	sf.set_animation_loop(VFX_CREAK_SLOT, false)
+	var v := AnimatedSprite2D.new()
+	v.name = "VfxCreak"
+	v.sprite_frames = sf
+	v.offset = AnimLibrary.offset_for(VFX_CREAK_SLOT)
+	v.z_index = 5
+	v.top_level = true
+	v.animation_finished.connect(v.queue_free)
+	get_parent().add_child(v)
+	v.global_position = Enemy.body_feet(self)
+	v.play(VFX_CREAK_SLOT)
+	return v
 
 
 ## All per-frame logic, separate from input polling so tests can drive it.
@@ -106,15 +184,73 @@ func tick(delta: float, dir: Vector2) -> void:
 				facing = 1 if dir.x > 0.0 else -1
 			if side_scroll:
 				velocity.x = dir.x * move_speed()
+				if _shake_left > 0.0:
+					_tick_shake(delta)
 				_apply_gravity(delta)
-				if _jump_queued and _grounded():
+				if _jump_queued and _grounded() and _shake_left <= 0.0:
 					velocity.y = -PlayerStats.get_stat(&"jump_velocity")
-				if absf(dir.y) > 0.5:
+				if absf(dir.y) > 0.5 and _shake_left <= 0.0:
 					_try_enter_stair(dir.y)
 			else:
 				velocity = dir * move_speed()
 			_update_hover_select()
 	_jump_queued = false
+
+
+## Shaken off furniture toward `dir` (-1 / +1): input is ignored until he has left the ground
+## and landed (or SHAKE_MAX_TIME). Collisions still apply, so he can't enter a wall or a floor.
+func shake_off(dir: float) -> void:
+	if not side_scroll or dir == 0.0:
+		return
+	if state == State.PICKUP:
+		_cancel_pickup()
+	_shake_dir = signf(dir)
+	_shake_left = SHAKE_MAX_TIME
+	_shake_air = false
+	_shake_still = 0.0
+	_shake_last = global_position
+	facing = int(_shake_dir)
+	if _grounded():
+		velocity.y = -SHAKE_KICK_SPEED
+	shaken_off.emit(_shake_dir)
+
+
+func _tick_shake(delta: float) -> void:
+	_shake_left -= delta
+	velocity.x = _shake_dir * SHAKE_PUSH_SPEED
+	# watchdog: wedged (no movement for 0.3 s) -> control comes back
+	if global_position.distance_to(_shake_last) < 0.5:
+		_shake_still += delta
+		if _shake_still >= 0.3:
+			_shake_left = 0.0
+	else:
+		_shake_still = 0.0
+		_shake_last = global_position
+	if not _grounded():
+		_shake_air = true
+	elif _shake_air and furniture_under() <= 0.0 and not _standing_on_body():
+		_shake_left = 0.0   # back on a floor (landing on the piece again keeps pushing him off)
+	if _shake_left <= 0.0:
+		velocity.x = 0.0
+
+
+## Landed on a walker's head rather than the floor: keep pushing, he walks off it.
+func _standing_on_body() -> bool:
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y < -0.5 and c.get_collider() is CharacterBody2D:
+			return true
+	return false
+
+
+## Hands control back at once (the walker's watchdog when a shake wedges him).
+func end_shake() -> void:
+	_shake_left = 0.0
+	velocity.x = 0.0
+
+
+func is_shaken() -> bool:
+	return _shake_left > 0.0
 
 
 ## Walk speed now: the stat, times item carry penalties for what is held (Heavy Vases).

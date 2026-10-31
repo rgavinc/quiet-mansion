@@ -63,9 +63,8 @@ signal item_purchased(offer: Dictionary)
 # --- Stat defaults (TODO(BE-wire): read from PlayerStats) -----------------
 ## Stages per run (docs/PRODUCT.md: 5 stages; clearing stage 5 = win screen, not the
 ## shop). The ONE place FE caps the run: no stage above this ever loads.
-## TODO(Lead): point at Lead's difficulty/stage table (PR #13 StageTable.stage_count())
-## once it is on development; nothing on development defines a stage count yet.
-const MAX_STAGES := 5
+## Comes from Lead's stage table (StageTable.STAGE_COUNT).
+const MAX_STAGES := StageTable.STAGE_COUNT
 ## Fresh-run hearts when no PlayerStats is wired (PlayerStats.BASE max_health).
 const DEFAULT_MAX_HEALTH := 3
 var max_health: int = 3
