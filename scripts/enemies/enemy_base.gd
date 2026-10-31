@@ -14,12 +14,18 @@ extends CharacterBody2D
 ## (LEVELGEN.md). `movement == &"float"` (stage 4+) ignores gravity and drifts through slabs.
 ## Enemies always simulate, on screen or not.
 
-enum State { CALM, STARTLED, CHASE, SEARCH, RETURN, RECOVER, STUNNED, REACH }
+enum State { CALM, STARTLED, CHASE, SEARCH, RETURN, RECOVER, STUNNED, REACH, RATTLE }
 
 ## Perch reach telegraph for FE / Designer: REACH starts, then ends caught (hit landed) or not
 ## (boy hopped off / out of reach, or the reach was interrupted by a stun).
 signal reach_started
 signal reach_ended(caught: bool)
+## Rattle (PRODUCT.md "No safe camping"): a walker that can't reach a perched boy shakes the
+## furniture. `rattled` fires with each loud noise, `rattle_ended(shaken)` when it stops
+## (shaken = the boy was shaken off; false = cancelled: he left, stun, state change).
+signal rattle_started
+signal rattled(at: Vector2)
+signal rattle_ended(shaken: bool)
 
 const MOVE_WALK := &"walk"
 const MOVE_FLOAT := &"float"
@@ -67,6 +73,17 @@ const MOVE_FLOAT := &"float"
 @export var perch_reach_height: float = 0.0
 ## Horizontal feet-to-feet distance (px) that counts as "under him".
 @export var perch_reach_x: float = 30.0
+## Rattle: art slot (puppet_rattle, loops), seconds unreachable before it starts, seconds of
+## rattling before the boy is shaken off, loud-noise radius / loudness, and the noise cadence
+## (0 = one per animation loop of the manifest slot, else seconds between noises).
+@export var anim_rattle: String = ""
+@export var rattle_wait: float = 3.0
+@export var rattle_time: float = 3.0
+@export var rattle_noise_radius: float = NoiseBus.DEFAULT_RADIUS
+@export var rattle_noise_loudness: float = 1.0
+@export var rattle_noise_every: float = 0.0
+## Tallest piece it rattles (4 tiles = 64 + margin); a hop above it still counts as "on it".
+@export var rattle_max_height: float = 72.0
 
 const STARTLE_FALLBACK_TIME := 0.5   # startle slot missing / no frames / no fps
 const REACH_FALLBACK_TIME := 0.6     # PD: a clear ~0.6 s reach when there's no reach anim
@@ -79,6 +96,14 @@ const REACH_RESUME_TIME := 1.0
 ## walker keeps its facing, or turns to the boy while it is hunting / reaching (no flicker at vx ~ 0).
 const FACE_VEL_DEADZONE := 8.0
 const FACE_TARGET_DEADZONE := 6.0
+## Turning toward a still boy needs him this far on the other side (hysteresis), and no turn
+## follows another within FACE_HOLD_TIME, so a boy wobbling +-7 px around a walker can't flicker it.
+const FACE_TURN_PX := 12.0
+const FACE_HOLD_TIME := 0.2
+## Walker beside a piece it rattles: centre within half the piece + this.
+const RATTLE_STAND_X := 40.0
+const RATTLE_SLOT_FALLBACK_LOOP := 0.5
+const VFX_RATTLE_SLOT := "vfx_rattle"
 ## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
 const LEDGE_PROBE_DEPTH := 24.0
 const LEDGE_PROBE_LIFT := 4.0     # ray starts this far above the feet
@@ -88,7 +113,8 @@ const DEF_FIELDS := [&"type_id", &"movement", &"walk_speed", &"chase_speed", &"f
 	&"noise_track_time", &"light_track_time", &"startle_reaction_time", &"recover_time",
 	&"backoff_speed", &"stun_time", &"patrol_radius", &"shove_distance", &"hit_radius",
 	&"anim_calm", &"anim_startle", &"anim_chase", &"give_up_distance",
-	&"anim_reach", &"reach_time", &"perch_reach_height", &"perch_reach_x"]
+	&"anim_reach", &"reach_time", &"perch_reach_height", &"perch_reach_x",
+	&"anim_rattle", &"rattle_wait", &"rattle_time"]
 
 var state: State = State.CALM
 var home: Vector2 = Vector2.ZERO
@@ -113,7 +139,7 @@ var enraged: bool:
 	get: return is_chasing()
 ## Not calm: hunting, or startled by light (a throw stuns instead of killing).
 func is_aroused() -> bool:
-	return state in [State.STARTLED, State.CHASE, State.SEARCH, State.RECOVER, State.STUNNED, State.REACH]
+	return state in [State.STARTLED, State.CHASE, State.SEARCH, State.RECOVER, State.STUNNED, State.REACH, State.RATTLE]
 
 ## Test hooks (like PlayerController.floor_override): -1 real, 0 false, 1 true.
 var sight_override: int = -1
@@ -144,6 +170,19 @@ var _reach_saved: float = 0.0
 ## He was last standing perched above us and hasn't stood anywhere since (hop off / in place).
 var _boy_off_perch: bool = false
 var _reach_resume_left: float = 0.0
+var _face_hold: float = 0.0
+# rattle
+var _rattle_shaken: bool = false
+var _rattle_unreach: float = 0.0       # s unreachable so far (CHASE/SEARCH)
+var _rattle_clock: float = 0.0         # s into the current rattle
+var _rattle_noise_n: int = 0           # noises emitted so far this rattle
+var _rattle_piece: Dictionary = {}     # {rect: Rect2 (global), body: Node}; cached while he stands
+var _rattle_vfx: AnimatedSprite2D = null
+var _wobble_nodes: Array = []          # [{node, base_x}] visuals the rattle shifts (never collision)
+## Current wobble step in px (already negated for a flipped walker). 0 when not rattling.
+var rattle_wobble: float = 0.0
+## 0..1 progress to the shake-off (0 when not rattling). FE telegraph.
+var rattle_progress: float = 0.0
 
 
 func _ready() -> void:
@@ -212,8 +251,8 @@ func _play(slot: String) -> void:
 		return
 	if _spr.sprite_frames == null:
 		var slots: Array = []
-		for s in [anim_calm, anim_startle, chase_slot(), anim_reach]:
-			if not s.is_empty() and (s != anim_reach or AnimLibrary.has_slot(s)):   # reach art may not be merged yet
+		for s in [anim_calm, anim_startle, chase_slot(), anim_reach, anim_rattle]:
+			if not s.is_empty() and ((s != anim_reach and s != anim_rattle) or AnimLibrary.has_slot(s)):   # reach art may not be merged yet
 				slots.append(s)
 		_spr.sprite_frames = AnimLibrary.frames_for(slots)
 		# Startle plays once and holds its last frame (frame count from the manifest via
@@ -222,6 +261,8 @@ func _play(slot: String) -> void:
 			_spr.sprite_frames.set_animation_loop(anim_startle, false)
 		if not anim_reach.is_empty() and _spr.sprite_frames.has_animation(anim_reach):
 			_spr.sprite_frames.set_animation_loop(anim_reach, false)   # one reach, holds the grab
+		if not anim_rattle.is_empty() and _spr.sprite_frames.has_animation(anim_rattle):
+			_spr.sprite_frames.set_animation_loop(anim_rattle, true)
 	if not _spr.sprite_frames.has_animation(slot):
 		return
 	if slot == anim_startle and _spr.animation == slot:
@@ -236,15 +277,23 @@ func _play(slot: String) -> void:
 ## startled / chasing / searching / reaching, toward the boy. The art faces right unless the
 ## slot's manifest entry says `facing = "left"` (or `flip = true`); flip_h mirrors about the
 ## pivot column (x = frame centre for every puppet slot, so the feet don't move).
-func update_facing(vx: float) -> void:
+func update_facing(vx: float, delta: float = -1.0) -> void:
+	if delta < 0.0:
+		delta = get_physics_process_delta_time()
+	_face_hold = maxf(_face_hold - delta, 0.0)
+	var want := face_dir
 	if absf(vx) > FACE_VEL_DEADZONE:
-		face_dir = 1 if vx > 0.0 else -1
-	elif state in [State.STARTLED, State.CHASE, State.SEARCH, State.REACH, State.STUNNED, State.RECOVER]:
+		want = 1 if vx > 0.0 else -1
+	elif state in [State.STARTLED, State.CHASE, State.SEARCH, State.REACH, State.RATTLE, State.STUNNED, State.RECOVER]:
 		var p := _player()
 		if p != null:
 			var dx := p.global_position.x - global_position.x
-			if absf(dx) > FACE_TARGET_DEADZONE:
-				face_dir = 1 if dx > 0.0 else -1
+			# turning needs the boy clearly on the other side (hysteresis)
+			if absf(dx) > FACE_TURN_PX:
+				want = 1 if dx > 0.0 else -1
+	if want != face_dir and _face_hold <= 0.0:
+		face_dir = want
+		_face_hold = FACE_HOLD_TIME
 	_apply_flip()
 
 
@@ -331,7 +380,7 @@ func _on_noise(level: float, at: Vector2) -> void:
 
 
 func hear_noise() -> void:
-	if state in [State.RECOVER, State.STUNNED, State.REACH]:
+	if state in [State.RECOVER, State.STUNNED, State.REACH, State.RATTLE]:
 		_track_left = maxf(_track_left, noise_track_time)
 		return
 	_enter_chase(noise_track_time)
@@ -340,7 +389,7 @@ func hear_noise() -> void:
 ## A lure (Music Box) plays at `at`: hunt toward IT, not the boy (SEARCH with last_known =
 ## the lure; each pulse refills memory). Sight of the boy still wins in _tick_hunt.
 func hear_lure(at: Vector2) -> void:
-	if state in [State.RECOVER, State.STUNNED, State.REACH]:
+	if state in [State.RECOVER, State.STUNNED, State.REACH, State.RATTLE]:
 		return
 	_enter_chase(0.0)
 	_track_left = 0.0
@@ -374,6 +423,12 @@ func _set_state(s: State) -> void:
 		reach_progress = 0.0
 		reach_ended.emit(_reach_landing)
 		_reach_landing = false
+	if state == State.RATTLE and s != State.RATTLE:
+		var shaken := _rattle_shaken
+		_rattle_shaken = false
+		_end_rattle(shaken)
+	if s != State.CHASE and s != State.SEARCH:
+		_rattle_unreach = 0.0
 	state = s
 	match s:
 		State.CALM, State.RETURN:
@@ -385,6 +440,11 @@ func _set_state(s: State) -> void:
 				_play(anim_reach)
 			else:
 				_play(chase_slot())   # no reach art yet: FE telegraphs from reach_started / reach_progress
+		State.RATTLE:
+			if not anim_rattle.is_empty() and AnimLibrary.has_slot(anim_rattle):
+				_play(anim_rattle)
+			else:
+				_play(chase_slot())
 		_:
 			_play(chase_slot())
 
@@ -502,8 +562,8 @@ func perch_in_reach(p: Node2D) -> bool:
 
 
 func _note_perch(p: Node2D) -> void:
-	if p == null:
-		_boy_off_perch = false
+	if p == null or ("stair" in p and p.get("stair") != null):
+		_boy_off_perch = false   # on a stair he is fair game (QA: no stair immunity)
 	elif _boy_standing(p):
 		_boy_off_perch = boy_perched(p)
 
@@ -537,6 +597,253 @@ func _tick_reach(delta: float, p: Node2D) -> void:
 		on_landed_hit(p)   # -> RECOVER, reach_ended(true)
 	else:
 		_set_state(State.CHASE)   # invulnerable: reach still landed (reach_ended(true))
+
+
+# --- rattle (PRODUCT.md "No safe camping") --------------------------------------------
+## Boy above us (standing on a piece, or hopping on it) where we can't grab him: higher than
+## reach_height, up to a 4-tile piece, with us beside that piece. Walkers only; floaters never.
+func rattle_blocked(p: Node2D) -> bool:
+	if p == null or not is_side_scroll() or is_floating() or climbing or not _grounded():
+		return false
+	if "stair" in p and p.get("stair") != null:
+		return false
+	var standing := _boy_standing(p)
+	var raw := _feet().y - body_feet(p).y
+	if standing:
+		if raw <= reach_height() or raw > rattle_max_height:
+			return false
+		_rattle_piece = _find_piece(p)
+	else:
+		if raw <= reach_height() or _rattle_piece.is_empty():
+			return false   # airborne with nothing known under him: hopped off, not on it
+	var ours := _feet().x
+	if _rattle_piece.is_empty():
+		return absf(body_feet(p).x - ours) <= 2.0 * RATTLE_STAND_X
+	var r: Rect2 = _rattle_piece.rect
+	return absf(ours - r.get_center().x) <= r.size.x * 0.5 + RATTLE_STAND_X
+
+
+## The WORLD box under his feet: {rect (global), body}. Empty if nothing rectangular found.
+func _find_piece(p: Node2D) -> Dictionary:
+	if not is_inside_tree():
+		return {}
+	var feet := body_feet(p)
+	var q := PhysicsRayQueryParameters2D.create(feet + Vector2(0, -1), feet + Vector2(0, 6),
+			PlayerStats.LAYER_WORLD, [p.get_rid()] if p is CollisionObject2D else [])
+	q.hit_from_inside = false
+	var hit := get_world_2d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or not (hit.collider is Node):
+		return {}
+	var body: Node = hit.collider
+	var best := {}
+	for c in body.get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape is RectangleShape2D:
+			var cs := c as CollisionShape2D
+			var size := ((cs.shape as RectangleShape2D).size * cs.global_scale.abs())
+			var r := Rect2(cs.global_position - size * 0.5, size)
+			if r.grow(1.5).has_point(hit.position):
+				best = {rect = r, body = body}
+				break
+	return best
+
+
+## True once he has been out of our reach (rattle_blocked) for rattle_wait seconds. Any frame
+## he isn't (he left, we aren't beside the piece, reachable now) resets the count.
+func _tick_rattle_wait(delta: float, p: Node2D) -> bool:
+	if rattle_wait < 0.0 or not rattle_blocked(p):
+		_rattle_unreach = 0.0
+		return false
+	_rattle_unreach += delta
+	return _rattle_unreach >= rattle_wait - 1e-4
+
+
+func rattle_loop_time() -> float:
+	return anim_length(anim_rattle, RATTLE_SLOT_FALLBACK_LOOP) if not anim_rattle.is_empty() else RATTLE_SLOT_FALLBACK_LOOP
+
+
+func rattle_noise_interval() -> float:
+	return rattle_noise_every if rattle_noise_every > 0.0 else maxf(rattle_loop_time(), 0.05)
+
+
+func _rattle_wobble_steps() -> Array:
+	var a: Variant = AnimLibrary.meta(anim_rattle).get("furniture_wobble_px", []) if not anim_rattle.is_empty() else []
+	return a if a is Array else []
+
+
+func _enter_rattle(p: Node2D) -> void:
+	_rattle_unreach = 0.0
+	_rattle_clock = 0.0
+	_rattle_noise_n = 0
+	rattle_progress = 0.0
+	_state_left = maxf(rattle_time, 0.0)
+	_set_state(State.RATTLE)
+	_spawn_rattle_vfx()
+	_collect_wobble_nodes(p)
+	rattle_started.emit()
+	_rattle_noise()   # the first rattle is loud at once
+
+
+func _tick_rattle(delta: float, p: Node2D) -> void:
+	_stop_x(delta)
+	if p == null or not rattle_blocked(p):
+		_set_state(State.CHASE)   # he left / we can't stand beside it: cancelled, timers reset
+		return
+	_rattle_clock += delta
+	_state_left -= delta
+	rattle_progress = clampf(1.0 - _state_left / maxf(rattle_time, 1e-4), 0.0, 1.0)
+	var every := rattle_noise_interval()
+	while float(_rattle_noise_n) * every <= _rattle_clock + 1e-4 and _rattle_noise_n * every < rattle_time - 1e-4:
+		_rattle_noise()
+	_apply_rattle_wobble()
+	if _state_left > 1e-4:
+		return
+	_shake_off(p)
+
+
+func _rattle_noise() -> void:
+	_rattle_noise_n += 1
+	var at := _rattle_top_point()
+	NoiseBus.emit_noise(at, rattle_noise_radius, rattle_noise_loudness, self)
+	rattled.emit(at)
+
+
+## Furniture top centre (where vfx_rattle sits); our feet if the piece is unknown.
+func _rattle_top_point() -> Vector2:
+	if _rattle_piece.is_empty():
+		return _feet()
+	var r: Rect2 = _rattle_piece.rect
+	return Vector2(r.get_center().x, r.position.y)
+
+
+func _rattle_frame() -> int:
+	var n := maxi(int(AnimLibrary.meta(anim_rattle).get("frames", 1)), 1) if not anim_rattle.is_empty() else 1
+	var fps := float(AnimLibrary.meta(anim_rattle).get("fps", 12)) if not anim_rattle.is_empty() else 12.0
+	return int(floor(_rattle_clock * maxf(fps, 1.0) + 1e-4)) % n
+
+
+## One manifest wobble step per rattle frame, negated when the walker is flipped. Visuals only
+## (the furniture's visual and the boy's sprite); collision never moves.
+func _apply_rattle_wobble() -> void:
+	var steps := _rattle_wobble_steps()
+	var idx := _rattle_frame()
+	if _spr != null and _spr.animation == anim_rattle:
+		_spr.frame = idx
+	var w := 0.0
+	if not steps.is_empty():
+		w = float(steps[idx % steps.size()])
+		if _spr != null and _spr.flip_h:
+			w = -w
+	_set_wobble(w)
+
+
+func _set_wobble(w: float) -> void:
+	rattle_wobble = w
+	for e in _wobble_nodes:
+		if is_instance_valid(e.node):
+			e.node.position.x = e.base_x + w
+
+
+func _collect_wobble_nodes(p: Node2D) -> void:
+	_wobble_nodes.clear()
+	var boy_spr: Variant = p.get("_anim") if "_anim" in p else null
+	if boy_spr is Node2D:
+		_wobble_nodes.append({node = boy_spr, base_x = (boy_spr as Node2D).position.x})
+	var v: CanvasItem = _find_furniture_visual()
+	if v != null:
+		_wobble_nodes.append({node = v, base_x = v.get("position").x})
+
+
+## The piece's visual: a CanvasItem child of its body (Sprite2D / ColorRect / Control, never a
+## collision shape) or a node in group "furniture_visual", whose rect top is on the piece's top
+## and spans the boy's column. Per-piece visuals only; a shared level-wide node is skipped.
+func _find_furniture_visual() -> CanvasItem:
+	if _rattle_piece.is_empty():
+		return null
+	var r: Rect2 = _rattle_piece.rect
+	var cands: Array = []
+	for n in get_tree().get_nodes_in_group("furniture_visual"):
+		cands.append(n)
+	var body: Node = _rattle_piece.body
+	for c in body.get_children():
+		cands.append(c)
+	for c in cands:
+		if not (c is Sprite2D or c is ColorRect or c is AnimatedSprite2D):
+			continue
+		var vr := _visual_rect(c)
+		if vr.size == Vector2.ZERO:
+			continue
+		if absf(vr.position.y - r.position.y) <= 2.0 and absf(vr.get_center().x - r.get_center().x) <= 4.0 \
+				and absf(vr.size.x - r.size.x) <= 4.0:
+			return c
+	return null
+
+
+static func _visual_rect(c: Node) -> Rect2:
+	if c is ColorRect:
+		return Rect2((c as ColorRect).global_position, (c as ColorRect).size)
+	if c is Sprite2D:
+		var sp := c as Sprite2D
+		if sp.texture == null:
+			return Rect2()
+		var sz := sp.texture.get_size() / Vector2(maxi(sp.hframes, 1), maxi(sp.vframes, 1)) * sp.global_scale.abs()
+		var o := sp.global_position + sp.offset * sp.global_scale
+		return Rect2(o - sz * 0.5 if sp.centered else o, sz)
+	return Rect2()
+
+
+func _spawn_rattle_vfx() -> void:
+	if _rattle_vfx != null and is_instance_valid(_rattle_vfx):
+		_rattle_vfx.queue_free()
+	_rattle_vfx = null
+	if not AnimLibrary.has_slot(VFX_RATTLE_SLOT) or get_parent() == null:
+		return
+	var sf := AnimLibrary.frames_for([VFX_RATTLE_SLOT])
+	if not sf.has_animation(VFX_RATTLE_SLOT):
+		return
+	sf.set_animation_loop(VFX_RATTLE_SLOT, true)
+	var v := AnimatedSprite2D.new()
+	v.name = "VfxRattle"
+	v.sprite_frames = sf
+	v.offset = AnimLibrary.offset_for(VFX_RATTLE_SLOT)
+	v.z_index = 5
+	v.top_level = true
+	get_parent().add_child(v)
+	v.global_position = _rattle_top_point()
+	v.play(VFX_RATTLE_SLOT)
+	_rattle_vfx = v
+
+
+## Leaving RATTLE (any way): vfx freed, wobble restored, timers reset, rattle_ended(shaken).
+func _end_rattle(shaken: bool) -> void:
+	_set_wobble(0.0)
+	_wobble_nodes.clear()   # _set_wobble(0) just put every node back on its base x
+	if _rattle_vfx != null and is_instance_valid(_rattle_vfx):
+		_rattle_vfx.queue_free()
+	_rattle_vfx = null
+	rattle_progress = 0.0
+	_rattle_clock = 0.0
+	_rattle_noise_n = 0
+	_rattle_unreach = 0.0
+	_rattle_piece = {}
+	rattle_ended.emit(shaken)
+
+
+## 3 s of rattling: the boy drops off the piece's edge toward our side (PlayerController
+## .shake_off: a small kick + push under real physics, so he lands on the floor, never in a wall).
+func _shake_off(p: Node2D) -> void:
+	var cx := _rattle_top_point().x
+	var dir := signf(_feet().x - cx)
+	if dir == 0.0:
+		dir = -1.0 if face_dir < 0 else 1.0
+	_boy_off_perch = true   # airborne until he lands: no contact hit mid-fall
+	if p != null and p.has_method(&"shake_off"):
+		p.call(&"shake_off", dir)
+	_end_rattle_state(true)
+
+
+func _end_rattle_state(shaken: bool) -> void:
+	_rattle_shaken = shaken
+	_set_state(State.CHASE)
 
 
 func _enter_return() -> void:
@@ -595,7 +902,7 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector2.ZERO
 		return
 	tick(delta)
-	update_facing(velocity.x)   # intended velocity, before the slide zeroes it against a wall
+	update_facing(velocity.x, delta)   # intended velocity, before the slide zeroes it against a wall
 	if not climbing:
 		move_and_slide()
 	_try_hit()
@@ -634,10 +941,15 @@ func tick(delta: float) -> void:
 			if p != null and perch_in_reach(p):
 				_enter_reach()
 				_stop_x(delta)
+			elif p != null and _tick_rattle_wait(delta, p):
+				_enter_rattle(p)
+				_stop_x(delta)
 			else:
 				_tick_hunt(delta, p, sees)
 		State.REACH:
 			_tick_reach(delta, p)
+		State.RATTLE:
+			_tick_rattle(delta, p)
 		State.RECOVER:
 			_state_left -= delta
 			if p and not climbing:

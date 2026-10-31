@@ -47,6 +47,19 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["perch_2_tile_caught_walker_origin_at_feet", _perch_catch_walker_shape.bind(-14.0)],
 		["perch_2_tile_caught_walker_centred", _perch_catch_walker_shape.bind(0.0)],
 		["perch_3_tile_out_of_reach", _perch_out_of_reach],
+		["rattle_starts_after_3s_unreachable_3_4_tiles_and_height_override", _rattle_start],
+		["rattle_floater_never_rattles", _rattle_floater],
+		["rattle_noise_each_rattle_pulls_other_enemy", _rattle_noise],
+		["rattle_noise_cadence_tunable", _rattle_cadence],
+		["rattle_shake_off_lands_on_walker_side_left", _rattle_shake.bind(-1, false)],
+		["rattle_shake_off_lands_on_walker_side_right", _rattle_shake.bind(1, false)],
+		["rattle_shake_off_beside_wall_lands_valid", _rattle_shake.bind(-1, true)],
+		["rattle_cancels_when_boy_leaves_timers_reset", _rattle_cancel_leave],
+		["rattle_cancels_on_stun_and_state_change", _rattle_cancel_stun],
+		["rattle_wobble_manifest_steps_negated_when_flipped_collision_fixed", _rattle_wobble_test],
+		["rattle_vfx_on_furniture_top_freed_on_end", _rattle_vfx],
+		["face_hysteresis_boy_wobbling_7px_no_flicker", _face_hysteresis],
+		["stair_clears_off_perch_immunity_airborne_keeps_it", _stair_immunity],
 		["perch_creak_on_furniture_scaled_by_noise_mult", _perch_creak],
 		["perch_creak_wakes_calm_walker_below", _perch_creak_wakes],
 		["perch_creak_vfx_hook_on_landing", _perch_creak_vfx],
@@ -878,4 +891,356 @@ func _face_flip_feet(tree: SceneTree) -> Variant:
 			if edge - 200.0 < -0.5 or edge - 200.0 > 1.5: return "%s flipped %d: art bottom %.2f vs floor 200" % [slot, dir, edge]
 			if _pivot_world(e, slot).distance_to(_bottom(e)) > 0.01: return "%s flipped %d: pivot off the feet" % [slot, dir]
 	if e.art_faces_left("puppet_chase"): return "puppet_chase should face right"
+	return ""
+
+
+# --- rattle (PD "No safe camping"), QA follow-ups: stair immunity, facing hysteresis --------
+## 3/4-tile piece with a visual (ColorRect child, like #13's placeholder), no walker exception:
+## the walker can only stand beside it.
+func _tall(h_tiles: int) -> StaticBody2D:
+	var b := _furniture(h_tiles)
+	var vis := ColorRect.new()
+	vis.name = "Vis"
+	vis.size = Vector2(64, h_tiles * 16)
+	vis.position = -vis.size * 0.5
+	b.add_child(vis)
+	return b
+
+
+## Boy on the piece, walker `side` (-1 left / +1 right) of it, chasing. {furn, p, e}.
+func _rattle_rig(tree: SceneTree, h_tiles: int, side := -1, walker_dx := 60.0) -> Dictionary:
+	var furn := _tall(h_tiles)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - h_tiles * 16))
+	for i in 3: await tree.physics_frame
+	var e := _walker_feet(Vector2(PERCH_X + side * walker_dx, PERCH_FLOOR), 0.0)
+	e.sight_override = 1
+	e._enter_chase(9999)
+	return {furn = furn, p = p, e = e}
+
+
+class RattleLog:
+	var started := 0
+	var ended: Array = []
+	var noises := 0
+	var source: Node
+	func on_start() -> void: started += 1
+	func on_end(shaken: bool) -> void: ended.append(shaken)
+	func on_noise(_at: Vector2, _r: float, _l: float, src: Node) -> void:
+		if src == source: noises += 1
+
+
+func _rlog(e: CharacterBody2D) -> RattleLog:
+	var l := RattleLog.new()
+	l.source = e
+	e.rattle_started.connect(l.on_start)
+	e.rattle_ended.connect(l.on_end)
+	NoiseBus.noise.connect(l.on_noise)
+	return l
+
+
+## Frames from "he is out of reach beside the piece" to RATTLE.
+func _frames_to_rattle(tree: SceneTree, e: CharacterBody2D, p: Node2D, max_frames := 420) -> Array:
+	var blocked := -1
+	for f in max_frames:
+		await tree.physics_frame
+		if blocked < 0 and e.rattle_blocked(p): blocked = f
+		if e.state == e.State.RATTLE: return [blocked, f]
+	return [blocked, -1]
+
+
+func _rattle_start(tree: SceneTree) -> Variant:
+	for h in [3, 4]:
+		var rig: Dictionary = await _rattle_rig(tree, h)
+		var e: CharacterBody2D = rig.e
+		var r: Array = await _frames_to_rattle(tree, e, rig.p)
+		if r[0] < 0 or r[1] < 0: return "%d-tile: never rattled (blocked %d, state %d)" % [h, r[0], e.state]
+		var t: float = (r[1] - r[0]) / 60.0
+		if t < 2.95 or t > 3.1: return "%d-tile: rattle %.3fs after he became unreachable, want 3.0" % [h, t]
+		e.free(); rig.p.free(); rig.furn.free()
+		await tree.process_frame
+	# 2 tiles (32) but beyond a lowered reach_height: out of reach -> rattle too
+	var rig2: Dictionary = await _rattle_rig(tree, 2)
+	var e2: CharacterBody2D = rig2.e
+	e2.perch_reach_height = 20.0
+	var r2: Array = await _frames_to_rattle(tree, e2, rig2.p)
+	if r2[1] < 0: return "2-tile piece with reach_height 20: never rattled"
+	# a walker that CAN reach (2 tiles, walker under him) reaches, never rattles
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32))
+	for i in 3: await tree.physics_frame
+	var e3 := _under_walker(furn)
+	for f in 150:
+		await tree.physics_frame
+		if e3.state == e3.State.RATTLE: return "rattled a boy it can reach"
+	return ""
+
+
+func _rattle_floater(tree: SceneTree) -> Variant:
+	var furn := _tall(3)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 48))
+	for i in 3: await tree.physics_frame
+	var e: CharacterBody2D = load("res://scripts/enemies/puppet_hand.gd").new()
+	e.movement = &"float"
+	var cs := CollisionShape2D.new(); var c := CircleShape2D.new(); c.radius = 14; cs.shape = c; e.add_child(cs)
+	_holder.add_child(e); e.global_position = Vector2(PERCH_X - 60, PERCH_FLOOR - 40)
+	e.side_scroll = true
+	e.sight_override = 1
+	e._enter_chase(9999)
+	for f in 480:
+		await tree.physics_frame
+		if e.state == e.State.RATTLE: return "a floater rattled"
+	if p.global_position.distance_to(e.global_position) > 300.0: return "floater test didn't engage"
+	return ""
+
+
+func _rattle_noise(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	var log := _rlog(e)
+	var other := _walker_feet(Vector2(PERCH_X + 450.0, PERCH_FLOOR), 0.0)   # calm, far, inside the radius
+	other.sight_override = 0
+	await tree.physics_frame
+	if other.state != other.State.CALM: return "other walker not calm at start (%d)" % other.state
+	for f in 420:
+		await tree.physics_frame
+		if not log.ended.is_empty(): break
+	NoiseBus.noise.disconnect(log.on_noise)
+	if log.ended.is_empty(): return "rattle never ended"
+	if log.noises != 6: return "%d rattle noises in 3 s at one per 0.5 s loop, want 6" % log.noises
+	if other.state != other.State.CHASE and other.state != other.State.SEARCH: return "a rattle noise did not pull the other walker (state %d)" % other.state
+	return ""
+
+
+func _rattle_cadence(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	e.rattle_noise_every = 1.0
+	var log := _rlog(e)
+	for f in 420:
+		await tree.physics_frame
+		if not log.ended.is_empty(): break
+	NoiseBus.noise.disconnect(log.on_noise)
+	if log.noises != 3: return "%d noises with rattle_noise_every 1.0 over 3 s, want 3" % log.noises
+	return ""
+
+
+## +3 s of rattling: the boy is shaken off onto the walker's side: lands on that floor, off the
+## piece, not inside anything (optionally with a wall right behind the walker).
+func _rattle_shake(tree: SceneTree, side: int, wall: bool) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3, side, 60.0)
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	if wall:
+		var w := StaticBody2D.new()
+		w.collision_layer = PlayerStats.LAYER_WORLD
+		w.collision_mask = 0
+		var cs := CollisionShape2D.new(); var r := RectangleShape2D.new(); r.size = Vector2(16, 200); cs.shape = r
+		w.add_child(cs)
+		_holder.add_child(w)
+		w.global_position = Vector2(PERCH_X + side * (60.0 + 14.0 + 30.0 + 8.0), PERCH_FLOOR - 100)   # a boy-wide gap behind the walker
+	var log := _rlog(e)
+	var shaken_frame := -1
+	for f in 480:
+		await tree.physics_frame
+		if not log.ended.is_empty():
+			shaken_frame = f
+			break
+	NoiseBus.noise.disconnect(log.on_noise)
+	if shaken_frame < 0: return "never shaken off"
+	if not log.ended[0]: return "rattle ended without a shake-off"
+	for f in 150: await tree.physics_frame
+	var feet := Enemy.body_feet(p)
+	if absf(feet.y - PERCH_FLOOR) > 2.0: return "boy's feet at %s, want the floor %.0f (walker %s, wall %s)" % [feet, PERCH_FLOOR, e.global_position, wall]
+	var edge := PERCH_X + side * 32.0
+	if (feet.x - edge) * side < -1.0: return "boy at x %.1f is not on the walker's side (edge %.0f, side %d)" % [feet.x, edge, side]
+	if (feet.x - edge) * side > 140.0: return "boy flew %.0f px from the edge" % absf(feet.x - edge)
+	if p.test_move(p.global_transform, Vector2.ZERO): return "boy landed overlapping a solid"
+	if p.is_shaken(): return "still shaken after landing"
+	if absf(feet.y - PERCH_FLOOR) > 2.0 or not p._grounded(): return "boy didn't land"
+	if e.state == e.State.RATTLE: return "walker still rattling after the shake"
+	return ""
+
+
+func _rattle_cancel_leave(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	var vis: ColorRect = rig.furn.get_node("Vis")
+	var base := vis.position.x
+	var log := _rlog(e)
+	var r: Array = await _frames_to_rattle(tree, e, p)
+	if r[1] < 0: return "never rattled"
+	for f in 40: await tree.physics_frame   # ~0.7 s in
+	p.global_position = Vector2(PERCH_X + 120.0, PERCH_FLOOR - 12.0)   # off the far side, on the floor
+	for f in 3: await tree.physics_frame
+	NoiseBus.noise.disconnect(log.on_noise)
+	if e.state == e.State.RATTLE: return "still rattling after the boy left"
+	if log.ended != [false]: return "rattle_ended %s, want [false]" % [log.ended]
+	if vis.position.x != base: return "furniture visual left displaced (%.1f vs %.1f)" % [vis.position.x, base]
+	if e.rattle_wobble != 0.0 or e._rattle_unreach > 1e-4 or e._rattle_clock != 0.0: return "timers/wobble not reset"
+	# he comes back: a fresh 3 s, not the remainder
+	p.global_position = Vector2(PERCH_X, PERCH_FLOOR - 48.0 - 12.0)
+	var r2: Array = await _frames_to_rattle(tree, e, p)
+	if r2[1] < 0: return "never rattled again"
+	var t: float = (r2[1] - maxi(r2[0], 0)) / 60.0
+	if t < 2.9: return "second rattle came %.2fs after he was back, want a fresh 3 s" % t
+	return ""
+
+
+func _rattle_cancel_stun(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	var vis: ColorRect = rig.furn.get_node("Vis")
+	var base := vis.position.x
+	var log := _rlog(e)
+	var r: Array = await _frames_to_rattle(tree, e, p)
+	if r[1] < 0: return "never rattled"
+	for f in 30: await tree.physics_frame
+	e.on_hit_by_throw({})
+	await tree.physics_frame
+	if e.state != e.State.STUNNED: return "state %d after a throw, want STUNNED" % e.state
+	if log.ended != [false]: return "stun: rattle_ended %s, want [false]" % [log.ended]
+	if vis.position.x != base or e.rattle_wobble != 0.0: return "stun left the furniture wobbled"
+	# back to the hunt after the stun: the 3 s count starts over
+	var f0 := -1
+	for f in 480:
+		await tree.physics_frame
+		if f0 < 0 and (e.state == e.State.CHASE or e.state == e.State.SEARCH): f0 = f
+		if e.state == e.State.RATTLE:
+			var t: float = (f - f0) / 60.0
+			if f0 < 0 or t < 2.9: return "rattled %.2fs after the stun ended, want 3 s" % t
+			# any other state change cancels too
+			e._set_state(e.State.RETURN)
+			await tree.physics_frame
+			NoiseBus.noise.disconnect(log.on_noise)
+			if log.ended != [false, false]: return "state change: rattle_ended %s" % [log.ended]
+			return ""
+	return "never rattled after the stun"
+
+
+func _rattle_wobble_test(tree: SceneTree) -> Variant:
+	var steps: Array = AnimLibrary.meta("puppet_rattle").get("furniture_wobble_px", [])
+	if steps.size() != 6: return "manifest furniture_wobble_px is %s" % [steps]
+	for side in [-1, 1]:
+		var rig: Dictionary = await _rattle_rig(tree, 3, side)
+		var e: CharacterBody2D = rig.e
+		var p: CharacterBody2D = rig.p
+		var furn: StaticBody2D = rig.furn
+		var vis: ColorRect = furn.get_node("Vis")
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var vbase := vis.position.x
+		var bspr: AnimatedSprite2D = p._anim
+		var bbase := bspr.position.x
+		var fpos := furn.global_position
+		var shape_pos := (furn.get_child(0) as CollisionShape2D).global_position
+		var r: Array = await _frames_to_rattle(tree, e, p)
+		if r[1] < 0: return "side %d: never rattled" % side
+		var ppos := p.global_position
+		var seen := {}
+		for f in 40:
+			await tree.physics_frame
+			if e.state != e.State.RATTLE: break
+			var idx: int = e._rattle_frame()
+			var want := float(steps[idx]) * (-1.0 if spr.flip_h else 1.0)
+			seen[idx] = true
+			if e.rattle_wobble != want: return "side %d frame %d: wobble %.1f, want %.1f (flip %s)" % [side, idx, e.rattle_wobble, want, spr.flip_h]
+			if absf(vis.position.x - (vbase + want)) > 1e-4: return "furniture visual off by %.2f" % (vis.position.x - vbase - want)
+			if absf(bspr.position.x - (bbase + want)) > 1e-4: return "boy sprite off by %.2f" % (bspr.position.x - bbase - want)
+			if furn.global_position != fpos or (furn.get_child(0) as CollisionShape2D).global_position != shape_pos: return "furniture collision moved"
+			if p.global_position != ppos: return "boy body moved during the rattle"
+		if seen.size() != 6: return "side %d: only frames %s seen" % [side, seen.keys()]
+		if spr.flip_h != (side > 0): return "side %d: flip_h %s (walker on the right faces left)" % [side, spr.flip_h]
+		e.free(); p.free(); furn.free()
+		await tree.process_frame
+	return ""
+
+
+func _rattle_vfx(tree: SceneTree) -> Variant:
+	if not AnimLibrary.has_slot("vfx_rattle"): return ""   # art not on this branch
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	var r: Array = await _frames_to_rattle(tree, e, rig.p)
+	if r[1] < 0: return "never rattled"
+	await tree.physics_frame
+	var v: AnimatedSprite2D = e.get_parent().get_node_or_null("VfxRattle")
+	if v == null: return "no vfx_rattle while rattling"
+	var top := Vector2(PERCH_X, PERCH_FLOOR - 48)
+	if v.global_position.distance_to(top) > 1.5: return "vfx at %s, want the furniture top %s" % [v.global_position, top]
+	if not v.is_playing() or not v.sprite_frames.get_animation_loop("vfx_rattle"): return "vfx not looping"
+	e.on_hit_by_throw({})
+	for f in 3: await tree.physics_frame
+	if is_instance_valid(v) and not v.is_queued_for_deletion(): return "vfx_rattle not freed when the rattle ended"
+	return ""
+
+
+## QA: a boy wobbling +-7 px around a standing walker flipped it every frame (600 flips / 10 s).
+func _face_hysteresis(tree: SceneTree) -> Variant:
+	_slab(0, 900, 200)
+	var e := _walker_feet(Vector2(450, 200), 0.0)
+	var p := _boy(Vector2(450, 188), true)
+	e.sight_override = 1
+	e._enter_chase(9999)
+	e.stun_time = 1000.0
+	e.on_hit_by_throw({})   # stands still (STUNNED) while the facing rule still follows the boy
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	p.global_position = Vector2(400, 188)
+	for i in 6: await tree.physics_frame
+	var base_flip := spr.flip_h
+	var flips: Array[int] = []
+	var last := spr.flip_h
+	for f in 600:
+		p.global_position.x = e.global_position.x + (7.0 if f % 2 == 0 else -7.0)
+		await tree.physics_frame
+		if spr.flip_h != last: flips.append(f)
+		last = spr.flip_h
+	for i in range(1, flips.size()):
+		if flips[i] - flips[i - 1] < 12: return "flipped twice within %d frames (min hold 0.2 s)" % (flips[i] - flips[i - 1])
+	if flips.size() > 2: return "%d flips in 10 s wobbling +-7 px" % flips.size()
+	# a real reversal still turns it, within a moment
+	p.global_position.x = e.global_position.x + (140.0 if not spr.flip_h else -140.0)
+	var turned := -1
+	var was := spr.flip_h
+	for f in 30:
+		await tree.physics_frame
+		if spr.flip_h != was:
+			turned = f
+			break
+	if turned < 0: return "never turned to a boy 140 px on the other side"
+	if turned > 15: return "turned after %d frames" % turned
+	return ""
+
+
+## QA: contact on a stair must hurt. _boy_off_perch (hopped off a perch, no contact hit while
+## he's in the air) clears on stair entry and on landing.
+func _stair_immunity(tree: SceneTree) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32))
+	for i in 3: await tree.physics_frame
+	var e := _walker_feet(Vector2(PERCH_X - 300.0, PERCH_FLOOR), 0.0)
+	for i in 3: await tree.physics_frame
+	if not e._boy_off_perch: return "not marked perched while he stands on the piece"
+	# airborne after the hop: still marked, so a touching walker doesn't hit him
+	p.floor_override = 0
+	p.global_position = e.global_position + Vector2(0, -18)
+	p.velocity = Vector2.ZERO
+	e.sight_override = 1
+	e._enter_chase(9999)
+	var hp := PlayerStats.health
+	for i in 4: await tree.physics_frame
+	if PlayerStats.health != hp or not e._boy_off_perch: return "airborne after the hop must keep the no-hit mark (hp %d, mark %s)" % [PlayerStats.health, e._boy_off_perch]
+	# onto a stair: mark cleared, contact hits
+	var st := _stair(Vector2(PERCH_X - 340.0, PERCH_FLOOR), Vector2(PERCH_X - 340.0, PERCH_FLOOR - 100.0))
+	p.stair = st
+	for i in 6: await tree.physics_frame
+	if e._boy_off_perch: return "mark survived stair entry"
+	if PlayerStats.health >= hp: return "contact on a stair did no damage (hp %d)" % PlayerStats.health
+	# landing: mark cleared too
+	p.stair = null
+	p.floor_override = 1
+	p.global_position.y = PERCH_FLOOR   # down on the floor (feet origin)
+	p.velocity = Vector2.ZERO
+	e._boy_off_perch = true
+	for i in 3: await tree.physics_frame
+	if e._boy_off_perch: return "mark survived landing on a floor (h %.1f, grounded %s, boy %s walker %s state %d)" % [e.perch_height(p), p._grounded(), p.global_position, e.global_position, e.state]
 	return ""
