@@ -338,9 +338,9 @@ func test_activation() -> String:
 	amb.color = Color(0.50, 0.42, 0.34)
 	if err.is_empty() and dg2.darkness_active():
 		err = "light StageAmbient (%.3f) should deactivate even on stage 5" % dg2.current_ambient()
-	amb.color = Color(0.15, 0.17, 0.24)      # stage 4 look: just under the 0.2 threshold
-	if err.is_empty() and not dg2.darkness_active():
-		err = "stage 4 ambient %.3f should be active" % dg2.current_ambient()
+	amb.color = Color(0.15, 0.17, 0.24)      # stage 4 look: PD says no glints
+	if err.is_empty() and dg2.darkness_active():
+		err = "stage 4 ambient %.3f should be inactive" % dg2.current_ambient()
 	amb.color = Color(0.27, 0.26, 0.30)      # stage 3 look
 	if err.is_empty() and dg2.darkness_active():
 		err = "stage 3 ambient %.3f should be inactive" % dg2.current_ambient()
