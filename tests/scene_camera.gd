@@ -118,7 +118,9 @@ func _snap_then_ease(tree: SceneTree) -> String:
 	if err.is_empty():
 		# Mid-level, the boy jumps 1000px: the view eases (no snap) and arrives later.
 		var before := rig.center
-		p.global_position += Vector2(1000, 0)
+		# Jump toward the side with room (a level may start the boy at its right end).
+		var room_dir := -1.0 if p.global_position.x > rig.limits.get_center().x else 1.0
+		p.global_position += Vector2(1000.0 * room_dir, 0)
 		p.velocity = Vector2.ZERO
 		await tree.process_frame
 		var step := rig.center.distance_to(before)
