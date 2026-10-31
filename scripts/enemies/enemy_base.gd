@@ -43,10 +43,18 @@ const MOVE_FLOAT := &"float"
 @export var hearing_mult: float = 1.0        # scales NoiseBus radius for this enemy
 @export var sight_range: float = 560.0
 @export var memory_time: float = 3.0         # s of lost sight before giving up (at give_up_distance)
-## PRODUCT.md: the gauge drains faster the farther the boy is. Drain rate while searching =
-## (1 / memory_time) * clamp(distance / give_up_distance, 0.25, 4): at give_up_distance it
-## empties in memory_time; right next to him it takes 4x longer.
+## PRODUCT.md: the gauge drains faster the farther the boy is, softened so no distance stalls it.
+## Drain rate while searching = (1 / memory_time) * clamp(distance / give_up_distance,
+## give_up_far_min, give_up_far_max): right next to him it takes memory_time / far_min (6 s), at
+## 2x give_up_distance memory_time / far_max (1.5 s). A near hider is not given a longer wait:
+## the walker walks to where it last saw him and finds him.
 @export var give_up_distance: float = 900.0
+@export var give_up_far_min: float = 0.5
+@export var give_up_far_max: float = 2.0
+## Hard cap (PD): at ANY distance the walker gives up at most this long after it stopped seeing
+## the boy. noise_track_time / light_track_time (tracking without sight) count inside it. Sight,
+## or a fresh noise / light startle, restarts the clock.
+@export var give_up_cap: float = 6.0
 @export var noise_track_time: float = 3.0    # s a noise lets it track the boy without sight
 @export var light_track_time: float = 1.0    # same, after a light startle
 ## Startle -> chase delay. <= 0 (default) = the startle/scream animation's length, read from the
@@ -126,7 +134,7 @@ const LEDGE_PROBE_LIFT := 4.0     # ray starts this far above the feet
 
 const DEF_FIELDS := [&"type_id", &"movement", &"walk_speed", &"chase_speed", &"float_speed",
 	&"climb_speed", &"hear_radius", &"hearing_mult", &"sight_range", &"memory_time",
-	&"noise_track_time", &"light_track_time", &"startle_reaction_time", &"recover_time",
+	&"noise_track_time", &"light_track_time", &"give_up_far_min", &"give_up_far_max", &"give_up_cap", &"startle_reaction_time", &"recover_time",
 	&"backoff_speed", &"stun_time", &"patrol_radius", &"shove_distance", &"hit_radius",
 	&"anim_calm", &"anim_startle", &"anim_chase", &"give_up_distance",
 	&"anim_reach", &"reach_time", &"perch_reach_height", &"perch_reach_x",
@@ -164,6 +172,8 @@ var floor_override: int = -1
 
 var _state_left: float = 0.0      # timer for STARTLED / RECOVER / STUNNED
 var _track_left: float = 0.0      # tracks the boy without sight (heard him)
+var _lost_t: float = 0.0          # s since the boy was last seen (or last heard / lit afresh); give_up_cap
+var _search_lost0: float = 0.0    # _lost_t when SEARCH began (the cap shortens the gauge from there)
 var _climb_on: bool = false
 var _climb_pts: PackedVector2Array = []   # feet points: where we were, stair foot, stair end
 var _climb_i: int = 0                       # next point to reach
@@ -486,6 +496,7 @@ func _set_state(s: State) -> void:
 
 
 func _enter_chase(track: float) -> void:
+	_lost_t = 0.0   # (re)alerted by a noise / light / lure: the give-up clock restarts
 	_track_left = maxf(_track_left, track)
 	var p := _player()
 	if p:
@@ -1401,6 +1412,13 @@ func _tick_hunt(delta: float, p: Node2D, sees: bool) -> void:
 	if p == null:
 		_enter_return()
 		return
+	if sees:
+		_lost_t = 0.0
+	else:
+		_lost_t += delta
+	if not sees and _lost_t >= give_up_cap:
+		_enter_return()   # hard cap: tracking time included
+		return
 	if sees or _track_left > 0.0:
 		last_known = p.global_position
 		if state != State.CHASE or memory < 1.0:
@@ -1409,10 +1427,14 @@ func _tick_hunt(delta: float, p: Node2D, sees: bool) -> void:
 			FESignals.report_chase_memory(self, memory)
 		_move_to(p.global_position, chase_speed, delta)
 		return
+	if state != State.SEARCH:
+		_search_lost0 = _lost_t - delta
 	state = State.SEARCH
-	var far := clampf(global_position.distance_to(p.global_position) / maxf(give_up_distance, 1.0), 0.25, 4.0)
+	var far := clampf(global_position.distance_to(p.global_position) / maxf(give_up_distance, 1.0), give_up_far_min, give_up_far_max)
 	var drain := PlayerStats.memory_drain_mult(self, is_off_screen())   # item hooks (Cracked Mirror)
 	memory = maxf(memory - delta * far * drain / maxf(memory_time, 0.01), 0.0)
+	# the cap shortens the gauge too, so the FE arrow/gauge empties exactly when it gives up
+	memory = minf(memory, clampf((give_up_cap - _lost_t) / maxf(give_up_cap - _search_lost0, 0.01), 0.0, 1.0))
 	FESignals.report_chase_memory(self, memory)
 	if memory <= 0.0:
 		_enter_return()
