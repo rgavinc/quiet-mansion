@@ -94,6 +94,7 @@ func run_all() -> Dictionary:
 		["shop_owned_overflow_outside_click_does_not_buy", test_shop_overflow_click_buy],
 		["shop_plusn_focusable_nav_and_accept_opens_list", test_shop_plusn_focus],
 		["shop_plusn_ui_cancel_closes_list_only_and_refocuses", test_shop_plusn_cancel],
+		["ui_accept_cancel_bound_to_keys_and_pad_a_b", test_ui_pad_bindings],
 		["shop_plusn_open_list_ui_accept_never_buys", test_shop_plusn_accept_guard],
 		["shop_plusn_lost_release_never_sticks_a_button", test_shop_plusn_lost_release],
 		["owned_strip_pip_threshold_shop_3_hud_5", test_strip_pip_threshold],
@@ -3456,11 +3457,14 @@ func _tap(code: Key) -> void:
 	_key(code, false)
 
 
-## A gamepad press as the game sees it: the ui_* action itself (headless has no pad mapping).
+## A real gamepad press (A = button 0 for ui_accept, B = button 1 for ui_cancel), so the
+## project's input bindings are exercised, not bypassed.
 func _act(action: StringName, pressed := true) -> void:
-	var ev := InputEventAction.new()
-	ev.action = action
+	var ev := InputEventJoypadButton.new()
+	ev.device = 0
+	ev.button_index = JOY_BUTTON_A if action == &"ui_accept" else JOY_BUTTON_B
 	ev.pressed = pressed
+	ev.pressure = 1.0 if pressed else 0.0
 	_root().push_input(ev, true)
 
 
@@ -3749,3 +3753,22 @@ func test_shop_plusn_lost_release() -> String:
 		_mouse(Vector2(-10, -10))
 	_qa_end(r[2])
 	return err
+
+
+## Every menu: keyboard defaults kept, plus pad A -> ui_accept and pad B -> ui_cancel.
+func test_ui_pad_bindings() -> String:
+	var want := {&"ui_accept": [[KEY_ENTER, KEY_KP_ENTER, KEY_SPACE], JOY_BUTTON_A], &"ui_cancel": [[KEY_ESCAPE], JOY_BUTTON_B]}
+	for action in want:
+		var keys: Array = []
+		var pad := false
+		for ev in InputMap.action_get_events(action):
+			if ev is InputEventKey:
+				keys.append(ev.keycode if ev.keycode != KEY_NONE else ev.physical_keycode)
+			elif ev is InputEventJoypadButton and ev.button_index == want[action][1]:
+				pad = true
+		for k in want[action][0]:
+			if not keys.has(k):
+				return "%s lost key %s" % [action, OS.get_keycode_string(k)]
+		if not pad:
+			return "%s has no pad button %d" % [action, want[action][1]]
+	return ""
