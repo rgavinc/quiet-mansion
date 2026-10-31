@@ -86,6 +86,8 @@ func run_all() -> Dictionary:
 		["shop_owned_row_qa_repro_order_shows_charged_items", test_shop_owned_qa_order],
 		["shop_owned_overflow_tooltip_lists_hidden_items", test_shop_overflow_tooltip],
 		["shop_owned_overflow_click_opens_list", test_shop_overflow_click],
+		["shop_owned_overflow_outside_click_does_not_buy", test_shop_overflow_click_buy],
+		["owned_strip_pip_threshold_shop_3_hud_5", test_strip_pip_threshold],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -2985,10 +2987,83 @@ func test_shop_overflow_click() -> String:
 			_click(strip.popover.get_global_rect().get_center())
 			if not strip.is_overflow_open():
 				err = "a click inside the list should keep it open"
+		# Continue under an open list: the first click only closes the list, the second continues
 		if err.is_empty():
-			cont.pressed.emit()
+			if not strip.is_overflow_open():   # still open from the click inside the list
+				err = "list should still be open before the Continue click"
+			var main_before := _tree().current_scene
+			_click(cont.get_global_rect().get_center())
 			if strip.is_overflow_open():
-				err = "Continue should close the list"
+				err = "a click on Continue should close the list"
+			elif not shop.is_open() or _tree().current_scene != main_before:
+				err = "the closing click must not also press Continue"
+		if err.is_empty():
+			_click(cont.get_global_rect().get_center())
+			if shop.is_open():
+				err = "second click on Continue should continue"
 		_mouse(Vector2(-10, -10))
 	_qa_end(r[2])
+	return err
+
+
+func test_shop_overflow_click_buy() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var ps := _root().get_node(^"PlayerStats")
+		ps.add_gold(2000)   # plenty for Offer0 (a gold multiplier may apply, so measure the baseline)
+		_settle(shop)
+		var gold0: int = ps.gold
+		var strip: Control = shop.owned_strip
+		if strip.overflow < 1:
+			err = "repro should hide items behind +N (got %d)" % strip.overflow
+		var buy := shop.root.find_child("Offer0", true, false).find_child("Buy", true, false) as Button
+		var at := buy.get_global_rect().get_center()
+		var owned: int = ps.owned_items.size()
+		if err.is_empty():
+			_click(strip.overflow_tile.get_global_rect().get_center())
+			_settle(shop)
+			if not strip.is_overflow_open():
+				err = "+N click should open the list"
+			elif strip.popover.get_global_rect().has_point(at):
+				err = "list covers Offer0's Buy; test needs a visible Buy"
+		if err.is_empty():
+			_click(at)
+			_settle(shop)
+			if strip.is_overflow_open():
+				err = "click on Buy should close the list"
+			elif int(ps.gold) != gold0 or ps.owned_items.size() != owned or shop.sold[0]:
+				err = "closing click also bought (gold %d, owned %d -> %d, sold %s)" % [ps.gold, owned, ps.owned_items.size(), shop.sold[0]]
+		if err.is_empty():
+			_click(at)
+			_settle(shop)
+			if int(ps.gold) >= gold0 or ps.owned_items.size() != owned + 1 or not shop.sold[0]:
+				err = "second click on Buy should buy (gold %d, owned %d)" % [ps.gold, ps.owned_items.size()]
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err
+
+
+func test_strip_pip_threshold() -> String:
+	var err := ""
+	var ps := _fresh_stats()
+	var hud := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var shop_s := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	shop_s.make_compact(11, 1)
+	var db := _item_db()
+	var it: Object = db.make("flash_bulb")
+	ps.grant_item(it)
+	for n in [3, 4, 5, 6]:
+		it.max_charges = n
+		it.charges = n
+		hud.refresh()
+		shop_s.refresh()
+		for pair in [[hud, 5], [shop_s, 3]]:
+			var strip: Control = pair[0]
+			var limit: int = pair[1]
+			var num: bool = strip.tiles[0].find_child("Count", true, false) != null
+			if err.is_empty() and num != (n > limit):
+				err = "%s with %d charges: n/max %s (want pips up to %d)" % ["shop" if strip == shop_s else "HUD", n, num, limit]
+	_cleanup([hud, shop_s, ps])
 	return err

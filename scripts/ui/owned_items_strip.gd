@@ -63,6 +63,7 @@ var overflow_interactive := false
 var popover_bounds: Control
 var overflow_tile: Control
 var popover: PanelContainer
+var _eat_release := MOUSE_BUTTON_NONE
 
 
 ## Shop variant: 28 px tiles, smaller pips, `row_tiles` a row, `rows` rows (+N past that).
@@ -465,8 +466,13 @@ func _place_popover() -> void:
 	popover.size = sz
 
 
-## Click outside the list (and outside "+N", which toggles itself) closes it.
+## A click outside the list (and outside "+N", which toggles itself) only closes it: the click is
+## consumed, so nothing underneath (a card's Buy, Continue) gets it; a second click acts.
 func _input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton and not ev.pressed and ev.button_index == _eat_release:
+		_eat_release = MOUSE_BUTTON_NONE   # the matching release of the closing click
+		get_viewport().set_input_as_handled()
+		return
 	if not is_overflow_open():
 		return
 	if ev is InputEventMouseButton and ev.pressed:
@@ -474,6 +480,8 @@ func _input(ev: InputEvent) -> void:
 		var on_tile := overflow_tile != null and is_instance_valid(overflow_tile) and overflow_tile.get_global_rect().has_point(p)
 		if not on_tile and not popover.get_global_rect().has_point(p):
 			close_overflow()
+			_eat_release = ev.button_index
+			get_viewport().set_input_as_handled()
 
 
 ## One dot per charge (filled = left this stage), wrapped onto up to `lines` (HUD 2, shop 1) lines inside the
@@ -504,6 +512,8 @@ class _Pips extends Control:
 		per_line = _per_line(r)
 		update_minimum_size()
 
+	## Pips while they fit, else 1 pip + "n/max". HUD (40 px tile, 2 lines): pips up to MAX_PIPS (5).
+	## Shop compact row (28 px tile, 1 line, dot shrinks to 60 %): 3 fit, so "n/max" above 3 charges.
 	func numeric() -> bool:
 		return total > MAX_PIPS or total > per_line * lines
 
