@@ -43,6 +43,7 @@ const MOUNT_TILES := 3             # the climb-over piece: 48px, above one cappe
 const MOUNT_STEP_MAX_TILES := 2   # steps touching it are 1-2 tiles, so every single climb is <= 2 tiles (32px)
 const MOUNT_MARGIN_PX := 16.0     # apex clearance over the tallest single climb required (actual margin: 52.2 - 32 = 20.2px)
 const MOUNT_RUN_TILES := 2        # open floor wanted beyond the steps on both sides
+const BLOCKER_MARGIN_PX := 8.0    # a blocker's top must stay this far above the best capped jump from any surface next to it
 const MIN_ROOM_TILES := 24
 const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
@@ -169,6 +170,8 @@ static func validate(layout: Variant) -> PackedStringArray:
 				errs.append("%s at %s over the stair %d->%d slab cutout" % [o.what, o.pos, ff, tf])
 	# no standable spot (floor or furniture top) lets a capped running jump clear a rail (QA #13 b2/b3)
 	errs.append_array(rail_jump_errors(L))
+	# a piece the floor graph treats as a blocker is never climbable, from the floor or from furniture next to it
+	errs.append_array(blocker_climb_errors(L))
 	if not errs.is_empty():
 		errs.append_array(table_errs)
 		return errs
@@ -447,6 +450,57 @@ static func mount_passable(L: Dictionary, fu: Dictionary) -> bool:
 			if (o.x + o.w) * TILE > a - run and o.x * TILE < b + run:
 				return false
 	return true
+
+
+## Furniture the floor graph treats as a wall: taller than a jump and not a passable climb-over
+## cluster (a bare or one-step 3-tile piece, any 4-tile piece).
+static func blocker_pieces(L: Dictionary) -> Array:
+	var out := []
+	for fu in L.get("furniture", []):
+		if int(fu.h) > MAX_JUMP_TILES and not mount_passable(L, fu):
+			out.append(fu)
+	return out
+
+
+## Furthest take-off gap (px, from the edge of a surface to the foot of the piece) at which a capped
+## running jump still gets the feet within BLOCKER_MARGIN_PX of a top `rise_px` above the take-off
+## surface; -1 if the capped apex never gets that close (see rail_jump_reach for the arc maths).
+static func blocker_reach(rise_px: float) -> float:
+	var j := capped_jump()
+	var need := maxf(rise_px - BLOCKER_MARGIN_PX, 0.0)
+	var disc := j.x * j.x - 2.0 * j.y * need
+	if min_jump_apex() <= need or disc <= 0.0:
+		return -1.0
+	return max_run_speed() * (j.x + sqrt(disc)) / j.y + BODY_R
+
+
+## One error per (blocker piece, surface) pair where the blocker can be climbed: from the floor, or
+## from the top of any other non-blocker piece on that floor whose gap to it is within a jump.
+## Touching pieces are gap 0. Blockers never serve as a surface (nothing reaches them).
+static func blocker_climb_errors(L: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
+	var blk := blocker_pieces(L)
+	if blk.is_empty():
+		return out
+	var others := []
+	for o in L.get("furniture", []):
+		if not blk.has(o):
+			others.append(o)
+	for b in blk:
+		var bh := float(int(b.h) * TILE)
+		var sp := furniture_span(b)
+		if blocker_reach(bh) >= 0.0:
+			out.append("blocker h%d at x=%d on floor %d can be climbed from the floor (top %dpx, capped apex %.1fpx, needs %dpx clear)" % [
+					int(b.h), int(sp.x), int(b.floor), int(bh), min_jump_apex(), int(BLOCKER_MARGIN_PX)])
+		for o in others:
+			if int(o.floor) != int(b.floor):
+				continue
+			var gap := span_gap(sp, furniture_span(o))
+			var reach := blocker_reach(bh - float(int(o.h) * TILE))
+			if reach >= 0.0 and gap <= reach:
+				out.append("blocker h%d at x=%d on floor %d can be climbed from the h%d piece at x=%d (gap %dpx <= jump reach %dpx)" % [
+						int(b.h), int(sp.x), int(b.floor), int(o.h), int(o.x) * int(TILE), int(gap), int(reach)])
+	return out
 
 
 ## Walkable segments per floor: {f: [Vector2(a, b), ...]} between blockers.

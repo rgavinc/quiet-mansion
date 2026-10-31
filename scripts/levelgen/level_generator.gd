@@ -184,8 +184,14 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 	if not LevelValidator.furniture_rail_ok(L, f, fx * TILE, (fx + w) * TILE, h):
 		return false
 	var before := _unreached(L)
+	var climbs := LevelValidator.blocker_climb_errors(L).size()
 	L.furniture.append({floor = f, x = fx, w = w, h = h})
 	if h > LevelValidator.MAX_JUMP_TILES and _unreached(L) > before:
+		L.furniture.pop_back()
+		return false
+	# never an unintended climb: neither this piece (a blocker) nor a low piece next to an
+	# existing blocker may make a blocker climbable (LevelValidator.blocker_climb_errors)
+	if LevelValidator.blocker_climb_errors(L).size() > climbs:
 		L.furniture.pop_back()
 		return false
 	used[f].append(Vector2(a, b))
@@ -196,7 +202,7 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 ## each side, placed as one block (step, tall, step; the steps are plain furniture). Every single
 ## climb on the way over is <= 32px, so no stat combo that slows the boy can strand him (the bare
 ## 48px piece clears a capped jump by only 4px). False (nothing placed) if it doesn't fit, breaks a
-## rail rule, or isn't mount_passable there.
+## rail rule, isn't mount_passable there, or puts a step within jump reach of an existing blocker.
 static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary, r: Dictionary, w: int) -> bool:
 	var f: int = r.floor
 	var wl := rng.randi_range(2, 3)
@@ -220,8 +226,9 @@ static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dict
 		if not LevelValidator.furniture_rail_ok(L, f, int(q.x) * TILE, (int(q.x) + int(q.w)) * TILE, int(q.h)):
 			return false
 	var n: int = L.furniture.size()
+	var climbs := LevelValidator.blocker_climb_errors(L).size()
 	L.furniture.append_array(parts)
-	if not LevelValidator.mount_passable(L, parts[1]):
+	if not LevelValidator.mount_passable(L, parts[1]) or LevelValidator.blocker_climb_errors(L).size() > climbs:
 		L.furniture.resize(n)
 		return false
 	used[f].append(Vector2(a, b))

@@ -172,6 +172,44 @@ static func check_level(tree: SceneTree, seed_v: int, stage: int, setups: Array)
 	return {errors = errs, climbs = climbs, pieces = pieces.size()}
 
 
+## Builds seed/stage and tries to climb every BLOCKER piece (taller than a jump and not a passable
+## climb-over cluster: the floor graph treats it as a wall) from the floor on both sides, at the
+## strongest jump (base stats, standstill jump against the wall). Every hop must FAIL to land on
+## top. Returns {errors, hops, blockers}.
+static func check_blockers(tree: SceneTree, seed_v: int, stage: int) -> Dictionary:
+	Engine.time_scale = 1.0
+	var errs: PackedStringArray = []
+	var hops := 0
+	var L := LevelGenerator.generate(seed_v, stage)
+	var blockers := LevelValidator.blocker_pieces(L)
+	if blockers.is_empty():
+		return {errors = errs, hops = 0, blockers = 0}
+	var world := Node2D.new()
+	tree.root.add_child(world)
+	var built := LevelGenerator.build(L, world)
+	for e in built.enemies:
+		e.queue_free()
+	await tree.physics_frame
+	var p: CharacterBody2D = built.player
+	apply_setup(p, SETUPS[0])
+	for b in blockers:
+		var f := int(b.floor)
+		var surf := float(LevelValidator.surface_y(f))
+		var sp := LevelValidator.furniture_span(b)
+		var top := surf - float(b.h) * 16.0
+		for dir in [1, -1]:
+			var wall_x: float = sp.x if dir > 0 else sp.y
+			var r: Dictionary = await hop(tree, p, dir, wall_x, surf, top, sp.x, sp.y)
+			hops += 1
+			if r.ok:
+				errs.append("seed %d stage %d floor %d: a blocker h%d at x=%d was climbed from the floor (dir %d)" % [seed_v, stage, f, int(b.h), int(sp.x), dir])
+	world.queue_free()
+	await tree.process_frame
+	PlayerStats.reset()
+	GameState.reset()
+	return {errors = errs, hops = hops, blockers = blockers.size()}
+
+
 ## Flat-world calibration of the harness itself: a free-standing box `h_px` tall, standstill hop.
 ## (Heights near the 52.24px apex are what the 2-tile step rule keeps every climb away from.)
 static func flat_hop(tree: SceneTree, h_px: float, setup: Array) -> bool:

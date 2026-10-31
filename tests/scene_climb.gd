@@ -20,6 +20,13 @@ func run_async(tree: SceneTree) -> Dictionary:
 		failures.append_array(r.errors)
 		if int(r.climbs) < (sd[2] as Array).size():
 			failures.append("seed %d stage %d: only %d climbs ran" % [sd[0], sd[1], int(r.climbs)])
+	# real physics: a blocker piece is never climbed from the floor (strongest jump, standstill)
+	for sd in [[3, 3], [3, 4], [1, 5], [30, 5]]:
+		var br: Dictionary = await ClimbSim.check_blockers(tree, int(sd[0]), int(sd[1]))
+		total += 1
+		failures.append_array(br.errors)
+		if int(br.hops) < 2:
+			failures.append("seed %d stage %d: no blocker hops ran" % [sd[0], sd[1]])
 	for setup in ClimbSim.SETUPS:
 		total += 2
 		if not await ClimbSim.flat_hop(tree, 32.0, setup):

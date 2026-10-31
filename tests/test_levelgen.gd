@@ -66,6 +66,8 @@ func run_all() -> Dictionary:
 		["sprite_row0_sits_on_the_collision_top_for_all_slots", test_sprite_row0_on_collision_top],
 		["tall_piece_mount_rule", test_mount_rule],
 		["every_floor_has_a_reachable_climbable_piece", test_floors_have_mountable],
+		["blocker_pieces_are_never_climbable", test_blocker_climb_rule],
+		["generator_never_makes_a_blocker_climbable", test_blocker_climb_generated],
 		["nav_target_on_a_tall_piece_routes_directly_from_either_side", test_nav_on_piece],
 		["furniture_falls_back_to_rects_without_slots", test_furniture_fallback],
 		["furniture_sprites_by_height_class_separate_stream", test_furniture_sprites],
@@ -1111,6 +1113,86 @@ func test_floors_have_mountable() -> String:
 			if not LevelValidator.validate(L).is_empty():
 				return "seed %d stage %d invalid: %s" % [sd, st, LevelValidator.validate(L)[0]]
 	return ""
+
+
+## Blockers (bare or one-step 3-tile, any 4-tile piece) must be out of reach of a capped jump with
+## BLOCKER_MARGIN_PX to spare, from the floor and from the top of any piece next to them.
+func test_blocker_climb_rule() -> String:
+	var apex := LevelValidator.min_jump_apex()
+	if LevelValidator.blocker_reach(64.0) >= 0.0 or LevelValidator.blocker_reach(apex + LevelValidator.BLOCKER_MARGIN_PX) >= 0.0:
+		return "a 64px top (and apex + margin) must be out of reach of a capped jump"
+	if LevelValidator.blocker_reach(48.0) < 0.0 or LevelValidator.blocker_reach(32.0) < LevelValidator.blocker_reach(48.0):
+		return "a 48px top is within reach of the capped apex (%.1fpx), and a lower rise reaches further" % apex
+	var base := LevelGenerator.fallback_layout(1)
+	var x := 20
+	# 4-tall alone: out of reach from the floor, clean
+	var T := base.duplicate(true)
+	T.furniture.append({floor = 0, x = x, w = 2, h = 4})
+	if not LevelValidator.blocker_climb_errors(T).is_empty():
+		return "a lone 4-tile piece was flagged: %s" % LevelValidator.blocker_climb_errors(T)[0]
+	# QA seed 74: a 4-tall touching a 1-tile step is a 48px climb (4.2px of margin)
+	for sh in [1, 2, 3]:
+		var U := base.duplicate(true)
+		U.furniture.append({floor = 0, x = x, w = 2, h = 4})
+		U.furniture.append({floor = 0, x = x - 2, w = 2, h = sh})
+		if LevelValidator.blocker_climb_errors(U).is_empty():
+			return "a 4-tile piece touching an h%d piece passed the blocker-climb rule" % sh
+		var ve := "\n".join(LevelValidator.validate(U))
+		if not ve.contains("can be climbed"):
+			return "validate() lacks the blocker-climb error for an h%d step: %s" % [sh, ve]
+	# ... also across a gap a running jump can bridge, but not across a wide one
+	var gap_ok := -1
+	for gap in range(1, 40):
+		var G := base.duplicate(true)
+		G.furniture.append({floor = 0, x = x, w = 2, h = 4})
+		G.furniture.append({floor = 0, x = x - 2 - gap, w = 2, h = 2})
+		if LevelValidator.blocker_climb_errors(G).is_empty():
+			gap_ok = gap
+			break
+	var reach := LevelValidator.blocker_reach(32.0)
+	if gap_ok < 0 or float(gap_ok) * 16.0 < reach - 16.0 or float(gap_ok - 1) * 16.0 > reach:
+		return "gap where an h2 piece stops reaching a 4-tile piece: %d tiles, jump reach %.0fpx" % [gap_ok, reach]
+	# a bare 3-tile piece is a 48px climb from the floor: never a blocker
+	var B := base.duplicate(true)
+	B.furniture.append({floor = 0, x = x, w = 2, h = 3})
+	if LevelValidator.blocker_climb_errors(B).is_empty():
+		return "a bare 3-tile piece (climbable from the floor) passed"
+	# one step only: the 3-tile piece is not passable, still climbable from its step
+	var O := base.duplicate(true)
+	O.furniture.append({floor = 0, x = x - 2, w = 2, h = 2})
+	O.furniture.append({floor = 0, x = x, w = 2, h = 3})
+	if LevelValidator.blocker_climb_errors(O).is_empty():
+		return "a one-step 3-tile piece passed"
+	# a proper cluster is passable, so it is not a blocker; neither are low pieces
+	var C := base.duplicate(true)
+	_append_cluster(C, x, 2, 2, 1)
+	if not LevelValidator.blocker_climb_errors(C).is_empty():
+		return "a passable climb-over cluster was flagged: %s" % LevelValidator.blocker_climb_errors(C)[0]
+	# ... but a 4-tile piece next to that cluster is
+	C.furniture.append({floor = 0, x = x + 7, w = 2, h = 4})
+	if LevelValidator.blocker_climb_errors(C).is_empty():
+		return "a 4-tile piece touching a cluster step passed"
+	# other floors do not matter
+	var F := base.duplicate(true)
+	F.furniture.append({floor = 0, x = x, w = 2, h = 4})
+	F.furniture.append({floor = 1, x = x - 2, w = 2, h = 1})
+	if not LevelValidator.blocker_climb_errors(F).is_empty():
+		return "a piece on another floor counted as a take-off"
+	return ""
+
+
+## Generated levels: no blocker is ever climbable (validate() has the same rule), and
+## the real player cannot climb a real blocker from the floor.
+func test_blocker_climb_generated() -> String:
+	for st in range(3, 6):   # tall pieces start at stage 3
+		for sd in range(25):
+			var L := LevelGenerator.generate(sd, st)
+			var errs := LevelValidator.blocker_climb_errors(L)
+			if not errs.is_empty():
+				return "seed %d stage %d: %s" % [sd, st, errs[0]]
+	var L74 := LevelGenerator.generate(74, 5)   # QA: seed 74 stage 5 floor 3
+	var e74 := LevelValidator.blocker_climb_errors(L74)
+	return "" if e74.is_empty() else "seed 74 stage 5: %s" % e74[0]
 
 
 ## QA: a boy on top of / inside a tall piece used to map to the segment on its LEFT, so a walker
