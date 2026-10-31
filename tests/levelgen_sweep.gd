@@ -31,6 +31,8 @@ func _run() -> void:
 		var att := 0
 		var blk_levels := 0   # levels where a blocker can be climbed (LevelValidator.blocker_climb_errors)
 		var blk_errs := 0
+		var dead := 0   # dead-end clusters (LevelValidator.cluster_exit_errors): must be 0
+		var clusters := 0
 		var weak := 0   # guaranteed pieces without both steps / under the climb margin
 		for sd in n:
 			var L: Dictionary = G.generate(sd, st)
@@ -39,6 +41,15 @@ func _run() -> void:
 				falls += 1
 				continue
 			if not (V.validate(L) as PackedStringArray).is_empty():
+				invalid += 1
+			var de: PackedStringArray = V.cluster_exit_errors(L)
+			dead += de.size()
+			clusters += (V.mountable_pieces(L) as Array).size()
+			if not de.is_empty():
+				print("  DEAD-END CLUSTER seed %d stage %d: %s" % [sd, st, de[0]])
+			var so: PackedStringArray = V.shake_off_errors(L)
+			if not so.is_empty():
+				print("  NO SHAKE-OFF SIDE seed %d stage %d: %s" % [sd, st, so[0]])
 				invalid += 1
 			var bc: PackedStringArray = V.blocker_climb_errors(L)
 			blk_errs += bc.size()
@@ -81,10 +92,10 @@ func _run() -> void:
 			for e in br.errors:
 				print("  BLOCKER CLIMBED ", e)
 		var share := float(tall) / maxf(pieces, 1)
-		var ok := falls == 0 and invalid == 0 and no_mount == 0 and weak == 0 and climb_fail == 0 and blk_errs == 0 and blk_climbed == 0 and share >= LO and share <= HI
+		var ok := falls == 0 and invalid == 0 and no_mount == 0 and weak == 0 and climb_fail == 0 and blk_errs == 0 and dead == 0 and blk_climbed == 0 and share >= LO and share <= HI
 		if not ok:
 			bad += 1
-		print("%s stage %d: tall %d/%d = %.1f%% (h4 %d) | floors without a reachable 3-tile piece %d/%d (min per floor %d) | fallbacks %d invalid %d | rerolls/level %.2f | weak climb pieces %d | physics climbs %d failed %d | blocker climbs: %d in %d levels, physics blocker hops %d climbed %d" % [
-				"OK  " if ok else "FAIL", st, tall, pieces, share * 100.0, h4, no_mount, floors, min_per_floor, falls, invalid, float(att) / n, weak, climbs, climb_fail, blk_errs, blk_levels, blk_hops, blk_climbed])
+		print("%s stage %d: tall %d/%d = %.1f%% (h4 %d) | floors without a reachable 3-tile piece %d/%d (min per floor %d) | fallbacks %d invalid %d | rerolls/level %.2f | weak climb pieces %d | physics climbs %d failed %d | blocker climbs: %d in %d levels, physics blocker hops %d climbed %d | dead-end clusters %d (of %d reachable clusters)" % [
+				"OK  " if ok else "FAIL", st, tall, pieces, share * 100.0, h4, no_mount, floors, min_per_floor, falls, invalid, float(att) / n, weak, climbs, climb_fail, blk_errs, blk_levels, blk_hops, blk_climbed, dead, clusters])
 	print("SWEEP: %d of 5 stages failed (%d seeds each)" % [bad, n])
 	quit(1 if bad > 0 else 0)

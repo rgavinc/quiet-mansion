@@ -44,6 +44,8 @@ const MOUNT_STEP_MAX_TILES := 2   # steps touching it are 1-2 tiles, so every si
 const MOUNT_MARGIN_PX := 16.0     # apex clearance over the tallest single climb required (actual margin: 52.2 - 32 = 20.2px)
 const MOUNT_RUN_TILES := 2        # open floor wanted beyond the steps on both sides
 const BLOCKER_MARGIN_PX := 8.0    # a blocker's top must stay this far above the best capped jump from any surface next to it
+const EXIT_STAIR_PX := 600.0       # a cluster side's exit: stairs (a stair foot or a slab cutout edge) within this run ...
+const EXIT_OPEN_PX := 1500.0       # ... or this much open floor (no wall, blocker or cutout) to run along
 const MIN_ROOM_TILES := 24
 const MAX_ROOM_TILES := 40
 const STAIR_RUN_PX := 240.0         # 15 tiles horizontal for a 160px rise (~34 deg, boy_climb_stairs art)
@@ -172,6 +174,8 @@ static func validate(layout: Variant) -> PackedStringArray:
 	errs.append_array(rail_jump_errors(L))
 	# a piece the floor graph treats as a blocker is never climbable, from the floor or from furniture next to it
 	errs.append_array(blocker_climb_errors(L))
+	errs.append_array(shake_off_errors(L))
+	errs.append_array(cluster_exit_errors(L))
 	if not errs.is_empty():
 		errs.append_array(table_errs)
 		return errs
@@ -479,27 +483,134 @@ static func blocker_reach(rise_px: float) -> float:
 ## Touching pieces are gap 0. Blockers never serve as a surface (nothing reaches them).
 static func blocker_climb_errors(L: Dictionary) -> PackedStringArray:
 	var out: PackedStringArray = []
+	for b in blocker_pieces(L):
+		out.append_array(blocker_climbs(L, b))
+	return out
+
+
+## The climb errors of one blocker piece (see blocker_climb_errors); empty if nothing reaches its top.
+static func blocker_climbs(L: Dictionary, b: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
 	var blk := blocker_pieces(L)
-	if blk.is_empty():
-		return out
-	var others := []
+	var bh := float(int(b.h) * TILE)
+	var sp := furniture_span(b)
+	if blocker_reach(bh) >= 0.0:
+		out.append("blocker h%d at x=%d on floor %d can be climbed from the floor (top %dpx, capped apex %.1fpx, needs %dpx clear)" % [
+				int(b.h), int(sp.x), int(b.floor), int(bh), min_jump_apex(), int(BLOCKER_MARGIN_PX)])
 	for o in L.get("furniture", []):
-		if not blk.has(o):
-			others.append(o)
-	for b in blk:
-		var bh := float(int(b.h) * TILE)
-		var sp := furniture_span(b)
-		if blocker_reach(bh) >= 0.0:
-			out.append("blocker h%d at x=%d on floor %d can be climbed from the floor (top %dpx, capped apex %.1fpx, needs %dpx clear)" % [
-					int(b.h), int(sp.x), int(b.floor), int(bh), min_jump_apex(), int(BLOCKER_MARGIN_PX)])
-		for o in others:
-			if int(o.floor) != int(b.floor):
+		if int(o.floor) != int(b.floor) or blk.has(o):
+			continue
+		var gap := span_gap(sp, furniture_span(o))
+		var reach := blocker_reach(bh - float(int(o.h) * TILE))
+		if reach >= 0.0 and gap <= reach:
+			out.append("blocker h%d at x=%d on floor %d can be climbed from the h%d piece at x=%d (gap %dpx <= jump reach %dpx)" % [
+					int(b.h), int(sp.x), int(b.floor), int(o.h), int(o.x) * int(TILE), int(gap), int(reach)])
+	return out
+
+
+## Shake-off rule. A piece taller than a walker can jump (h > MAX_JUMP_TILES) whose top the boy CAN
+## stand on (a passable climb-over piece, or a blocker something reaches) must have a free side to
+## come down on, so an enemy rattle / shake-off can never drop him back on the top in a loop. A side
+## is free when, past the piece (past its touching step, if it has one), MOUNT_RUN_TILES of floor
+## are clear of walls, stair holes and other tall pieces. Without one: no way down but the top.
+static func shake_off_errors(L: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
+	var right := float((int(L.get("width_tiles", 0)) + 1) * TILE)
+	var run := float(MOUNT_RUN_TILES * TILE)
+	for fu in L.get("furniture", []):
+		if int(fu.h) <= MAX_JUMP_TILES:
+			continue
+		if not mount_passable(L, fu) and blocker_climbs(L, fu).is_empty():
+			continue
+		var f := int(fu.floor)
+		var sp := furniture_span(fu)
+		var free_side := false
+		for dir in [-1, 1]:
+			var edge: float = sp.x if dir < 0 else sp.y
+			var step_o := {}
+			for o in L.get("furniture", []):   # a touching low piece is a step down, not a wall
+				if o != fu and int(o.floor) == f and int(o.h) <= MAX_JUMP_TILES and int(o.h) >= 1:
+					var os := furniture_span(o)
+					if (dir < 0 and os.y == sp.x) or (dir > 0 and os.x == sp.y):
+						step_o = o
+			if not step_o.is_empty():
+				var ss := furniture_span(step_o)
+				edge = ss.x if dir < 0 else ss.y
+			var lo: float = edge - run if dir < 0 else edge
+			var hi: float = edge if dir < 0 else edge + run
+			if lo < 0.0 or hi > right:
 				continue
-			var gap := span_gap(sp, furniture_span(o))
-			var reach := blocker_reach(bh - float(int(o.h) * TILE))
-			if reach >= 0.0 and gap <= reach:
-				out.append("blocker h%d at x=%d on floor %d can be climbed from the h%d piece at x=%d (gap %dpx <= jump reach %dpx)" % [
-						int(b.h), int(sp.x), int(b.floor), int(o.h), int(o.x) * int(TILE), int(gap), int(reach)])
+			var clear := true
+			for bl in hard_blockers(L, f):
+				if bl.y > lo and bl.x < hi and not (is_equal_approx(bl.x, sp.x) and is_equal_approx(bl.y, sp.y)):
+					clear = false
+			for o in L.get("furniture", []):
+				if o != fu and int(o.floor) == f and int(o.h) > MAX_JUMP_TILES:
+					var os := furniture_span(o)
+					if os.y > lo and os.x < hi:
+						clear = false
+			if clear:
+				free_side = true
+		if not free_side:
+			out.append("h%d piece at x=%d on floor %d has a climbable top but no free shake-off side (%d tiles of clear floor past a step or the piece)" % [
+					int(fu.h), int(sp.x), f, MOUNT_RUN_TILES])
+	return out
+
+
+## Can the boy, standing at `edge` px on floor f, run away in direction `dir` (+1 right, -1 left)?
+## Yes if a stair is within EXIT_STAIR_PX before the first wall / blocker (the foot of a stair that
+## starts on this floor, or the near edge of a slab cutout he can drop down), or if EXIT_OPEN_PX of
+## floor lies ahead before a wall, a blocker, a cutout or the end of the level.
+static func run_exit(L: Dictionary, f: int, edge: float, dir: int) -> bool:
+	var bound := float((int(L.get("width_tiles", 0)) + 1) * TILE) if dir > 0 else 0.0
+	var solid := absf(bound - edge)   # distance to the first thing that stops him
+	var holes := []
+	for s in L.get("stairs", []):
+		if int(s.get("to_floor", -1)) == f and s.get("bottom") is Vector2 and s.get("top") is Vector2:
+			holes.append(stair_hole(s))
+	var nearest_stair := INF   # distance to the nearest stair access ahead
+	for s in L.get("stairs", []):
+		if int(s.get("from_floor", -1)) == f and s.get("bottom") is Vector2:
+			var d := (float(s.bottom.x) - edge) * dir
+			if d >= 0.0:
+				nearest_stair = minf(nearest_stair, d)
+	for h in holes:
+		var d: float = (h.x - edge) if dir > 0 else (edge - h.y)
+		if d >= 0.0:
+			nearest_stair = minf(nearest_stair, d)
+	var first_open := solid   # to the first wall, blocker, cutout or the level end
+	for bl in blockers(L, f):
+		var d: float = (bl.x - edge) if dir > 0 else (edge - bl.y)
+		if d < 0.0:
+			continue
+		first_open = minf(first_open, d)
+		var is_hole := false
+		for h in holes:
+			if h == bl:
+				is_hole = true
+		if not is_hole:
+			solid = minf(solid, d)
+	return (nearest_stair <= EXIT_STAIR_PX and nearest_stair <= solid) or first_open >= EXIT_OPEN_PX
+
+
+## "Dead-end clusters": a climb-over cluster that has no way to run from a walker on at least one
+## side. The walker can come from either side and the boy is shaken off to the other, so BOTH sides
+## need `run_exit` (stairs within EXIT_STAIR_PX, or EXIT_OPEN_PX of open floor), measured from the far
+## edge of the step on that side.
+static func cluster_exit_errors(L: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = []
+	for fu in L.get("furniture", []):
+		if int(fu.h) != MOUNT_TILES or not mount_passable(L, fu):
+			continue
+		var st := step_pieces(L, fu)
+		var f := int(fu.floor)
+		for dir in [-1, 1]:
+			var step: Dictionary = st.left if dir < 0 else st.right
+			var sp := furniture_span(step)
+			var edge: float = sp.x if dir < 0 else sp.y
+			if not run_exit(L, f, edge, dir):
+				out.append("dead-end cluster: the %d-tile piece at x=%d on floor %d has no exit on its %s side (no stair within %dpx and under %dpx of open floor)" % [
+						MOUNT_TILES, int(furniture_span(fu).x), f, "left" if dir < 0 else "right", int(EXIT_STAIR_PX), int(EXIT_OPEN_PX)])
 	return out
 
 

@@ -68,11 +68,17 @@ func run_all() -> Dictionary:
 		["every_floor_has_a_reachable_climbable_piece", test_floors_have_mountable],
 		["blocker_pieces_are_never_climbable", test_blocker_climb_rule],
 		["generator_never_makes_a_blocker_climbable", test_blocker_climb_generated],
+		["qa_step_gap_blocker_flagged_and_rejected", test_blocker_qa_step_gap],
+		["qa_seed74_stage5_floor3_blocker_regression", test_blocker_seed74_regression],
+		["climbable_top_needs_a_free_shake_off_side", test_shake_off_side],
+		["cluster_needs_a_run_away_exit_on_both_sides", test_cluster_exit],
 		["nav_target_on_a_tall_piece_routes_directly_from_either_side", test_nav_on_piece],
 		["furniture_falls_back_to_rects_without_slots", test_furniture_fallback],
 		["furniture_sprites_by_height_class_separate_stream", test_furniture_sprites],
 		["furniture_slot_art_matches_collision_height", test_furniture_art_contract],
 		["stage_look_table_applied_darker_and_colder", test_stage_look],
+		["stage_ambient_value_decreases_per_stage", test_stage_ambient],
+		["stage_rim_covers_floor_edges_rails_furniture", test_stage_rim],
 		["build_survives_bad_input", test_build_bad_input],
 		["build_creates_level_nodes", test_build_nodes],
 	]
@@ -1178,6 +1184,291 @@ func test_blocker_climb_rule() -> String:
 	F.furniture.append({floor = 1, x = x - 2, w = 2, h = 1})
 	if not LevelValidator.blocker_climb_errors(F).is_empty():
 		return "a piece on another floor counted as a take-off"
+	return ""
+
+
+## StageLook.ambient (0..1, 1 = full light) falls stage over stage; it is what Front End reads.
+func test_stage_ambient() -> String:
+	var prev := 2.0
+	var prev_rim := -1.0
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var a := StageLook.ambient_of(st)
+		if a < 0.0 or a > 1.0 or a >= prev:
+			return "stage %d ambient %f is not in 0..1 and below stage %d (%f)" % [st, a, st - 1, prev]
+		prev = a
+		var rim := float(StageTable.look(st).rim_alpha)
+		if rim < prev_rim or (st > 1 and rim <= 0.0 and st >= 4):
+			return "stage %d rim_alpha %f does not rise with the darkness" % [st, rim]
+		prev_rim = rim
+		var b := _build_at(3, st)
+		var live := StageLook.ambient
+		var meta: float = b.level.get_meta("ambient", -1.0)
+		b.world.free()
+		if not is_equal_approx(live, a) or not is_equal_approx(meta, a):
+			return "stage %d: StageLook.ambient %f / level meta %f != ambient_of %f after a build" % [st, live, meta, a]
+	if float(StageTable.look(1).rim_alpha) > 0.0 or float(StageTable.look(5).rim_alpha) < 0.2 or float(StageTable.look(5).rim_alpha) > 0.35:
+		return "rim: stage 1 must have none, stage 5 a faint (0.2-0.35 alpha) line"
+	# FE / PD contract: the dark overlay turns on below 0.2, and ONLY stage 5 is that dark
+	for st in range(1, 5):
+		if StageLook.ambient_of(st) < 0.2:
+			return "stage %d ambient %f is below FE's 0.2 dark threshold (only stage 5 may be)" % [st, StageLook.ambient_of(st)]
+	if StageLook.ambient_of(5) >= 0.2:
+		return "stage 5 ambient %f is not below FE's 0.2 dark threshold" % StageLook.ambient_of(5)
+	if StageLook.ambient_of(0) != StageLook.ambient_of(1) or StageLook.ambient_of(9) != StageLook.ambient_of(5):
+		return "ambient_of does not clamp the stage"
+	return ""
+
+
+## The navigation rim (StageRim): a Line2D for the top of every floor (split at stair cutouts), every
+## stair opening and every furniture piece on the dark stages; none on stage 1; in its own CanvasLayer so
+## the stage CanvasModulate/flashlight don't touch it; the alpha follows the table; no enemy is touched.
+func test_stage_rim() -> String:
+	var b1 := _build_at(3, 1)
+	var none: bool = b1.level.get_node_or_null(StageRim.NODE) == null
+	b1.world.free()
+	if not none:
+		return "stage 1 drew a rim (rim_alpha 0)"
+	for st in [2, 3, 4, 5]:
+		for sd in [3, 74]:
+			var b := _build_at(sd, st)
+			var err := _rim_errors(b, st)
+			b.world.free()
+			if not err.is_empty():
+				return "seed %d stage %d: %s" % [sd, st, err]
+	return ""
+
+
+func _rim_errors(b: Dictionary, st: int) -> String:
+	var L: Dictionary = b.layout
+	var layer := b.level.get_node_or_null(StageRim.NODE) as CanvasLayer
+	if layer == null:
+		return "no StageRim layer"
+	if not layer.follow_viewport_enabled or layer.layer >= 20:
+		return "rim layer must follow the camera and sit under the HUD"
+	var want_a := float(StageTable.look(st).rim_alpha)
+	var lines := {}
+	for c in layer.get_children():
+		if not (c is Line2D):
+			return "non-line child %s in the rim" % c.name
+		var ln := c as Line2D
+		lines[str(ln.name)] = ln
+		if not is_equal_approx(ln.default_color.a, want_a) or ln.width != 1.0:
+			return "%s alpha %f width %f (want %f, 1px)" % [ln.name, ln.default_color.a, ln.width, want_a]
+		if ln.points.size() != 2 or ln.points[0].y != ln.points[1].y:
+			return "%s is not one horizontal segment" % ln.name
+	var hit := func(ln: Line2D, x0: float, x1: float, y: float) -> bool:
+		return absf(ln.points[0].x - x0) < 0.01 and absf(ln.points[1].x - x1) < 0.01 and absf(ln.points[0].y - (y + 0.5)) < 0.01
+	var i := 0
+	for fu in L.furniture:
+		var sp := LevelValidator.furniture_span(fu)
+		var ln: Line2D = lines.get("Furn_%d" % i)
+		if ln == null or not hit.call(ln, sp.x, sp.y, float(LevelValidator.surface_y(int(fu.floor))) - float(int(fu.h) * 16)):
+			return "furniture %d (floor %d x %d h %d) has no rim on its top" % [i, int(fu.floor), int(fu.x), int(fu.h)]
+		i += 1
+	i = 0
+	for s in L.stairs:
+		var hole := LevelValidator.stair_hole(s)
+		var ln: Line2D = lines.get("Rail_%d" % i)
+		if ln == null or not hit.call(ln, hole.x, hole.y, float(LevelValidator.surface_y(int(s.to_floor))) - StageRim.RAIL_TOP_PX):
+			return "stair %d has no rim over its opening" % i
+		i += 1
+	var right := float((int(L.width_tiles) + 1) * 16)
+	for f in int(L.floors):
+		# the segments of floor f must tile [0, right] minus the stair cutouts exactly
+		var segs := []
+		for k in 20:
+			var ln: Line2D = lines.get("Floor_%d_%d" % [f, k])
+			if ln == null:
+				break
+			segs.append(Vector2(ln.points[0].x, ln.points[1].x))
+			if absf(ln.points[0].y - (float(LevelValidator.surface_y(f)) + 0.5)) > 0.01:
+				return "floor %d rim is not on the surface row" % f
+		var holes: Array = []
+		for s in L.stairs:
+			if int(s.to_floor) == f:
+				holes.append(LevelValidator.stair_hole(s))
+		holes.sort_custom(func(p, q): return p.x < q.x)
+		var covered := 0.0
+		for sg in segs:
+			covered += sg.y - sg.x
+		var cut := 0.0
+		for h in holes:
+			cut += h.y - h.x
+		if segs.is_empty() or absf(covered - (right - cut)) > 0.01:
+			return "floor %d rim covers %.0fpx, want %.0f (width %.0f minus %.0f of stair cutouts)" % [f, covered, right - cut, right, cut]
+	for e in b.enemies:   # the rim leaves the enemies alone
+		if not e.visible or e.modulate != Color(1, 1, 1, 1) or e.get_node_or_null(StageRim.NODE) != null:
+			return "an enemy was touched by the rim"
+	return ""
+
+
+## QA probe: a 1-tall step, a 2-tile (32px) gap, then a bare 4-tall piece. A running jump off the step
+## top climbs the 48px rise at every stat level (real physics: ClimbSim.step_gap_climbs in scene_climb).
+## The validator must flag it and the generator must refuse to place the 4-tall there.
+func test_blocker_qa_step_gap() -> String:
+	var base := LevelGenerator.fallback_layout(1)
+	# one open floor, no stairs: a 4-tall only leaves the floor connected at its right end (a split
+	# would strand the part past it), so the generator accepts one only there
+	base.stairs = []
+	base.floors = 1
+	base.exit = Vector2(float(base.start.x) + 32.0, 0.0)
+	var x := -1
+	for cx in range(8, int(base.width_tiles) + 1):
+		if _try_place_4tall(base, cx, false) > 0:
+			x = cx
+			break
+	if x < 0:
+		return "control: the generator accepts a bare 4-tall nowhere on the fallback floor 0, the rejection check proves nothing"
+	var Q := base.duplicate(true)
+	Q.furniture.append({floor = 0, x = x - 4, w = 2, h = 1})   # step: tiles x-4..x-2, 2 tiles of floor, then
+	Q.furniture.append({floor = 0, x = x, w = 2, h = 4})       # the 4-tall
+	var errs := LevelValidator.blocker_climb_errors(Q)
+	if errs.is_empty():
+		return "step + 2-tile gap + bare 4-tall was not flagged (jump reach %.0fpx)" % LevelValidator.blocker_reach(48.0)
+	if not "\n".join(errs).contains("from the h1 piece"):
+		return "flagged, but not from the step: %s" % errs[0]
+	var V2 := LevelGenerator.fallback_layout(1)   # intact layout (the stripped one fails validate() structurally)
+	V2.furniture.append({floor = 0, x = 36, w = 2, h = 1})
+	V2.furniture.append({floor = 0, x = 40, w = 2, h = 4})
+	if not "\n".join(LevelValidator.validate(V2)).contains("can be climbed"):
+		return "validate() does not report it"
+	var n: int = Q.furniture.size()
+	if LevelValidator.span_gap(LevelValidator.furniture_span(Q.furniture[n - 2]), LevelValidator.furniture_span(Q.furniture[n - 1])) != 32.0:
+		return "test layout gap is not 32px"
+	if _try_place_4tall(base, x, true) > 0:
+		return "the generator placed the 4-tall 2 tiles from a 1-tall step"
+	return ""
+
+
+## How many of 24 rng seeds make LevelGenerator._place_piece put a 2-wide 4-tall at tile x (the only x
+## the one-position room allows) on floor 0, optionally with a 1-tall step 2 tiles to its left.
+## A placed piece must never leave a climbable blocker.
+func _try_place_4tall(base: Dictionary, x: int, with_step: bool) -> int:
+	var room := {floor = 0, x0 = x - 3, x1 = x + 5}
+	var accepted := 0
+	for sd in 24:
+		var L := base.duplicate(true)
+		L.furniture = []
+		var used := {}
+		for f in L.floors:
+			used[f] = []
+		if with_step:
+			L.furniture.append({floor = 0, x = x - 4, w = 2, h = 1})
+			used[0].append(Vector2(float((x - 5) * 16), float((x - 4 + 2 + 1) * 16)))
+		var rng := RandomNumberGenerator.new()
+		rng.seed = sd
+		if LevelGenerator._place_piece(rng, L, used, room, 2, 4):
+			accepted += 1
+			if not LevelValidator.blocker_climb_errors(L).is_empty():
+				push_error("the generator placed a climbable 4-tall: %s" % LevelValidator.blocker_climb_errors(L)[0])
+				return 999
+	return accepted
+
+
+## QA seed 74 stage 5 floor 3 (generated on ac2d984, before the validator knew the rule): a 4-tall at
+## x145 w2, a solid wall flush on its left, a 32px gap, then a 1-tall (the left step of a climb-over
+## cluster 149/152/154) on its right. The boy climbed the 4-tall from that 1-tall.
+func test_blocker_seed74_regression() -> String:
+	var L := LevelGenerator.fallback_layout(5)
+	L.furniture = L.furniture.filter(func(o): return int(o.floor) != 3)
+	if int(L.floors) < 4:
+		return "fallback layout has no floor 3"
+	L.walls.append({floor = 3, x = 144, doorway = false})   # the tall solid wall flush on the left
+	L.furniture.append({floor = 3, x = 145, w = 2, h = 4})
+	L.furniture.append({floor = 3, x = 149, w = 3, h = 1})
+	L.furniture.append({floor = 3, x = 152, w = 2, h = 3})
+	L.furniture.append({floor = 3, x = 154, w = 3, h = 2})
+	var errs := LevelValidator.blocker_climb_errors(L)
+	var txt := "\n".join(errs)
+	if not txt.contains("blocker h4 at x=2320 on floor 3 can be climbed from the h1 piece at x=2384 (gap 32px"):
+		return "the 4-tall at x145 was not flagged from the 1-tall 32px away: %s" % txt
+	if not "\n".join(LevelValidator.validate(L)).contains("can be climbed"):
+		return "validate() does not report it"
+	# the new generator never produces it
+	var G := LevelGenerator.generate(74, 5)
+	if not LevelValidator.blocker_climb_errors(G).is_empty():
+		return "seed 74 stage 5 still has a climbable blocker"
+	return ""
+
+
+## Shake-off rule: a climbable top needs a free side to come down on (validate() reports it).
+func test_shake_off_side() -> String:
+	var base := LevelGenerator.fallback_layout(1)
+	var x := 40
+	var C := base.duplicate(true)   # a climb-over cluster in open floor: steps both sides, free floor beyond
+	C.furniture = [{floor = 0, x = x, w = 2, h = 1}, {floor = 0, x = x + 2, w = 2, h = 3}, {floor = 0, x = x + 4, w = 2, h = 2}]
+	if not LevelValidator.mount_passable(C, C.furniture[1]):
+		return "test cluster is not passable"
+	if not LevelValidator.shake_off_errors(C).is_empty():
+		return "an open cluster has no shake-off side: %s" % LevelValidator.shake_off_errors(C)[0]
+	# a bare 4-tall with a wall flush on each side that nothing reaches: not a climbable top, not checked
+	var T := base.duplicate(true)
+	T.furniture = [{floor = 0, x = x, w = 2, h = 4}]
+	T.walls.append({floor = 0, x = x - 1, doorway = false})
+	T.walls.append({floor = 0, x = x + 2, doorway = false})
+	if not LevelValidator.shake_off_errors(T).is_empty():
+		return "a 4-tall nobody can reach was checked: %s" % LevelValidator.shake_off_errors(T)[0]
+	# the same 4-tall with a 1-tall step 2 tiles beyond the right wall (the model flags the climb and
+	# ignores the wall): walls flush on both sides leave no side to come down on
+	var K := T.duplicate(true)
+	K.furniture.append({floor = 0, x = x + 4, w = 2, h = 1})
+	if LevelValidator.blocker_climbs(K, K.furniture[0]).is_empty():
+		return "test setup: the 4-tall should be climbable from the step"
+	if LevelValidator.shake_off_errors(K).is_empty():
+		return "a climbable top with a wall flush on each side has a shake-off side"
+	K.walls = K.walls.filter(func(w): return int(w.x) != x + 2)   # open the right side
+	if not LevelValidator.shake_off_errors(K).is_empty():
+		return "open floor on the right still reported: %s" % LevelValidator.shake_off_errors(K)[0]
+	# the generator: every generated level has one for every climbable top
+	for st in range(3, 6):
+		for sd in 12:
+			var G := LevelGenerator.generate(sd, st)
+			if not LevelValidator.shake_off_errors(G).is_empty():
+				return "seed %d stage %d: %s" % [sd, st, LevelValidator.shake_off_errors(G)[0]]
+	return ""
+
+
+## Dead-end clusters: both sides of a climb-over cluster need a run-away exit (a stair within
+## EXIT_STAIR_PX or EXIT_OPEN_PX of open floor), measured from the far edge of the step.
+func test_cluster_exit() -> String:
+	var base := LevelGenerator.fallback_layout(1)
+	base.furniture = []
+	var f0 := func(x: int) -> Dictionary:   # a cluster (steps 2 wide) starting at tile x on floor 0
+		var T := base.duplicate(true)
+		T.furniture = [{floor = 0, x = x, w = 2, h = 1}, {floor = 0, x = x + 2, w = 2, h = 3}, {floor = 0, x = x + 4, w = 2, h = 2}]
+		return T
+	var mid: Dictionary = f0.call(100)   # 1600px from the left wall, the stair is 2000px right: open floor both ways
+	if not LevelValidator.mount_passable(mid, mid.furniture[1]):
+		return "test cluster is not passable"
+	if not LevelValidator.cluster_exit_errors(mid).is_empty():
+		return "a mid-floor cluster was flagged: %s" % LevelValidator.cluster_exit_errors(mid)[0]
+	var near: Dictionary = f0.call(30)   # ~450px from the left wall, no stair on that side
+	var ne := LevelValidator.cluster_exit_errors(near)
+	if ne.size() != 1 or not ne[0].contains("left side"):
+		return "a cluster 450px from the wall with no stair was not flagged on its left side: %s" % [ne]
+	if not "\n".join(LevelValidator.validate(near)).contains("dead-end cluster"):
+		return "validate() does not report a dead-end cluster"
+	if LevelValidator.run_exit(base, 0, 450.0, -1) or not LevelValidator.run_exit(base, 0, 1700.0, -1):
+		return "run_exit: 450px from the wall is a dead end, 1700px is not"
+	# a stair within EXIT_STAIR_PX is an exit: floor 1 has a stair foot at x=80
+	var up := base.duplicate(true)
+	up.furniture = [{floor = 1, x = 30, w = 2, h = 1}, {floor = 1, x = 32, w = 2, h = 3}, {floor = 1, x = 34, w = 2, h = 2}]
+	if Array(LevelValidator.cluster_exit_errors(up)).any(func(e): return e.contains("left side")):
+		return "a cluster with a stair foot 400px away was flagged: %s" % LevelValidator.cluster_exit_errors(up)[0]
+	# a wall between the cluster and the stair kills it
+	up.walls.append({floor = 1, x = 10, doorway = false})
+	if not Array(LevelValidator.cluster_exit_errors(up)).any(func(e): return e.contains("left side")):
+		return "a solid wall between the cluster and the stair still counts as an exit"
+	# a tall blocker closer than EXIT_OPEN_PX on the open side makes that side a dead end too
+	var blk: Dictionary = f0.call(100)
+	blk.furniture.append({floor = 0, x = 130, w = 2, h = 4})
+	if not Array(LevelValidator.cluster_exit_errors(blk)).any(func(e): return e.contains("right side")):
+		return "a 4-tall 350px past the cluster did not cut the right exit"
+	for st in range(1, 6):
+		for sd in 12:
+			var G := LevelGenerator.generate(sd, st)
+			if not LevelValidator.cluster_exit_errors(G).is_empty():
+				return "seed %d stage %d: %s" % [sd, st, LevelValidator.cluster_exit_errors(G)[0]]
 	return ""
 
 

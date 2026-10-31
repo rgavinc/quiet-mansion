@@ -9,6 +9,7 @@ extends RefCounted
 const R := 12.0              # LevelGenerator.PLAYER_RADIUS
 const SETTLE := 12
 const HOP_FRAMES := 75       # 1.25 s to get on top
+const NEAR_GAP_PX := 220.0   # check_blockers: low pieces this close to a blocker get a running take-off at it
 const RELEASE_PX := 6.0      # feet this far over the piece's near edge: let go of the direction key
 const OVER_FRAMES := 240     # walk off the far side and land on the floor
 
@@ -172,6 +173,48 @@ static func check_level(tree: SceneTree, seed_v: int, stage: int, setups: Array)
 	return {errors = errs, climbs = climbs, pieces = pieces.size()}
 
 
+## A running take-off: the boy stands on a surface at y = `from_y` (a piece top) near its far edge,
+## holds `dir` and jumps with his feet `edge_px` short of the edge at x = `edge_x` (the near edge
+## toward the target), then keeps pushing until he lands. Succeeds if he ends standing on `to_y`
+## with feet x in [x0, x1]. `start_x` is the feet x he starts from. Returns {ok, why}.
+static func run_hop(tree: SceneTree, p: CharacterBody2D, dir: int, start_x: float, edge_x: float,
+		edge_px: float, from_y: float, to_y: float, x0: float, x1: float, push_until: float) -> Dictionary:
+	p.state = p.State.NORMAL
+	p.stair = null
+	p.velocity = Vector2.ZERO
+	p.global_position = Vector2(start_x, from_y - 20.0)
+	p.global_position += Vector2(0.0, from_y - 0.5 - feet(p).y)
+	for i in SETTLE:
+		await tree.physics_frame
+	var f0 := feet(p)
+	if absf(f0.y - from_y) > 1.5 or absf(p.velocity.y) > 30.0:
+		return {ok = false, why = "not standing at the start (feet %s, want y %.1f)" % [f0, from_y]}
+	var act := &"move_right" if dir > 0 else &"move_left"
+	Input.action_press(act)
+	var jumped := false
+	var airborne := false
+	var landed := false
+	for n in 120 + HOP_FRAMES:
+		await tree.physics_frame
+		var fx := feet(p).x
+		if not jumped and (fx - (edge_x - dir * edge_px)) * dir >= 0.0:
+			p.jump()
+			jumped = true
+		if jumped and (fx - push_until) * dir >= 0.0:
+			Input.action_release(act)
+		if not p.is_on_floor():
+			airborne = true
+		elif airborne:
+			landed = true
+			break
+	Input.action_release(act)
+	for i in 4:
+		await tree.physics_frame
+	var f := feet(p)
+	var ok := landed and absf(f.y - to_y) < 1.5 and f.x >= x0 and f.x <= x1
+	return {ok = ok, why = "" if ok else "landed=%s at feet %s" % [landed, f]}
+
+
 ## Builds seed/stage and tries to climb every BLOCKER piece (taller than a jump and not a passable
 ## climb-over cluster: the floor graph treats it as a wall) from the floor on both sides, at the
 ## strongest jump (base stats, standstill jump against the wall). Every hop must FAIL to land on
@@ -203,11 +246,74 @@ static func check_blockers(tree: SceneTree, seed_v: int, stage: int) -> Dictiona
 			hops += 1
 			if r.ok:
 				errs.append("seed %d stage %d floor %d: a blocker h%d at x=%d was climbed from the floor (dir %d)" % [seed_v, stage, f, int(b.h), int(sp.x), dir])
+		# ... and from the top of every low piece within a running jump of it (take-off at the edge)
+		for o in L.furniture:
+			if int(o.floor) != f or blockers.has(o):
+				continue
+			var os := LevelValidator.furniture_span(o)
+			var gap := LevelValidator.span_gap(sp, os)
+			if gap > NEAR_GAP_PX:
+				continue
+			var dir2 := 1 if os.y <= sp.x else -1   # toward the blocker
+			var edge: float = os.y if dir2 > 0 else os.x
+			var ot := surf - float(o.h) * 16.0
+			var start: float = os.x + R + 0.2 if dir2 > 0 else os.y - R - 0.2
+			var far: float = sp.y if dir2 > 0 else sp.x
+			for ep in [0.0, 4.0]:
+				var r2: Dictionary = await run_hop(tree, p, dir2, start, edge, ep, ot, top, sp.x, sp.y, far)
+				hops += 1
+				if r2.ok:
+					errs.append("seed %d stage %d floor %d: a blocker h%d at x=%d was climbed from the h%d piece at x=%d (gap %dpx)" % [seed_v, stage, f, int(b.h), int(sp.x), int(o.h), int(os.x), int(gap)])
 	world.queue_free()
 	await tree.process_frame
 	PlayerStats.reset()
 	GameState.reset()
 	return {errors = errs, hops = hops, blockers = blockers.size()}
+
+
+## A running jump off a step top at a blocker across a gap, in a flat world (floor top y = 0): the
+## step is [0, step_w] px wide and `step_h` tall, the blocker `gap` px beyond it, `block_h` tall and
+## 64px wide. The boy starts on the step's far-left, holds the direction and jumps when his feet are
+## `edge_px` short of the step's edge (the best take-off is at the edge: reach is what the validator
+## models). Returns true if he ends standing on top of the blocker.
+static func step_gap_hop(tree: SceneTree, setup: Array, step_w: float, step_h: float, gap: float,
+		block_h: float, edge_px: float) -> bool:
+	var world := Node2D.new()
+	tree.root.add_child(world)
+	var body := StaticBody2D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	world.add_child(body)
+	var bx0 := step_w + gap
+	for rc in [Rect2(-2000, 0, 4000, 16), Rect2(0, -step_h, step_w, step_h), Rect2(bx0, -block_h, 64, block_h)]:
+		var cs := CollisionShape2D.new()
+		var sh := RectangleShape2D.new()
+		sh.size = rc.size
+		cs.shape = sh
+		cs.position = rc.position + rc.size / 2.0
+		body.add_child(cs)
+	var p := CharacterBody2D.new()
+	p.set_script(load("res://scripts/player/player_controller.gd"))
+	LevelGenerator._circle(p, R)
+	p.set("side_scroll", true)
+	world.add_child(p)
+	await tree.physics_frame
+	apply_setup(p, setup)
+	var r: Dictionary = await run_hop(tree, p, 1, R + 0.2, step_w, edge_px, -step_h, -block_h, bx0, bx0 + 64.0, bx0 + 30.0)
+	var ok: bool = r.ok
+	world.queue_free()
+	await tree.process_frame
+	PlayerStats.reset()
+	GameState.reset()
+	return ok
+
+
+## Best of a few take-offs near the step edge.
+static func step_gap_climbs(tree: SceneTree, setup: Array, step_w: float, step_h: float, gap: float, block_h: float) -> bool:
+	for edge in [0.0, 2.0, 5.0, 9.0]:
+		if await step_gap_hop(tree, setup, step_w, step_h, gap, block_h, edge):
+			return true
+	return false
 
 
 ## Flat-world calibration of the harness itself: a free-standing box `h_px` tall, standstill hop.

@@ -137,8 +137,8 @@ static func generate_layout(rng: RandomNumberGenerator, stage: int, P: Dictionar
 	# so they used to split floors the repair pass then "fixed" by lowering them (94% of them
 	# at stage 5). Now a tall piece is only kept where the floor graph stays connected.
 	_connect(rng, L, used)
+	_ensure_mountable(rng, L, used)   # first, while every spot is still free (dead-end rule)
 	_furnish(rng, L, P, used)
-	_ensure_mountable(rng, L, used)
 	_connect(rng, L, used)   # safety net: no-op unless furnishing left something unreached
 	_populate(rng, L, P, used, stage)
 	return L
@@ -185,6 +185,7 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 		return false
 	var before := _unreached(L)
 	var climbs := LevelValidator.blocker_climb_errors(L).size()
+	var dead := LevelValidator.cluster_exit_errors(L).size() if h > LevelValidator.MAX_JUMP_TILES else 0
 	L.furniture.append({floor = f, x = fx, w = w, h = h})
 	if h > LevelValidator.MAX_JUMP_TILES and _unreached(L) > before:
 		L.furniture.pop_back()
@@ -192,6 +193,10 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 	# never an unintended climb: neither this piece (a blocker) nor a low piece next to an
 	# existing blocker may make a blocker climbable (LevelValidator.blocker_climb_errors)
 	if LevelValidator.blocker_climb_errors(L).size() > climbs:
+		L.furniture.pop_back()
+		return false
+	# a new blocker must not cut a cluster's run-away exit (LevelValidator.cluster_exit_errors)
+	if h > LevelValidator.MAX_JUMP_TILES and LevelValidator.cluster_exit_errors(L).size() > dead:
 		L.furniture.pop_back()
 		return false
 	used[f].append(Vector2(a, b))
@@ -203,7 +208,7 @@ static func _place_piece(rng: RandomNumberGenerator, L: Dictionary, used: Dictio
 ## climb on the way over is <= 32px, so no stat combo that slows the boy can strand him (the bare
 ## 48px piece clears a capped jump by only 4px). False (nothing placed) if it doesn't fit, breaks a
 ## rail rule, isn't mount_passable there, or puts a step within jump reach of an existing blocker.
-static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary, r: Dictionary, w: int) -> bool:
+static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dictionary, r: Dictionary, w: int, force_x := -1) -> bool:
 	var f: int = r.floor
 	var wl := rng.randi_range(2, 3)
 	var wr := rng.randi_range(2, 3)
@@ -215,6 +220,10 @@ static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dict
 	if hi < lo:
 		return false
 	var fx := rng.randi_range(lo, hi)
+	if force_x >= 0:
+		if force_x < lo or force_x > hi:
+			return false
+		fx = force_x
 	var a := float((fx - 1) * TILE)
 	var b := float((fx + total + 1) * TILE)
 	for s in used[f]:
@@ -227,8 +236,10 @@ static func _place_cluster(rng: RandomNumberGenerator, L: Dictionary, used: Dict
 			return false
 	var n: int = L.furniture.size()
 	var climbs := LevelValidator.blocker_climb_errors(L).size()
+	var dead := LevelValidator.cluster_exit_errors(L).size()
 	L.furniture.append_array(parts)
-	if not LevelValidator.mount_passable(L, parts[1]) or LevelValidator.blocker_climb_errors(L).size() > climbs:
+	if not LevelValidator.mount_passable(L, parts[1]) or LevelValidator.blocker_climb_errors(L).size() > climbs \
+			or LevelValidator.cluster_exit_errors(L).size() > dead:
 		L.furniture.resize(n)
 		return false
 	used[f].append(Vector2(a, b))
@@ -269,15 +280,20 @@ static func _ensure_mountable(rng: RandomNumberGenerator, L: Dictionary, used: D
 	for f in int(L.floors):
 		if _has_mountable(L, f):
 			continue
-		var rooms := []
+		# every legal spot on the floor, shuffled: the dead-end rule (LevelValidator.cluster_exit_errors)
+		# leaves few of them on a floor with solid walls, so random tries would often miss them
+		var cands := []
 		for r in L.rooms:
 			if int(r.floor) == f:
-				rooms.append(r)
-		for _try in 40:
-			var r: Dictionary = rooms[rng.randi_range(0, rooms.size() - 1)]
+				var x: int = int(r.x0) + 3
+				while x <= int(r.x1) - 3 - 6:
+					cands.append([r, x])
+					x += 2
+		_shuffle(rng, cands)
+		for c in cands:
 			var n: int = used[f].size()
 			var fn: int = L.furniture.size()
-			if _place_cluster(rng, L, used, r, rng.randi_range(2, 3)):
+			if _place_cluster(rng, L, used, c[0], rng.randi_range(2, 3), c[1]):
 				if _has_mountable(L, f):
 					break
 				L.furniture.resize(fn)
@@ -915,7 +931,7 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	if fl:
 		fl.position = Vector2(0, -30)
 
-	StageLook.apply(level, int(L.get("stage", 1)), player)   # per-stage ambient, tint, flashlight boost
+	StageLook.apply(level, int(L.get("stage", 1)), player, L)   # per-stage ambient, tint, flashlight boost, rim
 
 	var ex := Area2D.new()
 	ex.set_script(load("res://scripts/world/exit_zone.gd"))
