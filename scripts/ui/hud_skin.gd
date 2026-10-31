@@ -76,6 +76,37 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 @export var camera_max_speed_y: float = 420.0
 
 
+@export_group("Dark glints")
+## Eye glints + dim silhouette on puppets OUTSIDE the flashlight light on dark stages
+## (scripts/ui/dark_glints.gd, docs/DESIGN.md "Eye glint"). Art comes from the manifest slots below.
+@export var glints_enabled: bool = true
+## Calm / return puppets get the soft amber glint; every hunting state gets the ember one;
+## a stunned puppet (eyes shut) gets none.
+@export var glint_calm_slot: String = "vfx_eye_glint_calm"
+@export var glint_hunting_slot: String = "vfx_eye_glint"
+## Glint opacity. QA: at 40 % the blink / dim frames fail contrast, so DarkGlints never
+## draws below GLINT_ALPHA_MIN whatever is set here.
+@export_range(0.6, 1.0) var glint_alpha: float = 0.9
+const GLINT_ALPHA_MIN := 0.6
+## Faint flat silhouette of the puppet's current frame (unshaded) so its shape reads on near-black.
+@export var silhouette_color: Color = Color(0.45, 0.55, 0.85)
+@export_range(0.0, 1.0) var silhouette_alpha: float = 0.2
+## Active when the stage ambient luminance (StageLook / the level's StageAmbient CanvasModulate)
+## is BELOW this. Stage 4 is ~0.17, stage 3 ~0.27, so 0.2 means stages 4-5.
+@export var dark_ambient_threshold: float = 0.2
+## Until a level reports an ambient: active from this stage on.
+@export var dark_fallback_stage: int = 4
+## The flashlight's soft blob also counts as light within this fraction of its radius.
+@export_range(0.0, 1.0) var blob_lit_fraction: float = 0.55
+
+@export_group("Seed readout")
+## Dim-looking but fully opaque text with a hard dark outline, readable over the stage 5 floor.
+@export var readout_color: Color = Color(0.72, 0.70, 0.80, 1.0)
+@export var readout_outline: Color = Color(0.02, 0.01, 0.04, 1.0)
+@export var readout_outline_size: int = 5
+@export var readout_shadow: Color = Color(0.0, 0.0, 0.0, 0.9)
+
+
 func ring_color_for(type_id: String) -> Color:
 	if ring_colors.has(type_id):
 		return ring_colors[type_id]

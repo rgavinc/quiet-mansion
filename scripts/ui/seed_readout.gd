@@ -36,10 +36,17 @@ func _wire(on: bool) -> void:
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if skin == null:
+		skin = HudSkin.load_default()
 	add_theme_font_size_override("font_size", 12)
-	add_theme_color_override("font_color", Color(0.85, 0.82, 0.92, 0.6))
-	add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.06, 0.8))
-	add_theme_constant_override("outline_size", 3)
+	# Fully opaque text with a hard dark outline + drop shadow (QA: 60 % alpha was unreadable
+	# over the stage 5 floor); the colour stays a dim lavender so it still looks quiet.
+	add_theme_color_override("font_color", skin.readout_color)
+	add_theme_color_override("font_outline_color", skin.readout_outline)
+	add_theme_constant_override("outline_size", skin.readout_outline_size)
+	add_theme_color_override("font_shadow_color", skin.readout_shadow)
+	add_theme_constant_override("shadow_offset_x", 1)
+	add_theme_constant_override("shadow_offset_y", 1)
 	refresh()
 	refresh.call_deferred()
 

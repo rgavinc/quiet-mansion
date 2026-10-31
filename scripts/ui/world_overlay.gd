@@ -1,5 +1,5 @@
 extends Node2D
-## World-space FE overlays in one node: selection ring, per-enemy startle
+## World-space FE overlays in one node: dark-stage puppet glints + silhouettes, selection ring, per-enemy startle
 ## meters, pickup gauge, throw line, camera nudge and the camera rig (level limits + follow). Drop
 ## `scenes/ui/world_overlay.tscn` under the level's world root.
 ## The drawn pieces live in a child CanvasLayer that follows the camera
@@ -11,9 +11,11 @@ const StartleMeter := preload("res://scripts/ui/startle_meter.gd")
 const PickupGauge := preload("res://scripts/ui/pickup_gauge.gd")
 const ThrowLine := preload("res://scripts/ui/throw_line.gd")
 const CameraNudge := preload("res://scripts/ui/camera_nudge.gd")
+const DarkGlints := preload("res://scripts/ui/dark_glints.gd")
 
 var skin: HudSkin
 var bus: Node
+var dark_glints: Node2D
 var ring: Node2D
 var pickup_gauge: Node2D
 var throw_line: Node2D
@@ -33,6 +35,7 @@ func _ready() -> void:
 	layer.layer = 5
 	layer.follow_viewport_enabled = true
 	add_child(layer)
+	dark_glints = _add(DarkGlints.new(), "DarkGlints")   # first: under the ring and meters
 	var r := SelectionRing.new()
 	r.glow_parent = self
 	ring = _add(r, "SelectionRing")
