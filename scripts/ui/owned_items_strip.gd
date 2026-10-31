@@ -76,6 +76,9 @@ func _stacks() -> Array:
 			order.append(by_id[id])
 		var e: Dictionary = by_id[id]
 		e.count += 1
+		if _in_pocket(it):
+			e.pocket = true   # its lure charges show in the lure pocket, not on this tile
+			continue
 		e.charges += int(it.get("charges")) if "charges" in it else 0
 		e.max_charges += int(it.get("max_charges")) if "max_charges" in it else 0
 	return order
@@ -116,6 +119,13 @@ func refresh() -> void:
 ## Widest the strip can get (px): PER_ROW tiles + gaps.
 static func max_width() -> float:
 	return PER_ROW * TILE + (PER_ROW - 1) * SEP + 8.0   # + room for 3 pips under a tile
+
+
+## Music Box copies keep a tile here, but with PR #41's lure pocket (PlayerStats.lure_max())
+## their charges live in the pocket pips next to the hand strip, so the tile shows none: no
+## pips, no "spent" fade, no charged-first ordering. Without #41 they stay ordinary charged items.
+func _in_pocket(it: Object) -> bool:
+	return it.has_method(&"lure_dict") and stats != null and stats.has_method(&"lure_max")
 
 
 func _rim(rarity: String) -> Color:

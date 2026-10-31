@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## Screen-space FE HUD root: hearts + gold (top-left), alert counter (top-right),
-## inventory strip (bottom-centre) with the "tap: throw lure" hint above it, owned items
+## inventory strip (bottom-centre) with the "tap: throw lure" hint above it and the Music Box
+## lure pocket pips beside it, owned items
 ## (under hearts + gold), minimap (top-right, Minimap item only), off-screen chaser arrows
 ## (full screen), and the "Stage N" intro banner. Game-over / shop screens are separate layers.
 ## Instance `scenes/ui/hud.tscn` once per level. All data via FESignals.
@@ -13,6 +14,7 @@ const StageBanner := preload("res://scripts/ui/stage_banner.gd")
 const OwnedItemsStrip := preload("res://scripts/ui/owned_items_strip.gd")
 const Minimap := preload("res://scripts/ui/minimap.gd")
 const LureHint := preload("res://scripts/ui/lure_hint.gd")
+const LurePocket := preload("res://scripts/ui/lure_pocket.gd")
 
 var skin: HudSkin
 ## PlayerStats for the item widgets (tests); null = each widget uses /root/PlayerStats.
@@ -25,6 +27,7 @@ var banner: Control
 var owned_items: Control
 var minimap: Control
 var lure_hint: Control
+var lure_pocket: Control
 var hud_root: Control
 ## End screens (UiScreen: game over, win, shop) seen in the tree; the HUD hides while any is open.
 var _screens: Array = []
@@ -80,6 +83,8 @@ func _ready() -> void:
 	owned_items.position = Vector2(14, 112)   # under hearts/gold and the level's 2-line Hint (16, 64)
 
 	lure_hint = LureHint.new()
+	if stats:
+		lure_hint.stats = stats
 	lure_hint.name = "LureHint"
 	lure_hint.skin = skin
 	root.add_child(lure_hint)
@@ -87,6 +92,14 @@ func _ready() -> void:
 	lure_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	lure_hint.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	lure_hint.offset_bottom = -(skin.slot_size + 48.0)   # above the strip's name label
+
+	lure_pocket = LurePocket.new()   # Music Box pocket pips, right of the hand slots
+	lure_pocket.name = "LurePocket"
+	lure_pocket.skin = skin
+	if stats:
+		lure_pocket.stats = stats
+	lure_pocket.anchor_strip = inventory
+	root.add_child(lure_pocket)
 
 	minimap = Minimap.new()
 	minimap.name = "Minimap"
