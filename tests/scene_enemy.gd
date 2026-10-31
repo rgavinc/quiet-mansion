@@ -1371,15 +1371,44 @@ func _rattle_far_walker(tree: SceneTree) -> Variant:
 ## QA's far-half repros on real #13 levels (stage 2 seeds 0/2/3), walker 200 px out, both sides:
 ## rattle by ~3.5 s after the walker could arrive.
 func _rattle_real_levels(tree: SceneTree) -> Variant:
-	var cases := [[0, 2, 1, 122, 2, 4], [2, 2, 1, 148, 2, 3], [3, 2, 0, 201, 3, 3]]   # seed, stage, floor, x, w, h
+	# QA repros (seed, stage, floor, x, w, h) - used while the generated layout still has that piece
+	# (a generator change reshuffles layouts) - plus the two tallest pieces of a few seeds, so
+	# the check keeps covering real layouts either way.
+	var cases: Array = []
+	for c in [[0, 2, 1, 122, 2, 4], [2, 2, 1, 148, 2, 3], [3, 2, 0, 201, 3, 3]]:
+		if _layout_has_piece(int(c[0]), int(c[1]), c):
+			cases.append(c)
+	for sd in [0, 2, 3, 5]:
+		var L: Dictionary = LevelGenerator.generate(sd, 2)
+		var pieces: Array = []
+		for fu in L.get("furniture", []):
+			if int(fu.h) >= 3:
+				pieces.append(fu)
+		pieces.sort_custom(func(a, b): return int(a.h) > int(b.h) or (int(a.h) == int(b.h) and int(a.x) < int(b.x)))
+		for k in mini(2, pieces.size()):
+			var fu: Dictionary = pieces[k]
+			cases.append([sd, 2, int(fu.floor), int(fu.x), int(fu.w), int(fu.h)])
+	if cases.is_empty(): return "no real-level piece to test"
+	var ran := 0
 	for c in cases:
 		for side in [-1, 1]:
-			var err: String = await _real_level_case(tree, c, side)
-			if not err.is_empty(): return "seed %d stage %d f%d x%d side %d: %s" % [c[0], c[1], c[2], c[3], side, err]
+			var r: Variant = await _real_level_case(tree, c, side)
+			if r is String and not (r as String).is_empty():
+				return "seed %d stage %d f%d x%d side %d: %s" % [c[0], c[1], c[2], c[3], side, r]
+			if r is bool and r: ran += 1
+	if ran < 4: return "only %d real-level cases had a valid walker spawn" % ran
 	return ""
 
 
-func _real_level_case(tree: SceneTree, c: Array, side: int) -> String:
+func _layout_has_piece(seed_: int, stage: int, c: Array) -> bool:
+	var L: Dictionary = LevelGenerator.generate(seed_, stage)
+	for fu in L.get("furniture", []):
+		if int(fu.floor) == int(c[2]) and int(fu.x) == int(c[3]) and int(fu.w) == int(c[4]) and int(fu.h) == int(c[5]):
+			return true
+	return false
+
+
+func _real_level_case(tree: SceneTree, c: Array, side: int) -> Variant:
 	PlayerStats.reset(); GameState.reset(); FESignals.reset()
 	var world := Node2D.new()
 	_holder.add_child(world)
@@ -1409,7 +1438,12 @@ func _real_level_case(tree: SceneTree, c: Array, side: int) -> String:
 	if not (walker.is_on_floor() and absf(Enemy.body_feet(walker).y - floor_y) < 3.0):
 		world.queue_free()
 		await tree.process_frame
-		return ""
+		return false
+	# A wall / stair hole / tall piece between them means a stair detour, not this case.
+	if LevelNav.current != null and LevelNav.current.node_for(Enemy.body_feet(p)) != LevelNav.current.node_for(Enemy.body_feet(walker)):
+		world.queue_free()
+		await tree.process_frame
+		return false
 	walker.call("_enter_chase", 9999.0)
 	var got := -1
 	for f in 900:
@@ -1425,7 +1459,7 @@ func _real_level_case(tree: SceneTree, c: Array, side: int) -> String:
 		err = "rattled after %.1f s (walk %.1f s + 3 s expected)" % [got / 60.0, base_frames / 60.0]
 	world.queue_free()
 	await tree.process_frame
-	return err
+	return err if not err.is_empty() else true
 
 
 ## Synthetic wedge (QA p_wedge): 48x48 piece, wall `gap` px from its edge, walker mid-gap.
