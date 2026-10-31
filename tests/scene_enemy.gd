@@ -57,6 +57,7 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["rattle_cancels_when_boy_leaves_timers_reset", _rattle_cancel_leave],
 		["rattle_cancels_on_stun_and_state_change", _rattle_cancel_stun],
 		["rattle_wobble_manifest_steps_negated_when_flipped_collision_fixed", _rattle_wobble_test],
+		["rattle_claw_to_furniture_offset_identical_flipped_vs_unflipped", _rattle_relative_offset],
 		["rattle_vfx_on_furniture_top_freed_on_end", _rattle_vfx],
 		["face_hysteresis_boy_wobbling_7px_no_flicker", _face_hysteresis],
 		["stair_clears_off_perch_immunity_airborne_keeps_it", _stair_immunity],
@@ -1243,4 +1244,34 @@ func _stair_immunity(tree: SceneTree) -> Variant:
 	e._boy_off_perch = true
 	for i in 3: await tree.physics_frame
 	if e._boy_off_perch: return "mark survived landing on a floor (h %.1f, grounded %s, boy %s walker %s state %d)" % [e.perch_height(p), p._grounded(), p.global_position, e.global_position, e.state]
+	return ""
+
+
+## QA: the wobble is in the walker's facing frame (multiplied by its facing sign), so the offset
+## between the claws and the furniture is the same flipped or not (raw screen-space wobble missed
+## by 1-2 px on frames 0/2/4). Claw = walker feet x; offset measured toward its facing, per frame.
+func _rattle_relative_offset(tree: SceneTree) -> Variant:
+	var rel := {-1: {}, 1: {}}
+	for side in [-1, 1]:
+		var rig: Dictionary = await _rattle_rig(tree, 3, side)
+		var e: CharacterBody2D = rig.e
+		var vis: ColorRect = rig.furn.get_node("Vis")
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var vbase := vis.position.x
+		var r: Array = await _frames_to_rattle(tree, e, rig.p)
+		if r[1] < 0: return "side %d: never rattled" % side
+		var facing := -1.0 if spr.flip_h else 1.0
+		var furn: StaticBody2D = rig.furn
+		var gap0: float = (furn.global_position.x - e.global_position.x) * facing   # unwobbled, toward the walker's facing
+		for f in 40:
+			await tree.physics_frame
+			if e.state != e.State.RATTLE: break
+			var idx: int = e._rattle_frame()
+			var gap: float = (vis.position.x - vbase + furn.global_position.x - e.global_position.x) * facing
+			rel[side][idx] = snappedf(gap - gap0, 0.001)
+		e.free(); rig.p.free(); rig.furn.free()
+		await tree.process_frame
+	if rel[-1].size() != 6 or rel[1].size() != 6: return "not all 6 frames seen (%s / %s)" % [rel[-1].keys(), rel[1].keys()]
+	for idx in rel[-1]:
+		if rel[-1][idx] != rel[1][idx]: return "frame %d: claw-to-furniture offset %.2f unflipped vs %.2f flipped" % [idx, rel[-1][idx], rel[1][idx]]
 	return ""
