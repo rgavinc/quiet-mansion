@@ -86,7 +86,7 @@ const MOVE_FLOAT := &"float"
 @export var rattle_max_height: float = 72.0
 ## Fairness (PD may veto / retune): after the shake-off touchdown the boy has control and this
 ## long before our hit can land.
-@export var shake_hit_grace: float = 0.25
+@export var shake_hit_grace: float = 0.4
 ## Visual only: while rattling the sprite sits this many px toward the piece so the claw tips
 ## meet its edge (the body stops ~14 px out; collision unchanged).
 @export var rattle_claw_px: float = 12.0
