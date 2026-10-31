@@ -106,3 +106,19 @@ func _make_slot(d: Dictionary) -> PanelContainer:
 	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	p.add_child(icon)
 	return p
+
+
+## Global rect covering just the hand slots (not the wider name label above them): what the
+## lure pocket sits beside.
+func slots_rect() -> Rect2:
+	var r := Rect2()
+	var first := true
+	for sl in _slots:
+		if not is_instance_valid(sl):
+			continue
+		var g := sl.get_global_rect()
+		r = g if first else r.merge(g)
+		first = false
+	if first:
+		return _row.get_global_rect() if _row != null else Rect2(global_position, size)
+	return r
