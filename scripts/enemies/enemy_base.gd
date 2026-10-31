@@ -75,6 +75,10 @@ const REACH_HEIGHT_FALLBACK := 40.0  # PD: 8 px margin over 2 tiles (32) and und
 const PERCH_MIN_PX := 8.0
 ## A cancelled reach resumes (not restarts) if he's back in reach within this many seconds.
 const REACH_RESUME_TIME := 1.0
+## Sprite facing: walk art faces right (manifest: "flip_h for left"). Below the velocity deadzone the
+## walker keeps its facing, or turns to the boy while it is hunting / reaching (no flicker at vx ~ 0).
+const FACE_VEL_DEADZONE := 8.0
+const FACE_TARGET_DEADZONE := 6.0
 ## Ledge backstop (walkers): how far below the feet a floor must be just ahead of them.
 const LEDGE_PROBE_DEPTH := 24.0
 const LEDGE_PROBE_LIFT := 4.0     # ray starts this far above the feet
@@ -126,6 +130,7 @@ var _reported_chase: bool = false
 var _reported_startle: float = -1.0
 var _home_set: bool = false
 var _spr: AnimatedSprite2D
+var face_dir := 1               # 1 = looking right, -1 = left (sprite flip_h from this)
 var _spr_slot := ""           # slot whose manifest offset the sprite uses
 var _spr_feet := Vector2.ZERO   # origin -> feet the sprite offset was last built with
 var _stun_calm: bool = false        # Flash Bulb stun: back to CALM afterwards, never chase
@@ -224,6 +229,37 @@ func _play(slot: String) -> void:
 	_spr.play(slot)
 	_spr_slot = slot
 	_apply_spr_offset()
+	_apply_flip()
+
+
+## Turn the sprite toward the way it moves (vx past the deadzone) or, standing still while
+## startled / chasing / searching / reaching, toward the boy. The art faces right unless the
+## slot's manifest entry says `facing = "left"` (or `flip = true`); flip_h mirrors about the
+## pivot column (x = frame centre for every puppet slot, so the feet don't move).
+func update_facing(vx: float) -> void:
+	if absf(vx) > FACE_VEL_DEADZONE:
+		face_dir = 1 if vx > 0.0 else -1
+	elif state in [State.STARTLED, State.CHASE, State.SEARCH, State.REACH, State.STUNNED, State.RECOVER]:
+		var p := _player()
+		if p != null:
+			var dx := p.global_position.x - global_position.x
+			if absf(dx) > FACE_TARGET_DEADZONE:
+				face_dir = 1 if dx > 0.0 else -1
+	_apply_flip()
+
+
+func _apply_flip() -> void:
+	if _spr != null:
+		_spr.flip_h = (face_dir < 0) != art_faces_left(_spr_slot)
+
+
+## Manifest: `facing = "left"` / -1, or `flip = true`, marks art drawn facing left.
+static func art_faces_left(slot: String) -> bool:
+	var m := AnimLibrary.meta(slot)
+	if bool(m.get("flip", false)):
+		return true
+	var f: Variant = m.get("facing", "right")
+	return (f is String and str(f).to_lower() == "left") or ((f is int or f is float) and float(f) < 0.0)
 
 
 ## Art pivot = feet (manifest), so the sprite is anchored to the REAL feet: the pivot offset
@@ -559,6 +595,7 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector2.ZERO
 		return
 	tick(delta)
+	update_facing(velocity.x)   # intended velocity, before the slide zeroes it against a wall
 	if not climbing:
 		move_and_slide()
 	_try_hit()

@@ -40,6 +40,12 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["perch_1_tile_hop_off_at_0_5s_escapes", _perch_hop_off.bind(1)],
 		["perch_2_tile_hop_off_at_0_5s_escapes", _perch_hop_off.bind(2)],
 		["perch_hop_in_place_does_not_reset_reach", _perch_hop_in_place],
+		["face_chasing_left_flips_right_does_not", _face_chase],
+		["face_no_flicker_at_vx_zero_reach_faces_boy", _face_reach_still],
+		["face_flip_keeps_art_pivot_on_feet", _face_flip_feet],
+		["perch_height_measured_from_walker_feet_both_shapes", _perch_height_feet],
+		["perch_2_tile_caught_walker_origin_at_feet", _perch_catch_walker_shape.bind(-14.0)],
+		["perch_2_tile_caught_walker_centred", _perch_catch_walker_shape.bind(0.0)],
 		["perch_3_tile_out_of_reach", _perch_out_of_reach],
 		["perch_creak_on_furniture_scaled_by_noise_mult", _perch_creak],
 		["perch_creak_wakes_calm_walker_below", _perch_creak_wakes],
@@ -393,8 +399,8 @@ func _perch_boy(feet: Vector2, off := -12.0) -> CharacterBody2D:
 
 ## Walker 40px left of the furniture's middle, walking in under it (passes through it, like
 ## #13's walkers); on 1 tile its head meets the boy and it stops ~22px short, still in reach.
-func _under_walker(furn: StaticBody2D, chase := true) -> CharacterBody2D:
-	var e := _walker_feet(Vector2(PERCH_X - 40.0, PERCH_FLOOR), 0.0)
+func _under_walker(furn: StaticBody2D, chase := true, woff := 0.0) -> CharacterBody2D:
+	var e := _walker_feet(Vector2(PERCH_X - 40.0, PERCH_FLOOR), woff)
 	e.add_collision_exception_with(furn)
 	e.sight_override = 1
 	if chase:
@@ -756,4 +762,120 @@ func _sprite_swapped_shape(tree: SceneTree) -> Variant:
 	var got := _pivot_world(e, e.anim_calm)
 	if got.distance_to(_bottom(e)) > 0.01:
 		return "after swap art pivot %s vs feet %s" % [got, _bottom(e)]
+	return ""
+
+
+## Reach height is measured from the walker's real feet (the floor) to the boy's feet, whatever
+## the walker's collider offset: 1 / 2 / 3 tiles read 16 / 32 / 48 against reach_height() 40.
+func _perch_height_feet(tree: SceneTree) -> Variant:
+	for woff in [0.0, -14.0]:
+		for h in [1, 2, 3]:
+			var furn := _furniture(h)
+			var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - h * 16), -12.0)
+			for i in 3: await tree.physics_frame
+			var e := _under_walker(furn, false, woff)
+			for i in 20: await tree.physics_frame
+			var want: float = h * 16.0
+			if absf(e.perch_height(p) - want) > 1.0:
+				return "walker shape off %.0f, %d tiles: perch_height %.2f, want %.1f" % [woff, h, e.perch_height(p), want]
+			if (e.perch_height(p) <= e.reach_height()) != (h <= 2):
+				return "walker shape off %.0f, %d tiles: reach_height %.1f gives wrong in-reach" % [woff, h, e.reach_height()]
+			p.free(); furn.free(); e.free()
+	return ""
+
+
+func _perch_catch_walker_shape(tree: SceneTree, woff: float) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 32.0), -12.0)
+	for i in 3: await tree.physics_frame
+	var hp := PlayerStats.health
+	var e := _under_walker(furn, true, woff)
+	var w := _watch(e)
+	var hit := -1
+	for f in 120:
+		w.frame = f
+		await tree.physics_frame
+		if PlayerStats.health < hp:
+			hit = f
+			break
+	if w.started < 0: return "never started a reach (walker off %.0f)" % woff
+	if hit < 0: return "no catch (walker off %.0f)" % woff
+	if absf((hit - w.started) / 60.0 - e.reach_delay()) > 0.1: return "catch %.2fs after start, want %.2fs" % [(hit - w.started) / 60.0, e.reach_delay()]
+	return ""
+
+
+# --- sprite facing (QA: enemies never mirrored; chase art faces right, "flip_h for left") ----
+func _face_chase(tree: SceneTree) -> Variant:
+	_slab(0, 900, 200)
+	for side in [-1, 1]:
+		var e := _walker_feet(Vector2(450, 200), 0.0)
+		var p := _boy(Vector2(450 + side * 250, 188), true)
+		e.sight_override = 1
+		e._enter_chase(9999)
+		var spr: AnimatedSprite2D = e.get_node("Anim")
+		var flips := 0
+		var last := spr.flip_h
+		for i in 40:
+			await tree.physics_frame
+			if spr.flip_h != last: flips += 1
+			last = spr.flip_h
+		if spr.flip_h != (side < 0): return "chasing a boy to the %s: flip_h %s" % ["left" if side < 0 else "right", spr.flip_h]
+		if flips > 1: return "flip flickered %d times on a straight chase" % flips
+		e.free(); p.free()
+	return ""
+
+
+## Standing under the boy in REACH (vx 0): faces him, and wobbling the boy a few px around the
+## walker's x (inside the deadzone) never flips it.
+func _face_reach_still(tree: SceneTree) -> Variant:
+	var furn := _furniture(2)
+	var p := _perch_boy(Vector2(PERCH_X - 26.0, PERCH_FLOOR - 32.0), -12.0)   # boy 20px left of the walker
+	for i in 3: await tree.physics_frame
+	var e := _walker_feet(Vector2(PERCH_X - 6.0, PERCH_FLOOR), 0.0)
+	e.add_collision_exception_with(furn)
+	e.sight_override = 1
+	e._enter_chase(9999)
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	var f := 0
+	while e.state != e.State.REACH and f < 90:
+		await tree.physics_frame
+		f += 1
+	if e.state != e.State.REACH: return "no reach (state %d)" % e.state
+	for i in 3: await tree.physics_frame
+	if not spr.flip_h: return "reaching a boy on its left: not flipped"
+	var base := p.global_position
+	var flips := 0
+	var last := spr.flip_h
+	for k in 24:
+		p.global_position = base + Vector2(((k % 4) - 1.5) * 2.0, 0)   # wobble within the deadzone
+		p.global_position.x = e.global_position.x + (3.0 if k % 2 == 0 else -3.0)
+		await tree.physics_frame
+		if e.state != e.State.REACH: break
+		if spr.flip_h != last: flips += 1
+		last = spr.flip_h
+	if flips > 0: return "flipped %d times with the boy within the deadzone" % flips
+	return ""
+
+
+## flip_h on/off keeps the pivot on the feet and the lowest art pixel on the floor: puppet slots
+## are x-symmetric about the pivot (offset.x = 0), so the mirror happens about the feet column.
+func _face_flip_feet(tree: SceneTree) -> Variant:
+	_slab(0, 600, 200)
+	var e := _walker_feet(Vector2(300, 150), 0.0)
+	for i in 90:
+		await tree.physics_frame
+	var spr: AnimatedSprite2D = e.get_node("Anim")
+	for dir in [1, -1]:
+		e.face_dir = dir
+		for slot in _slots_of(e):
+			e._play(slot)
+			e._apply_flip()
+			if spr.flip_h != (dir < 0): return "%s: flip_h %s for face_dir %d" % [slot, spr.flip_h, dir]
+			if absf(spr.offset.x) > 0.01: return "%s: offset.x %.2f, mirror would move the feet column" % [slot, spr.offset.x]
+			if absf(AnimLibrary.pivot(slot).x * 2.0 - float(AnimLibrary.meta(slot).frame_size[0])) > 0.01: return "%s pivot not centred" % slot
+			var fs: Array = AnimLibrary.meta(slot).get("frame_size")
+			var edge := e.global_position.y + spr.position.y + spr.offset.y + float(_art_bottom_row(slot) + 1) - float(fs[1]) * 0.5
+			if edge - 200.0 < -0.5 or edge - 200.0 > 1.5: return "%s flipped %d: art bottom %.2f vs floor 200" % [slot, dir, edge]
+			if _pivot_world(e, slot).distance_to(_bottom(e)) > 0.01: return "%s flipped %d: pivot off the feet" % [slot, dir]
+	if e.art_faces_left("puppet_chase"): return "puppet_chase should face right"
 	return ""

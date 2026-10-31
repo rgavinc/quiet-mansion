@@ -203,3 +203,14 @@ Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copie
 
 ### Test hooks and tests
 `sight_override`, `lit_override`, `floor_override` (-1 real, 0/1 forced) and `nav_override`. Tests: `tests/test_enemy_fsm.gd` (sync, `tick()`), `tests/scene_enemy.gd` (real physics: hit back-off, walker gravity + stairs, walker without stairs, float through floors, startle → chase on real frames, walker turns at a floor gap while a floater crosses it; and, for a centred collider and one offset to `(0,-14)` with the origin at the feet: flat-floor chase moves >150 px in 600 frames with `ledge_stopped` false on most frames, the gap holds, and a stair climb ends with the collider bottom on the upper floor within 1 px). A check that hits a runtime script error counts as failed.
+
+## Sprite facing (flip_h)
+Enemies mirror their art toward where they are going. `Enemy.update_facing(vx)` runs each physics frame after `tick()`:
+- `|vx| > FACE_VEL_DEADZONE (8 px/s)` -> `face_dir` follows the sign of the intended velocity (captured before the slide, so a wall-blocked walker keeps its facing).
+- Inside the deadzone, while STARTLED/CHASE/SEARCH/REACH/STUNNED/RECOVER, it faces the boy if `|dx| > FACE_TARGET_DEADZONE (6 px)`; otherwise it keeps the last facing (no flicker when standing under the boy).
+- `flip_h = (face_dir < 0) != art_faces_left(slot)`. Art is assumed to face right (chase art does). A manifest slot can set `flip = true` or `facing = "left"` (or a negative number) for art drawn facing left.
+- The pivot is on the feet column (all puppet slots have pivot.x = frame_w/2, so `offset.x == 0`) and the mirror stays about the feet; the #42 lowest-pixel check holds with flip on/off.
+Tests: `face_chasing_left_flips_right_does_not`, `face_no_flicker_at_vx_zero_reach_faces_boy`, `face_flip_keeps_art_pivot_on_feet`.
+
+## Perch reach: sweep notes
+Catch sweep (real physics, generated #13 levels, 50 seeds/height) measures reach height from the walker's `_feet()` to the boy's feet. One early "seed never reached" miss was a floor-0 room wall between walker and furniture (walker detoured via stairs), not a gap in REACH; a walker that cannot physically get under the boy will not reach. Extra tests: `perch_height_measured_from_walker_feet_both_shapes`, `perch_2_tile_caught_walker_*`.
