@@ -971,9 +971,56 @@ func _shake_off(p: Node2D) -> bool:
 	return true
 
 
-## A boy-sized spot on the floor, free of world and bodies (shape query) and with floor under it:
-## our side = past our body; far side = just outside the piece's far edge. Two spots, 12 px apart.
-func _landing_free(p: Node2D, dir: float, our_side: bool) -> bool:
+## Outer x edge of the whole furniture cluster on `dir`'s side: the piece he stands on plus every
+## contiguous floor-standing piece beside it (steps, a 3-tall next to a 1-tall, ...), measured from
+## the piece edge rather than from where the walker stands (walkers pass through LowFurniture, so
+## they can be inside the footprint). A tall solid (wall) ends the walk and is returned as `wall`.
+func _cluster_edge(r: Rect2, dir: float) -> Dictionary:
+	var edge := r.end.x if dir > 0.0 else r.position.x
+	var floor_y := r.end.y
+	var space := get_world_2d().direct_space_state
+	var wall := false
+	for i in 8:
+		var q := PhysicsPointQueryParameters2D.new()
+		q.position = Vector2(edge + dir * 1.5, floor_y - 4.0)
+		q.collision_mask = PlayerStats.LAYER_WORLD
+		var hit := space.intersect_point(q, 4)
+		if hit.is_empty():
+			break
+		var nxt := edge
+		var tall := false
+		for h in hit:
+			if not (h.collider is Node):
+				continue
+			for c in (h.collider as Node).get_children():
+				if not (c is CollisionShape2D and (c as CollisionShape2D).shape is RectangleShape2D):
+					continue
+				var cs := c as CollisionShape2D
+				var size := (cs.shape as RectangleShape2D).size * cs.global_scale.abs()
+				var cr := Rect2(cs.global_position - size * 0.5, size)
+				if not cr.grow(1.5).has_point(q.position):
+					continue
+				if absf(cr.end.y - floor_y) > 3.0 or cr.size.y > 80.0:
+					tall = true   # a wall / slab edge, not a step
+				elif dir > 0.0:
+					nxt = maxf(nxt, cr.end.x)
+				else:
+					nxt = minf(nxt, cr.position.x)
+		if tall:
+			wall = true
+			break
+		if is_equal_approx(nxt, edge):
+			break
+		edge = nxt
+	return {edge = edge, wall = wall}
+
+
+## A boy-sized spot on the floor, free of world and bodies (shape query) and with floor under it,
+## searched outward from the cluster's outer edge on `dir`'s side (4 spots, 12 px apart, each also
+## needing the next one over free so he is not wedged). Never measured from a walker standing in
+## the cluster's footprint; on our side, with the walker out on the floor beside the cluster, the
+## spot just behind its body counts too (a boy-wide gap behind it is a valid landing).
+func _landing_free(p: Node2D, dir: float, our_side: bool = false) -> bool:
 	if _rattle_piece.is_empty() or not is_inside_tree() or p == null:
 		return false
 	var r: Rect2 = _rattle_piece.rect
@@ -986,26 +1033,44 @@ func _landing_free(p: Node2D, dir: float, our_side: bool) -> bool:
 		return true
 	var he := shape_half_extents(cs.shape)
 	var rel := cs.global_position - body_feet(p)
-	var x1: float
-	if our_side:
-		x1 = _feet().x + dir * (shape_half_extents(_own_shape()).x + he.x + 2.0)
-	else:
-		x1 = r.get_center().x + dir * (r.size.x * 0.5 + he.x + 4.0)
-	var space := get_world_2d().direct_space_state
+	var cl := _cluster_edge(r, dir)
+	if cl.wall:
+		return false   # a wall flush against the cluster: nothing past it is reachable
+	var x1 := float(cl.edge) + dir * (he.x + 4.0)
 	var floor_y := r.end.y
-	for k in 2:
-		var x := x1 + dir * 12.0 * k
-		var q := PhysicsShapeQueryParameters2D.new()
-		q.shape = cs.shape
-		q.transform = Transform2D(0.0, Vector2(x, floor_y - 2.5) + rel)
-		q.collision_mask = PlayerStats.LAYER_WORLD | PlayerStats.LAYER_ENEMY
-		q.exclude = [p.get_rid()] if p is CollisionObject2D else []
-		if not space.intersect_shape(q, 1).is_empty():
-			return false
-		var fr := PhysicsRayQueryParameters2D.create(Vector2(x, floor_y - 6.0), Vector2(x, floor_y + 8.0), PlayerStats.LAYER_WORLD, [p.get_rid()] if p is CollisionObject2D else [])
-		if space.intersect_ray(fr).is_empty():
-			return false
-	return true
+	for j in 4:   # outward; a body (walker) in a spot is stepped past, a solid or a hole ends the search
+		var a := _spot_state(p, cs.shape, rel, x1 + dir * 12.0 * j, floor_y)
+		if a == 2:
+			break
+		if a == 0 and _spot_state(p, cs.shape, rel, x1 + dir * 12.0 * (j + 1), floor_y) == 0:
+			return true
+	if our_side and dir * (_feet().x - float(cl.edge)) > 0.0:   # we stand outside the cluster
+		var xw := _feet().x + dir * (shape_half_extents(_own_shape()).x + he.x + 2.0)
+		if _spot_free(p, cs.shape, rel, xw, floor_y) and _spot_free(p, cs.shape, rel, xw + dir * 12.0, floor_y):
+			return true
+	return false
+
+
+## 0 = free with floor under it, 1 = a body (enemy) is in the way, 2 = world solid or no floor.
+func _spot_state(p: Node2D, shape: Shape2D, rel: Vector2, x: float, floor_y: float) -> int:
+	var space := get_world_2d().direct_space_state
+	var ex: Array = [p.get_rid()] if p is CollisionObject2D else []
+	var q := PhysicsShapeQueryParameters2D.new()
+	q.shape = shape
+	q.transform = Transform2D(0.0, Vector2(x, floor_y - 2.5) + rel)
+	q.collision_mask = PlayerStats.LAYER_WORLD
+	q.exclude = ex
+	if not space.intersect_shape(q, 1).is_empty():
+		return 2
+	var fr := PhysicsRayQueryParameters2D.create(Vector2(x, floor_y - 6.0), Vector2(x, floor_y + 8.0), PlayerStats.LAYER_WORLD, ex)
+	if space.intersect_ray(fr).is_empty():
+		return 2
+	q.collision_mask = PlayerStats.LAYER_ENEMY
+	return 0 if space.intersect_shape(q, 1).is_empty() else 1
+
+
+func _spot_free(p: Node2D, shape: Shape2D, rel: Vector2, x: float, floor_y: float) -> bool:
+	return _spot_state(p, shape, rel, x, floor_y) == 0
 
 
 func _own_shape() -> Shape2D:

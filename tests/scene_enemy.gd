@@ -62,6 +62,8 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["rattle_real_levels_far_walker_both_sides_rattles_by_3_5s", _rattle_real_levels],
 		["rattle_shake_wedge_gap_walker_side_blocked_goes_far_side", _rattle_wedge_far_side],
 		["rattle_shake_no_free_landing_keeps_rattling_never_cancels", _rattle_no_landing],
+		["rattle_landing_measured_from_cluster_edge_walker_inside_footprint", _rattle_cluster_landing],
+		["rattle_cluster_both_sides_blocked_keeps_rattling_never_cancels", _rattle_cluster_blocked],
 		["rattle_watchdog_frees_wedged_boy_and_clears_immunity", _rattle_watchdog],
 		["rattle_shake_touchdown_gives_control_and_hit_grace", _rattle_hit_grace],
 		["rattle_claw_visual_offset_toward_piece_sign_correct_collision_fixed", _rattle_claw_offset],
@@ -1537,6 +1539,84 @@ func _rattle_no_landing(tree: SceneTree) -> Variant:
 	NoiseBus.noise.disconnect(log.on_noise)
 	if dirs.is_empty(): return "boy not shaken once a spot opened"
 	if dirs[0] != 1.0: return "shaken toward %s, want the open far side" % dirs[0]
+	return ""
+
+
+## A low piece (own WORLD body, bottom on the floor) x0..x1, h px tall.
+func _low_piece(x0: float, x1: float, h: float) -> StaticBody2D:
+	var b := StaticBody2D.new()
+	b.collision_layer = PlayerStats.LAYER_WORLD
+	b.collision_mask = 0
+	var cs := CollisionShape2D.new(); var r := RectangleShape2D.new(); r.size = Vector2(x1 - x0, h); cs.shape = r
+	b.add_child(cs)
+	_holder.add_child(b); b.global_position = Vector2((x0 + x1) * 0.5, PERCH_FLOOR - h * 0.5)
+	return b
+
+
+## QA repro (seed 0 stage 1 f2 x171 w3 h3): walkers pass through LowFurniture, so one stands INSIDE
+## the 3-tall piece's footprint; the old near-side landing was measured from its position (inside
+## the piece) and a 1-tile step beside the far edge blocked the far side -> no free side, rattled
+## forever. Landing is now measured from the outer edge of the whole cluster.
+func _cluster_rig(tree: SceneTree, step_far := true, step_near := false) -> Dictionary:
+	var furn := _tall(3)   # x 280..344, 48 tall
+	var steps: Array = []
+	if step_far: steps.append(_low_piece(344.0, 376.0, 16.0))
+	if step_near: steps.append(_low_piece(248.0, 280.0, 16.0))
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 48.0))
+	for i in 3: await tree.physics_frame
+	var e := _walker_feet(Vector2(PERCH_X - 18.0, PERCH_FLOOR), 0.0)   # inside the footprint
+	e.add_collision_exception_with(furn)
+	for st in steps: e.add_collision_exception_with(st)
+	e.sight_override = 1
+	return {furn = furn, steps = steps, p = p, e = e}
+
+
+func _rattle_cluster_landing(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _cluster_rig(tree, true, false)
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	e._rattle_piece = e._find_piece(p)
+	if e._rattle_piece.is_empty(): return "no piece under the boy"
+	# direct: both sides are free once measured from the cluster edge (376 / 280), not the walker
+	if not e._landing_free(p, -1.0, true): return "near side not free with the walker inside the footprint"
+	if not e._landing_free(p, 1.0, false): return "far side not free past the 1-tile step"
+	var ce: Dictionary = e._cluster_edge(e._rattle_piece.rect, 1.0)
+	if absf(float(ce.edge) - 376.0) > 0.5: return "cluster edge %.1f, want 376 (piece + step)" % float(ce.edge)
+	# full flow: the walker chases, rattles, and the boy is shaken off onto the floor
+	var dirs := []
+	p.shaken_off.connect(func(d: float) -> void: dirs.append(d))
+	e._enter_chase(9999)
+	for f in 60 * 9: await tree.physics_frame
+	if dirs.is_empty(): return "never shaken off in 9 s (state %d)" % e.state
+	for f in 120: await tree.physics_frame
+	var feet := Enemy.body_feet(p)
+	if absf(feet.y - PERCH_FLOOR) > 2.5: return "boy not on the floor after the shake (y %.1f)" % feet.y
+	if p.is_shaken(): return "input lock still on after landing"
+	return ""
+
+
+func _rattle_cluster_blocked(tree: SceneTree) -> Variant:
+	# tall walls just past the step and just past the near edge: no spot on either side
+	var rig: Dictionary = await _cluster_rig(tree, true, false)
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	var wall := _low_piece(376.0, 392.0, 200.0)
+	var wall2 := _low_piece(216.0, 264.0, 200.0)   # 16 px off the near edge: no boy-wide gap
+	if wall2 == null: return "rig"
+	var log := _rlog(e)
+	var dirs := []
+	p.shaken_off.connect(func(d: float) -> void: dirs.append(d))
+	e._enter_chase(9999)
+	for f in 60 * 9: await tree.physics_frame
+	if e.state != e.State.RATTLE: return "walker left RATTLE (state %d) with no free spot" % e.state
+	if not dirs.is_empty(): return "shaken into a blocked space"
+	if not log.ended.is_empty(): return "rattle_ended fired with no free spot"
+	if log.noises < 6: return "only %d noises: it must keep rattling" % log.noises
+	if absf(Enemy.body_feet(p).y - (PERCH_FLOOR - 48.0)) > 2.0: return "boy left the piece top"
+	wall.free()   # a spot opens
+	for f in 60: await tree.physics_frame
+	NoiseBus.noise.disconnect(log.on_noise)
+	if dirs.is_empty(): return "not shaken once a spot opened"
 	return ""
 
 
