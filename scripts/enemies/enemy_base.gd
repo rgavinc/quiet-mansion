@@ -1346,8 +1346,11 @@ func tick(delta: float) -> void:
 			if _state_left <= 1e-4 and not PlayerStats.startle_handled(self):
 				_enter_chase(light_track_time)
 		State.CHASE, State.SEARCH:
-			if p != null and _shake_watch and _boy_shaken(p):
-				_stop_x(delta)   # he is mid-air toward a spot verified free: don't walk under him
+			if p != null and _shake_watch:
+				# Mid-air toward a spot verified free: don't walk under him. The watch only ends once he
+				# has touched down and control is back (grace begun), so a reach wind-up can never
+				# start before that and the full telegraph is always reactable.
+				_stop_x(delta)
 			elif p != null and perch_in_reach(p):
 				_enter_reach()
 				_stop_x(delta)

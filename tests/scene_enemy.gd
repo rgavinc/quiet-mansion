@@ -1662,12 +1662,14 @@ func _shake_outcome(tree: SceneTree, e: CharacterBody2D, p: CharacterBody2D, max
 		await tree.physics_frame
 		if not dirs.is_empty():
 			break
-	var out := {shaken = not dirs.is_empty(), feet = Vector2.ZERO, dir = 0.0 if dirs.is_empty() else dirs[0]}
+	var out := {shaken = not dirs.is_empty(), feet = Vector2.ZERO, dir = 0.0 if dirs.is_empty() else dirs[0], ctl = -1}
 	if dirs.is_empty():
 		return out
 	for f in 150:
 		await tree.physics_frame
-		if not p.is_shaken(): break
+		if not p.is_shaken():
+			out.ctl = Engine.get_physics_frames()   # the frame control came back
+			break
 	for f in 3: await tree.physics_frame
 	out.feet = Enemy.body_feet(p)
 	return out
@@ -1723,6 +1725,14 @@ func _rattle_step_rule(tree: SceneTree, mode: String) -> Variant:
 		if caught[0] < 0: return "reach never landed on the step"
 		var t := float(caught[0] - base[0]) / 60.0
 		if t < 0.1 or t > 1.2: return "reach landed %.2f s after touchdown, want ~0.4-1.0" % t
+		# the telegraph is fully reactable: no wind-up before control returned, so the first catch is
+		# at least hit_frame / fps (reach_delay) after control return, never earlier
+		var ctl: int = o.ctl
+		if ctl < 0: return "control never returned"
+		if reach[0] < ctl: return "reach wind-up started %d frames BEFORE control returned" % (ctl - reach[0])
+		var need := int(round(e.reach_delay() * Engine.physics_ticks_per_second))
+		if caught[0] - ctl < need:
+			return "first catch %d frames after control return, want >= %d (hit_frame/fps %.2f s)" % [caught[0] - ctl, need, e.reach_delay()]
 	return ""
 
 
