@@ -33,6 +33,7 @@ func run_all() -> Dictionary:
 		["behaviour_rows_load_their_script", test_rows],
 		["each_stat_clamps_to_its_own_bounds_x10", test_stat_bounds],
 		["item_hooks_clamp_to_stat_bounds_x10", test_hook_bounds],
+		["run_speed_at_least_105_free_100_carrying_every_combo", test_run_speed_floor],
 	]
 	var passed := 0
 	for item in checks:
@@ -464,7 +465,56 @@ func test_hook_bounds() -> Variant:
 	var p := _player()
 	p.inventory.items.append(vase)
 	var spd: float = p.move_speed()
-	if absf(spd - PlayerStats.STAT_BOUNDS[&"move_speed"][0]) > 1e-3: return "carry speed %.3f, want floor %.2f" % [spd, PlayerStats.STAT_BOUNDS[&"move_speed"][0]]
+	if absf(spd - PlayerStats.CARRY_SPEED_FLOOR) > 1e-3: return "carry speed %.3f, want the carry floor %.2f" % [spd, PlayerStats.CARRY_SPEED_FLOOR]
+	return ""
+
+
+## PD: the boy always outruns the walker's chase (95 px/s). Effective run speed (the stat
+## x carry hooks, = PlayerController.move_speed()) is >= the move_speed floor (105) empty-handed and
+## >= CARRY_SPEED_FLOOR (100) while carrying any vase, for every stat state (min / base / max
+## move_speed) x every speed item stack (Soft Shoes, Big Pockets, Thick Sweater, Sneakers) x 0..4
+## Heavy Vases x carry state (nothing / 1 vase / 3 vases).
+func test_run_speed_floor() -> Variant:
+	var chase: float = load("res://scripts/enemies/puppet_hand.gd").new().chase_speed
+	var floor_free: float = PlayerStats.STAT_BOUNDS[&"move_speed"][0]
+	if floor_free < 105.0 - 1e-6: return "move_speed floor %.1f, want >= 105" % floor_free
+	if PlayerStats.CARRY_SPEED_FLOOR < 100.0 - 1e-6: return "carry floor %.1f, want >= 100" % PlayerStats.CARRY_SPEED_FLOOR
+	if floor_free <= chase or PlayerStats.CARRY_SPEED_FLOOR <= chase: return "floors %.0f / %.0f not above walker chase %.0f" % [floor_free, PlayerStats.CARRY_SPEED_FLOOR, chase]
+	var p := _player()
+	var vase := {script_path = "res://scripts/world/vase.gd"}
+	var lo := INF
+	var lo_carry := INF
+	var n := 0
+	for st in [[&"min", 0.001], [&"base", 1.0], [&"max", 1000.0]]:
+		for shoes in 4:
+			for pockets in 4:
+				for sweater in 4:
+					for sneakers in 3:
+						for heavy in 5:
+							PlayerStats.reset()
+							if st[1] != 1.0: PlayerStats.add_modifier(&"move_speed", 0.0, st[1], "probe")
+							for i in shoes: _grant("soft_shoes")
+							for i in pockets: _grant("big_pockets")
+							for i in sweater: _grant("thick_sweater")
+							for i in sneakers: _grant("sneakers")
+							for i in heavy: _grant("heavy_vases")
+							for held in [0, 1, 3]:
+								p.inventory.items.clear()
+								for i in held: p.inventory.items.append(vase)
+								var spd: float = p.move_speed()
+								n += 1
+								var need: float = PlayerStats.CARRY_SPEED_FLOOR if held > 0 else floor_free
+								var tag := "%s move_speed, shoes %d pockets %d sweater %d sneakers %d heavy %d, holding %d" % [st[0], shoes, pockets, sweater, sneakers, heavy, held]
+								if spd < need - 1e-3: return "run speed %.2f < %.0f (%s)" % [spd, need, tag]
+								if spd <= chase: return "run speed %.2f not above walker chase %.0f (%s)" % [spd, chase, tag]
+								if spd > PlayerStats.stat_max(&"move_speed") + 1e-3: return "run speed %.2f above the cap (%s)" % [spd, tag]
+								if held > 0: lo_carry = minf(lo_carry, spd)
+								else: lo = minf(lo, spd)
+	p.inventory.items.clear()
+	# the floors are reached (not just respected): min stat empty-handed is exactly 105, min stat + heavy vase exactly 100
+	if absf(lo - floor_free) > 1e-3: return "lowest empty-handed speed %.2f, want exactly the floor %.0f" % [lo, floor_free]
+	if absf(lo_carry - PlayerStats.CARRY_SPEED_FLOOR) > 1e-3: return "lowest carried speed %.2f, want exactly %.0f" % [lo_carry, PlayerStats.CARRY_SPEED_FLOOR]
+	if n < 8000: return "only %d combinations checked" % n
 	return ""
 
 
@@ -660,8 +710,10 @@ func test_stacked_behavior_bounds() -> Variant:
 		var m := PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase)
 		if absf(m - case[1]) > 1e-4: return "%d Greedy Sacks: vase noise x%.3f, want x%.2f" % [case[0], m, case[1]]
 		_clean()
-	# Heavy Vases carry slow: 1 copy x0.85, 2 copies x0.7225 (inside), 3+ copies floor x0.7.
-	for case in [[1, 0.85], [2, 0.7225], [3, 0.7], [4, 0.7]]:
+	# Heavy Vases carry slow: 1 copy x0.85, 2 copies x0.7225 (inside), 3+ copies: x0.7 would be 98 px/s at
+	# base stats, so the carry floor (100 px/s = x0.7143 of 140) catches it.
+	var floor_mult := PlayerStats.CARRY_SPEED_FLOOR / float(PlayerStats.BASE[&"move_speed"])
+	for case in [[1, 0.85], [2, 0.7225], [3, floor_mult], [4, floor_mult]]:
 		for i in case[0]: _grant("heavy_vases")
 		var m := PlayerStats.carry_speed_mult([vase])
 		if absf(m - case[1]) > 1e-4: return "%d Heavy Vases: carry x%.4f, want x%.2f" % [case[0], m, case[1]]

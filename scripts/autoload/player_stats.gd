@@ -49,7 +49,7 @@ const LAYER_ENEMY := 4
 ## jump_velocity / gravity are pinned to base: no item may change jump height (rails rule).
 const STAT_BOUNDS := {
 	&"max_health": [1.0, 6.0],          # hearts (PD: max 6)
-	&"move_speed": [70.0, 280.0],       # px/s = x0.5 .. x2 (stat x carry hooks)
+	&"move_speed": [105.0, 280.0],      # px/s = x0.75 .. x2 (stat x carry hooks). PD: floor above the walker's chase speed (95)
 	&"jump_velocity": [320.0, 320.0],   # pinned: PRODUCT.md rails must stay unclearable
 	&"gravity": [980.0, 980.0],         # pinned (jump height)
 	&"climb_speed": [36.0, 225.0],      # px/s = x0.4 .. x2.5
@@ -73,6 +73,11 @@ const STAT_BOUNDS := {
 	&"item_noise_mult": [0.5, 2.0],     # on_noise hooks: Greedy Sack vase-break noise (x1.5 per copy)
 	&"item_carry_mult": [0.7, 1.0],     # carry_speed_mult hooks: Heavy Vases carry slow (x0.85 per copy)
 }
+
+## PD: effective run speed while carrying ANY vase never drops below this (px/s), however many
+## Heavy Vases / speed-down items stack. Above the walker's chase_speed (95), below the move_speed
+## floor above, so it is the carry penalty alone that is capped (see _carry_mult).
+const CARRY_SPEED_FLOOR := 100.0
 
 ## `stat`'s effective value `v` (its own units) clamped to STAT_BOUNDS.
 static func clamp_stat(stat: StringName, v: float) -> float:
@@ -400,8 +405,10 @@ func _carry_mult(held: Array, extra: Array) -> float:
 	for it in _live_items(extra):
 		m *= float(it.carry_speed_mult(held))
 	m = clamp_mult(&"item_carry_mult", m)
-	var ms := stat_with(&"move_speed", _mods_of(extra)) / float(BASE[&"move_speed"])
-	return clamp_mult(&"move_speed", ms * m) / ms
+	var ms := stat_with(&"move_speed", _mods_of(extra))   # px/s, already inside STAT_BOUNDS (>= 105)
+	# the carry penalty alone may not take him under CARRY_SPEED_FLOOR (or above the stat cap)
+	var carried := clampf(ms * m, minf(CARRY_SPEED_FLOOR, ms), maxf(stat_max(&"move_speed"), ms))
+	return carried / ms
 
 
 ## Multiplier on a searching enemy's give-up drain.
