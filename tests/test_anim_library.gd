@@ -69,6 +69,13 @@ func test_eye_points() -> String:
 		return "vfx_eye_glint_calm slot missing"
 	var hunt: Dictionary = AnimLibrary.meta("vfx_eye_glint")
 	var calm: Dictionary = AnimLibrary.meta("vfx_eye_glint_calm")
+	for k in ["fps", "loop"]:
+		if hunt.get(k) == null or calm.get(k) != hunt.get(k):
+			return "vfx_eye_glint_calm %s %s differs from vfx_eye_glint %s" % [k, str(calm.get(k)), str(hunt.get(k))]
+	if float(hunt.fps) != 6.0 or float(calm.fps) != 6.0:
+		return "eye glints must run at 6 fps (hunting %s, calm %s)" % [str(hunt.fps), str(calm.fps)]
+	if hunt.loop != true or calm.loop != true:
+		return "eye glints must loop (hunting %s, calm %s)" % [str(hunt.loop), str(calm.loop)]
 	for k in ["frame_size", "frames", "pivot"]:
 		if calm.get(k) != hunt.get(k):
 			return "vfx_eye_glint_calm %s %s differs from vfx_eye_glint %s" % [k, str(calm.get(k)), str(hunt.get(k))]
