@@ -1,0 +1,66 @@
+name: CI (tests + level seed sweep)
+on:
+  pull_request:
+  push:
+    branches: [development]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
+
+      - name: Import project
+        run: godot --headless --path . --import || godot --headless --path . --import
+
+      - name: Test suite
+        run: godot --headless --path . -s res://tests/run_tests.gd
+
+      - name: Smoke boot (300 frames)
+        run: |
+          godot --headless --path . --quit-after 300 -- --seed=1 2>&1 | tee boot.log
+          if grep -E "SCRIPT ERROR|^ERROR" boot.log; then exit 1; fi
+
+      - name: Web export builds
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-release "Web" build/index.html
+
+  # 1000 seeds per stage, one job per stage in parallel. Fails on any invalid / short /
+  # nondeterministic layout, any boot error (every 25th seed boots main.tscn), or (stage 1 job)
+  # the scene catch check.
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+
+      - name: Import project
+        run: godot --headless --path . --import || godot --headless --path . --import
+
+      - name: Level seed sweep (1000 seeds, stage ${{ matrix.stage }})
+        run: godot --headless --path . -s res://tests/seed_sweep.gd -- --seeds 1000 --stages ${{ matrix.stage }} --catch ${{ matrix.stage == 1 && '1' || '0' }}
