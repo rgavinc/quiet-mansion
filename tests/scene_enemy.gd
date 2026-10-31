@@ -64,6 +64,15 @@ func run_async(tree: SceneTree) -> Dictionary:
 		["rattle_shake_no_free_landing_keeps_rattling_never_cancels", _rattle_no_landing],
 		["rattle_landing_measured_from_cluster_edge_walker_inside_footprint", _rattle_cluster_landing],
 		["rattle_cluster_both_sides_blocked_keeps_rattling_never_cancels", _rattle_cluster_blocked],
+		["rattle_step_top_on_the_walkers_side_first", _rattle_step_rule.bind("ours")],
+		["rattle_far_step_top_when_ours_is_blocked", _rattle_step_rule.bind("far")],
+		["rattle_never_lands_on_a_3_tall_neighbour_top_floor_past_it", _rattle_step_rule.bind("tall_neighbour")],
+		["rattle_step_beyond_reach_height_is_not_a_landing_floor_instead", _rattle_step_rule.bind("uncatchable")],
+		["rattle_after_step_landing_the_perch_reach_catches_him", _rattle_step_rule.bind("reach")],
+		["rattle_walker_flush_against_level_wall_lands_on_the_open_side", _rattle_level_wall.bind("flush")],
+		["rattle_walker_pinned_in_a_gap_at_level_wall_lands_on_the_open_side", _rattle_level_wall.bind("gap")],
+		["rattle_boy_resting_on_an_enemy_head_is_nudged_to_the_floor", _rattle_head_nudge],
+		["rattle_vfx_freed_when_the_walker_is_freed_mid_rattle", _rattle_vfx_orphan],
 		["rattle_watchdog_frees_wedged_boy_and_clears_immunity", _rattle_watchdog],
 		["rattle_shake_touchdown_gives_control_and_hit_grace", _rattle_hit_grace],
 		["rattle_claw_visual_offset_toward_piece_sign_correct_collision_fixed", _rattle_claw_offset],
@@ -1571,38 +1580,60 @@ func _cluster_rig(tree: SceneTree, step_far := true, step_near := false) -> Dict
 	return {furn = furn, steps = steps, p = p, e = e}
 
 
+## A solid box (world layer) x0..x1, y0..y1 (absolute).
+func _box_at(x0: float, x1: float, y0: float, y1: float) -> StaticBody2D:
+	var b := StaticBody2D.new()
+	b.collision_layer = PlayerStats.LAYER_WORLD
+	b.collision_mask = 0
+	var cs := CollisionShape2D.new(); var r := RectangleShape2D.new(); r.size = Vector2(x1 - x0, y1 - y0); cs.shape = r
+	b.add_child(cs)
+	_holder.add_child(b); b.global_position = Vector2((x0 + x1) * 0.5, (y0 + y1) * 0.5)
+	return b
+
+
 func _rattle_cluster_landing(tree: SceneTree) -> Variant:
 	var rig: Dictionary = await _cluster_rig(tree, true, false)
 	var e: CharacterBody2D = rig.e
 	var p: CharacterBody2D = rig.p
 	e._rattle_piece = e._find_piece(p)
 	if e._rattle_piece.is_empty(): return "no piece under the boy"
-	# direct: both sides are free once measured from the cluster edge (376 / 280), not the walker
+	# direct: both sides are free floor once measured from the cluster edge (376 / 280), not the walker
 	if not e._landing_free(p, -1.0, true): return "near side not free with the walker inside the footprint"
 	if not e._landing_free(p, 1.0, false): return "far side not free past the 1-tile step"
 	var ce: Dictionary = e._cluster_edge(e._rattle_piece.rect, 1.0)
 	if absf(float(ce.edge) - 376.0) > 0.5: return "cluster edge %.1f, want 376 (piece + step)" % float(ce.edge)
-	# full flow: the walker chases, rattles, and the boy is shaken off onto the floor
+	# PD order: no near step, so the far STEP top (a 1-tile piece the reach catches), not the floor
+	var plan: Dictionary = e._plan_landing(p, -1.0)
+	if plan.is_empty() or not plan.step or plan.dir != 1.0: return "plan %s, want the far step top" % [plan]
+	if absf(float(plan.y) - (PERCH_FLOOR - 16.0)) > 0.5: return "step top y %.1f" % float(plan.y)
+	# full flow: the walker chases, rattles, and the boy is shaken off onto the step top
 	var dirs := []
 	p.shaken_off.connect(func(d: float) -> void: dirs.append(d))
 	e._enter_chase(9999)
-	for f in 60 * 9: await tree.physics_frame
+	for f in 60 * 9:
+		await tree.physics_frame
+		if not dirs.is_empty():
+			break
 	if dirs.is_empty(): return "never shaken off in 9 s (state %d)" % e.state
-	for f in 120: await tree.physics_frame
+	for f in 120:   # until control returns
+		await tree.physics_frame
+		if not p.is_shaken(): break
 	var feet := Enemy.body_feet(p)
-	if absf(feet.y - PERCH_FLOOR) > 2.5: return "boy not on the floor after the shake (y %.1f)" % feet.y
+	if absf(feet.y - (PERCH_FLOOR - 16.0)) > 2.5: return "boy not on the step top (feet y %.1f)" % feet.y
+	if feet.x < 344.0 or feet.x > 376.0: return "boy at x %.1f, want on the step 344..376" % feet.x
 	if p.is_shaken(): return "input lock still on after landing"
 	return ""
 
 
 func _rattle_cluster_blocked(tree: SceneTree) -> Variant:
-	# tall walls just past the step and just past the near edge: no spot on either side
+	# step top roofed over, walls just past the step and just past the near edge: no spot at all
 	var rig: Dictionary = await _cluster_rig(tree, true, false)
 	var e: CharacterBody2D = rig.e
 	var p: CharacterBody2D = rig.p
 	var wall := _low_piece(376.0, 392.0, 200.0)
 	var wall2 := _low_piece(216.0, 264.0, 200.0)   # 16 px off the near edge: no boy-wide gap
-	if wall2 == null: return "rig"
+	var roof := _box_at(344.0, 376.0, PERCH_FLOOR - 40.0, PERCH_FLOOR - 28.0)   # over the step top
+	if wall2 == null or roof == null: return "rig"
 	var log := _rlog(e)
 	var dirs := []
 	p.shaken_off.connect(func(d: float) -> void: dirs.append(d))
@@ -1613,10 +1644,150 @@ func _rattle_cluster_blocked(tree: SceneTree) -> Variant:
 	if not log.ended.is_empty(): return "rattle_ended fired with no free spot"
 	if log.noises < 6: return "only %d noises: it must keep rattling" % log.noises
 	if absf(Enemy.body_feet(p).y - (PERCH_FLOOR - 48.0)) > 2.0: return "boy left the piece top"
-	wall.free()   # a spot opens
+	wall.free()   # floor past the step opens: rule 3
 	for f in 60: await tree.physics_frame
 	NoiseBus.noise.disconnect(log.on_noise)
 	if dirs.is_empty(): return "not shaken once a spot opened"
+	for f in 120: await tree.physics_frame
+	if absf(Enemy.body_feet(p).y - PERCH_FLOOR) > 2.5: return "boy not on the floor after rule 3 (feet y %.1f)" % Enemy.body_feet(p).y
+	return ""
+
+
+## Until the first shake-off, then until control returns. Returns {shaken, feet, frames}.
+func _shake_outcome(tree: SceneTree, e: CharacterBody2D, p: CharacterBody2D, max_s := 9) -> Dictionary:
+	var dirs := []
+	p.shaken_off.connect(func(d: float) -> void: dirs.append(d))
+	e._enter_chase(9999)
+	for f in 60 * max_s:
+		await tree.physics_frame
+		if not dirs.is_empty():
+			break
+	var out := {shaken = not dirs.is_empty(), feet = Vector2.ZERO, dir = 0.0 if dirs.is_empty() else dirs[0]}
+	if dirs.is_empty():
+		return out
+	for f in 150:
+		await tree.physics_frame
+		if not p.is_shaken(): break
+	for f in 3: await tree.physics_frame
+	out.feet = Enemy.body_feet(p)
+	return out
+
+
+func _rattle_step_rule(tree: SceneTree, mode: String) -> Variant:
+	var rig: Dictionary = await _cluster_rig(tree, false, false)   # tall 280..344, walker at 294 inside
+	var e: CharacterBody2D = rig.e
+	var p: CharacterBody2D = rig.p
+	var near := _low_piece(248.0, 280.0, 32.0 if mode == "uncatchable" else 16.0)
+	var far_h := 48.0 if mode == "tall_neighbour" else (32.0 if mode == "uncatchable" else 16.0)
+	var far := _low_piece(344.0, 408.0 if mode == "tall_neighbour" else 376.0, far_h)
+	if mode == "tall_neighbour":
+		near.free(); near = null
+	e.add_collision_exception_with(far)
+	if near != null: e.add_collision_exception_with(near)
+	if mode == "far":
+		_box_at(248.0, 280.0, PERCH_FLOOR - 52.0, PERCH_FLOOR - 40.0)   # roofs the near step top
+	if mode == "uncatchable":
+		e.perch_reach_height = 24.0   # a 2-tile step is out of this walker's reach
+	var log := _rlog(e)
+	var rs := [-1]
+	var reach := [-1]
+	var caught := [-1]
+	var base := [-1]
+	e.reach_started.connect(func() -> void: if reach[0] < 0: reach[0] = Engine.get_physics_frames())
+	e.reach_ended.connect(func(c: bool) -> void: if c and caught[0] < 0: caught[0] = Engine.get_physics_frames())
+	var o: Dictionary = await _shake_outcome(tree, e, p)
+	base[0] = Engine.get_physics_frames()
+	if mode == "reach":
+		for f in 120:
+			await tree.physics_frame
+			if caught[0] >= 0: break
+	NoiseBus.noise.disconnect(log.on_noise)
+	if not o.shaken: return "never shaken off"
+	var feet: Vector2 = o.feet
+	if p.is_shaken(): return "control not returned"
+	match mode:
+		"ours", "reach":
+			if absf(feet.y - (PERCH_FLOOR - 16.0)) > 2.5 or feet.x < 248.0 or feet.x > 280.0:
+				return "%s: want the walker's (near) step top x 248..280 y 384, got %s" % [mode, feet]
+		"far":
+			if absf(feet.y - (PERCH_FLOOR - 16.0)) > 2.5 or feet.x < 344.0 or feet.x > 376.0:
+				return "far: want the far step top x 344..376 y 384, got %s" % [feet]
+		"tall_neighbour":
+			if absf(feet.y - PERCH_FLOOR) > 2.5 or (feet.x > 280.0 and feet.x < 408.0):
+				return "tall neighbour: want the floor past the cluster (x < 280 or >= 408), got %s" % [feet]
+		"uncatchable":
+			if absf(feet.y - PERCH_FLOOR) > 2.5 or (feet.x > 248.0 and feet.x < 376.0):
+				return "step beyond reach: want the floor past the cluster, got %s" % [feet]
+	if mode == "reach":
+		if reach[0] < 0: return "perch reach never started on the step"
+		if caught[0] < 0: return "reach never landed on the step"
+		var t := float(caught[0] - base[0]) / 60.0
+		if t < 0.1 or t > 1.2: return "reach landed %.2f s after touchdown, want ~0.4-1.0" % t
+	return ""
+
+
+## Walker beside a 3-tall piece with a level wall (tall solid) behind / around it: the landing is
+## the open side's floor, never the wall gap, never overlapping the walker or a solid.
+func _rattle_level_wall(tree: SceneTree, mode: String) -> Variant:
+	var furn := _tall(3)   # 280..344
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 48.0))
+	for i in 3: await tree.physics_frame
+	var wall_x := 280.0 if mode == "flush" else 240.0   # wall right edge: flush, or a 40 px gap
+	_box_at(wall_x - 40.0, wall_x, PERCH_FLOOR - 200.0, PERCH_FLOOR)
+	var e := _walker_feet(Vector2(wall_x + 14.0 if mode == "gap" else PERCH_X - 18.0, PERCH_FLOOR), 0.0)
+	e.add_collision_exception_with(furn)
+	e.sight_override = 1
+	var o: Dictionary = await _shake_outcome(tree, e, p)
+	if not o.shaken: return "never shaken off (%s)" % mode
+	var feet: Vector2 = o.feet
+	if p.is_shaken() or absf(feet.y - PERCH_FLOOR) > 2.5: return "%s: not grounded on the floor, feet %s" % [mode, feet]
+	if feet.x < 344.0: return "%s: landed on the wall side (x %.1f), want the open right side" % [mode, feet.x]
+	if p.test_move(p.global_transform, Vector2.ZERO): return "%s: landed overlapping a solid" % mode
+	if e._boy_on_enemy_head(p): return "%s: landed on an enemy body" % mode
+	return ""
+
+
+## Post-shake watchdog: a boy found resting on an enemy's head is moved to free floor, control back.
+func _rattle_head_nudge(tree: SceneTree) -> Variant:
+	var e := _walker_feet(Vector2(PERCH_X, PERCH_FLOOR), 0.0)
+	e.sight_override = 0
+	var p := _perch_boy(Vector2(PERCH_X, PERCH_FLOOR - 28.0))   # feet on the walker's head
+	_slab(0, 900, int(PERCH_FLOOR))
+	p.set_physics_process(false)   # frozen there, as a soft-locked boy would be
+	e._post_shake_t = 4.0
+	for f in 3: await tree.physics_frame
+	if not e._boy_on_enemy_head(p): return "setup: the boy is not resting on the walker (feet %s)" % [Enemy.body_feet(p)]
+	for f in 60: await tree.physics_frame
+	var feet := Enemy.body_feet(p)
+	if absf(feet.y - PERCH_FLOOR) > 3.0: return "still off the floor after the nudge window (feet %s)" % [feet]
+	if e._boy_on_enemy_head(p): return "still on the head"
+	if absf(feet.x - e.global_position.x) < 14.0: return "overlapping the walker (boy x %.1f, walker %.1f)" % [feet.x, e.global_position.x]
+	if p.test_move(p.global_transform, Vector2.ZERO): return "nudged into a solid"
+	return ""
+
+
+## The rattle vfx is a top_level sibling: freeing the walker mid-rattle must free it too.
+func _rattle_vfx_orphan(tree: SceneTree) -> Variant:
+	var rig: Dictionary = await _rattle_rig(tree, 3)
+	var e: CharacterBody2D = rig.e
+	var parent := e.get_parent()
+	if AnimLibrary.has_slot("vfx_rattle"):
+		var r: Array = await _frames_to_rattle(tree, e, rig.p)
+		if r[1] < 0: return "never rattled"
+		await tree.physics_frame
+		if parent.get_node_or_null("VfxRattle") == null: return "no vfx while rattling"
+		e.free()   # mid-rattle (not through the state machine)
+		await tree.physics_frame
+		await tree.physics_frame
+		if parent.get_node_or_null("VfxRattle") != null: return "VfxRattle orphaned after the walker was freed mid-rattle"
+		return ""
+	# art slot not on this branch: same ownership contract with a stand-in node
+	var v := AnimatedSprite2D.new(); v.name = "VfxRattle"; v.top_level = true
+	parent.add_child(v)
+	e._rattle_vfx = v
+	e.queue_free()
+	for f in 3: await tree.physics_frame
+	if is_instance_valid(v) and not v.is_queued_for_deletion(): return "stand-in VfxRattle orphaned after the walker was freed"
 	return ""
 
 
