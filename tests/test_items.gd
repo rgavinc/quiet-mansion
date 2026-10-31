@@ -410,6 +410,70 @@ func test_desc_no_handtyped() -> String:
 	return ""
 
 
+## PRODUCT.md (94b9cfa): at a cap the text drops the zero clause (or says "(at limit)"); it never
+## shows "0%", "-0", "+0 s" ... QA: ghost_slippers "-0 max heart" at 1 max health, "0% closer",
+## "0% sooner", "0% slower", "0% less far". 1-8 copies of every item, then adversarial combos.
+func _zero_text_problem(id: String, text: String, ctx: String) -> String:
+	var num := RegEx.create_from_string("(?<![\\w.])[-+]?\\d+(?:\\.\\d+)?%?")
+	var params := []
+	for v in ItemDb.row(id).get("params", {}).values():
+		params.append(ItemDb.fmt_num(float(v)))
+	for m in num.search_all(text):
+		var g := m.get_string()
+		var bare := g.lstrip("+-").trim_suffix("%")
+		if is_zero_approx(float(bare)) and not params.has(bare):
+			return "%s %s: zero clause '%s' in '%s'" % [id, ctx, g, text]
+	if text.contains("\u0001") or text.contains("{"): return "%s %s: marker left in '%s'" % [id, ctx, text]
+	if text.contains("  ") or text.contains(", ,") or text.contains(". .") or text.contains(" ,") or text.contains(" ."):
+		return "%s %s: dangling punctuation in '%s'" % [id, ctx, text]
+	if text == "" or not text.ends_with(".") and not text.ends_with(")"): return "%s %s: bad ending '%s'" % [id, ctx, text]
+	if text.substr(0, 1) != text.substr(0, 1).to_upper(): return "%s %s: lower-case start '%s'" % [id, ctx, text]
+	return ""
+
+
+func test_desc_no_zero_clause() -> String:
+	# 1-8 copies of each item alone (fresh run).
+	for r in ItemDb.ITEMS:
+		var id := str(r.id)
+		PlayerStats.reset()
+		for n in range(0, 9):
+			var bad := _zero_text_problem(id, ItemDb.make(id).description, "alone, %d owned" % n)
+			if bad != "": return bad
+			PlayerStats.grant_item(ItemDb.make(id))
+	# Adversarial combos: every item stacked in forward / reverse / seeded-random order, text of
+	# every item re-read after each grant (other items' caps and floors reach into its numbers).
+	var ids: Array = []
+	for r in ItemDb.ITEMS:
+		ids.append(str(r.id))
+	var orders: Array = [ids.duplicate(), ids.duplicate()]
+	orders[1].reverse()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 41
+	for k in 4:
+		var o := ids.duplicate()
+		for i in range(o.size() - 1, 0, -1):
+			var j := rng.randi_range(0, i)
+			var tmp = o[i]; o[i] = o[j]; o[j] = tmp
+		orders.append(o)
+	for order in orders:
+		PlayerStats.reset()
+		for round in 4:
+			for gid in order:
+				PlayerStats.grant_item(ItemDb.make(gid))
+				for id in ids:
+					var bad := _zero_text_problem(id, ItemDb.make(id).description, "after %s round %d" % [gid, round])
+					if bad != "": PlayerStats.reset(); return bad
+	PlayerStats.reset()
+	# The QA cases by name.
+	for _i in 2:
+		PlayerStats.grant_item(ItemDb.make("ghost_slippers"))   # 3 -> 1 max health
+	var gs := ItemDb.make("ghost_slippers").description
+	if PlayerStats.get_stat(&"max_health") != 1.0: return "ghost_slippers setup: max_health %s" % PlayerStats.get_stat(&"max_health")
+	if gs.contains("max heart"): return "ghost_slippers at 1 max health still shows a heart clause: " + gs
+	PlayerStats.reset()
+	return ""
+
+
 const _VASE := {slot = "vase_idle", script_path = "res://scripts/world/vase.gd", throwable = true}
 
 ## Independent measurement of a desc token key on the live PlayerStats (public API only).
@@ -473,6 +537,8 @@ func test_desc_scan() -> String:
 					continue
 				var after := _measure(key if kind != "uses" else "uses", id)
 				var shown := _expect(kind, before[i], after)
+				if shown == "0%" or shown == "0":
+					continue   # PRODUCT.md: a zero clause is dropped from the text, never shown
 				want.append(shown)
 				var good := int(ItemDb.GOOD.get("uses" if kind == "uses" else key, 0))
 				if shown != "0%" and shown != "0" and good != 0 and signf(after - before[i]) == signf(good):
