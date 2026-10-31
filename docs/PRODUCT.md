@@ -169,6 +169,7 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Max useful copies:** each item gets a `max_copies` field. Shops and chests stop offering an item once another copy would add nothing. Music Box `max_copies` is 3.
 - **Music Box charges don't use hand slots:** lures are held in their own pocket, shown as pips, so owning boxes never blocks picking up vases.
 - **Perching has risk:** a walker under a boy on 1- or 2-tile furniture reaches up and catches him after a telegraphed ~0.6s reach (so a quick hop-off escapes). 3-tile furniture is out of reach, but climbing onto any furniture makes a creak noise.
+- **No safe camping:** if a walker can't reach the boy for 3s it rattles the furniture: each rattle is a loud noise that draws other enemies, and after 3 more seconds the boy is shaken off toward the walker. 3-tile furniture buys ~6s, not a hiding spot.
 - **Rails can't be cleared:** at capped stats, no spot the boy can stand on (floor or furniture) may let any jump clear a rail. Rail height or furniture placement must guarantee this, and CI checks running jumps from furniture.
 - **Walker routing:** walkers pick the shortest route by distance, not by stair count.
 - **Gold floor:** every stage's worst-roll total gold (floor + vases + chests) is at least that stage's cheapest shop price, checked in the seed sweep. Stage 1 floor gold minimum rises from 4 to 6.
