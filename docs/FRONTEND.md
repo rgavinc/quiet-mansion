@@ -73,6 +73,8 @@ Owned items, Minimap, Lure hint and the shop connect their signals to methods (n
 World overlays draw in a follow-viewport `CanvasLayer`, so the level's
 `CanvasModulate` darkness never hides them.
 
+`StageLook.ambient` (float, 0..1, 1 = full light) is the current stage's ambient brightness (stages 1-5: 0.435, 0.343, 0.268, 0.213, 0.057, strictly decreasing, so FE's `< 0.2` dark threshold is stage 5 only (stage 4 stays readable without glints); `StageLook.ambient_of(stage)` for any stage; level meta `ambient`). Read it to decide when to draw eye glints. The stage rim light (`StageRim`, layer 4 under the HUD, see docs/LEVELGEN.md) is level geometry only and never touches enemies.
+
 ## Using it in a level
 The real game `scenes/main.tscn` already does this: `HUD` (hud.tscn), `GameOver` and `Shop` at the root, `World/WorldOverlay`, `AIWatermark` top-right. The old text HUD is gone; `main.gd` keeps one themed hint/status line.
 
