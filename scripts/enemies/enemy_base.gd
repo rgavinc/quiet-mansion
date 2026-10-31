@@ -126,6 +126,8 @@ var _reported_chase: bool = false
 var _reported_startle: float = -1.0
 var _home_set: bool = false
 var _spr: AnimatedSprite2D
+var _spr_slot := ""           # slot whose manifest offset the sprite uses
+var _spr_feet := Vector2.ZERO   # origin -> feet the sprite offset was last built with
 var _stun_calm: bool = false        # Flash Bulb stun: back to CALM afterwards, never chase
 ## True when the last _move_to stopped at a floor edge (ledge backstop). Read-only for tests.
 var ledge_stopped: bool = false
@@ -220,7 +222,18 @@ func _play(slot: String) -> void:
 	if slot == anim_startle and _spr.animation == slot:
 		return   # STARTLED -> STUNNED (or re-startle): keep playing / holding, never restart
 	_spr.play(slot)
-	_spr.offset = AnimLibrary.offset_for(slot)
+	_spr_slot = slot
+	_apply_spr_offset()
+
+
+## Art pivot = feet (manifest), so the sprite is anchored to the REAL feet: the pivot offset
+## plus origin -> feet from the collision shape (same math as _feet()). A centred r=14 circle
+## (old map, tests, #13's generator) has its feet 14px below the origin, a feet-origin shape 0.
+func _apply_spr_offset() -> void:
+	if _spr == null or _spr_slot.is_empty():
+		return
+	_spr_feet = _feet_offset()
+	_spr.offset = AnimLibrary.offset_for(_spr_slot) + _spr_feet
 
 
 # --- senses -------------------------------------------------------------------
@@ -553,6 +566,8 @@ func _physics_process(delta: float) -> void:
 
 ## All per-frame logic (no move_and_slide), so tests can drive it.
 func tick(delta: float) -> void:
+	if _spr != null and _feet_offset() != _spr_feet:
+		_apply_spr_offset()   # collider swapped/moved after _ready: keep the art on the feet
 	if not _home_set:
 		_home_set = true
 		home = global_position

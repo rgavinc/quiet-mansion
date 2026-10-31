@@ -170,6 +170,7 @@ Lead's stair-opening rail (#13) is the real fix; this is a backup that holds any
 - `_foot_half_width()` is the shape's half width (circle/capsule radius, rect half x), scaled.
 - Before the fix, an offset shape put the ray start 10 px inside the slab, so `_ledge_ahead()` was true every frame and every generated walker froze; stair feet checks were 14 px low.
 
+<<<<<<< HEAD
 ### Perch reach (`State.REACH`)
 PRODUCT "Perching has risk": a walker under furniture the boy stands on can reach up and catch him. 1-2 tile furniture is catchable, 3 tiles (and taller) is safe.
 - **Trigger.** A chasing walker (`CHASE`) that is within `perch_reach_x` (30 px) of the boy's feet x, with the boy perched (feet at least `PERCH_MIN_PX` = 8 px above the walker's feet) and `perch_height <= reach_height()`, enters `REACH` (`reach_started` signal, `anim_reach` plays, `puppet_reach_up` for the hand).
@@ -180,6 +181,10 @@ PRODUCT "Perching has risk": a walker under furniture the boy stands on can reac
 - **Creak.** `PlayerController` checks for a landing after `move_and_slide`; landing on furniture (`furniture_under()`, a downward ray, `FURNITURE_PROBE_PX` = 80) calls `creak(height)`: a noise at the feet with radius `furniture_creak_radius` (half of `NoiseBus.DEFAULT_RADIUS`) times the `noise_mult` stat, loudness `furniture_creak_loudness` (0.6), then the `creaked(furniture_px)` signal. It applies to any furniture height.
 - **`vfx_creak` hook.** `creak()` spawns a non-looping `AnimatedSprite2D` ("VfxCreak", the manifest `vfx_creak` slot, placed with `offset_for`) at the feet, freed on `animation_finished`. With no `vfx_creak` slot in the manifest nothing spawns. Likewise `_play` only asks `AnimLibrary` for `anim_reach` when `has_slot` is true, so there is no "unknown slot" warning before the art (#40) lands.
 - Tests (`tests/scene_enemy.gd`, real physics): `perch_reach_delay_fallback_and_overrides`, `perch_{1,2}_tile_caught_after_reach`, `perch_2_tile_caught_after_reach_centred_boy`, `perch_{1,2}_tile_hop_off_at_0_5s_escapes`, `perch_hop_in_place_does_not_reset_reach`, `perch_3_tile_out_of_reach`, `perch_creak_on_furniture_scaled_by_noise_mult`, `perch_creak_wakes_calm_walker_below`, `perch_creak_vfx_hook_on_landing`.
+=======
+### Sprite anchored to the real feet
+The manifest pivot is the art's feet, so `_play()` sets `Anim.offset = AnimLibrary.offset_for(slot) + _feet_offset()` (origin -> feet from the collider, same math as `_feet()`), for every slot, walkers and floaters. A centred r=14 circle (tests, the old map, #13's generator) puts the feet 14px below the origin; without the term the art floated 14px. `tick()` re-applies the offset if the collider changes after `_ready`. Pivot row 63 sinks the bottom art row 1px into the floor. Tests: `sprite_feet_*`, `sprite_art_bottom_pixel_on_floor_*` in `tests/scene_enemy.gd` (pivot lands on the collider bottom for centred and (0,-14) shapes; the lowest opaque PNG row of every slot sits within 1px of the slab top).
+>>>>>>> origin/be/sprite-feet
 
 ### EnemyDef plug-in
 Set `def` (any `Resource`) before the enemy enters the tree. `apply_def()` copies every field in `DEF_FIELDS` the resource actually has, duck-typed, so an `EnemyDef` class (not written yet) just has to use these names. `movement = &"float"` (stage 4+) makes the enemy ignore gravity and drift straight through slabs and walls; its chase art is `<anim_chase>_float` (`puppet_chase_float`) when the manifest has that slot, else `anim_chase`.
