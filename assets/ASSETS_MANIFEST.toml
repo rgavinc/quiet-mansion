@@ -262,6 +262,17 @@ pivot = [3, 3]
 notes = "7x7 single-eye glow overlay for puppets that are outside the flashlight light (draw it unlit, on top of the puppet, once per eye point): centre pivot [3, 3] = the eye centre, so it works for any eye spacing and for both eyes (draw one instance per entry of the puppet slot's eye_points). Warm sickly amber core (3x3, hot amber centre, red-orange plus, deep-red corners) with a soft 1-2 px red halo, readable on near-black; the colours do not depend on light level, so draw it with normal blending and no light modulate (or additive for a stronger glow). Slow flicker/blink loop, 6f @6fps = 1.0s: 0 steady, 1 flicker up (halo breathes out), 2 dim (about 60%), 3 steady, 4 near-closed blink (thin 3x1 slit), 5 opening (half-lidded). Offset each puppet's start frame (e.g. by its index) so a crowd does not blink in unison. Every pixel is inside the 7x7 frame; the faintest halo pixels touch the frame edge on the axes. For a flipped puppet use the mirrored point x' = frame_w - 1 - x (the glint itself is symmetric, never flip it)"
 
 [[asset]]
+path = "assets/art/props/vfx_eye_glint_calm.png"
+slot = "vfx_eye_glint_calm"
+status = "ai"
+frame_size = [7, 7]
+frames = 6
+fps = 6
+loop = true
+pivot = [3, 3]
+notes = "7x7 single-eye glow for CALM puppets (calm / idle / patrol states) outside the flashlight light: the quiet counterpart of vfx_eye_glint (hunting). Same 7x7 frames, 6f @6fps loop, centre pivot [3, 3] and the same rhythm (0 steady, 1 gentle flicker up, 2 dim, 3 steady, 4 near-closed slit, 5 opening), so FE can swap one for the other by enemy state with no other change; draw one instance per eye_points entry, unlit, on top of the puppet, never flipped. Soft pale amber core (255, 228, 164) with ochre arms and a faint ochre edge (166, 118, 52), NO red anywhere and no halo ring; lower intensity and a smaller footprint (5x5 plus the faint edge) than the hunting glint, a gentler flicker, so a calm puppet reads as a dim warm lamp and a hunting one as a hot red-amber ember. FE picks the glint by enemy STATE: calm/idle/patrol -> vfx_eye_glint_calm; startle/chase/reach/rattle -> vfx_eye_glint. The eye positions (eye_points) always come from the puppet's current animation slot"
+
+[[asset]]
 path = "assets/art/props/furniture_h1_a.png"
 slot = "furniture_h1_a"
 status = "ai"
