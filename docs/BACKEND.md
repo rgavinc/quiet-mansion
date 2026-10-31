@@ -40,23 +40,35 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
 - `Shop.roll_stock(stage, seed) -> Array[Item]` returns 4 different items, weighted by rarity and gated by stage, each priced `ItemDb.shop_price(id, stage)` (see Gold economy). The same (stage, seed) always gives the same stock. The shop shows all 4 offers (`STOCK_SIZE`; FE #34).
 - `Shop.buy(item) -> bool` spends through `try_spend`. It then marks the item `sold` and calls `PlayerStats.grant_item` (apply + add to `owned_items` + `items_changed`). It returns false and changes nothing if gold is short or the item is already sold or applied.
 - `PlayerStats.owned_items`: items stay owned across Continue (PlayerStats is an autoload). `reset()` clears them along with every modifier. Signal: `items_changed(items)`. Helpers: `owns(id)` and `has_minimap()`.
+- Honest item text (PRODUCT.md): every number in a `desc` is a token (`{mul:}`, `{inv:}`, `{add:}`, `{sec:}`, `{param:}` ...) filled by `ItemDb.describe(row, stats)` from the EFFECTIVE, CAPPED value read through `PlayerStats.effect(key, extra_copies)` / `stat_with`, including what the NEXT copy would add (so a copy that is already capped says so). `test_desc_scan` builds 1–6 copies of every item and checks each text against the measured numbers; hand-typed numbers are rejected.
+- `max_copies` (`Item.max_copies`, `ItemDb.max_copies(id)`, also in `to_dict()`): the row's value if set (Music Box 3, Rabbit's Foot 2, Flash Bulb 2, Minimap 1), else derived: the last copy that still adds something before its upside hits `STAT_BOUNDS`. `ItemDb.would_add(id, stats)` is false once `copies(id) >= max_copies` or another copy changes nothing. `Shop.roll_stock(stage, seed, stats)` and `Chest.open` (`ItemDb.roll_chest(stage, seed, stats)`) never offer such an item, so the same (stage, seed, owned items) gives the same stock. Short of items the shop tops up from the rest of the catalogue; with nothing useful left it offers ONE free `gold_pouch` (`ItemDb.fallback_gold(stage)` gold via `add_gold`), and a chest gives that gold instead.
+- Music Box lure pocket (PRODUCT.md: lures never use hand slots): each copy refills one lure per stage in `begin_stage` (`Item.charges`, per copy, #38). Hands (`Inventory`) never hold a lure, so owning boxes never blocks a vase pickup. FE API on `PlayerStats`: `lure_charges()`, `lure_max()` (sums over copies), signal `lures_changed(charges, max)` (fires on throw, refill, buy, reset), `tap_throws_lure()` (true when a tap with nothing ringed would throw a lure now: lures left, and the tap is not a knock because hands are full or no prop is in reach; false with no live player). `PlayerController._tap` throws `PlayerStats.next_lure()` in the facing direction; `dispatch_throw` spends exactly that copy's charge. `lure_hint.gd` listens to `lures_changed`.
 - Max health: a higher max heals by the same amount. A lower max only clamps current health, so it never costs you an extra heart.
-- Stat caps (PRODUCT.md "Stat caps"): `PlayerStats.STAT_BOUNDS` is the one table, a `[min, max]` per multiplier stat on its effective value (all items stacked) relative to base; `PlayerStats.clamp_mult(stat, m)` applies it. `get_stat` clamps the BASE stats; the hook dispatchers clamp the rest, and for noise and move speed the bound is on stat × hook (Greedy Sack's vase noise, Heavy Vases' carry slow).
+- Stat bounds (PRODUCT.md "Stat caps"): `PlayerStats.STAT_BOUNDS` is the one table, a `[min, max]` in each stat's OWN units for EVERY `BASE` stat (a test enforces a row per stat). `get_stat` = `stat_with(stat, [])` clamps through `clamp_stat`; `clamp_mult(stat, m)` does the same on a multiplier vs base. `MIN` is gone. Hook-only keys (no BASE row) are multipliers on 1 and clamp in their dispatcher; noise and move speed also clamp stat × hook.
 
-  | Stat | min | max | Effective range |
+  | Stat | min | max | Note |
   |---|---|---|---|
-  | `noise_mult` (+ `on_noise` hooks) | ×0.3 | ×3.0 | PD's numbers |
-  | `light_range` | ×0.5 | ×2.0 | 130–520 px |
-  | `light_detect_mult` | ×0.3 | ×3.0 | startle takes 3.3× to 0.33× as long |
-  | `move_speed` (+ `carry_speed_mult` hooks) | ×0.5 | ×2.0 | 70–280 px/s |
-  | `climb_speed` | ×0.4 | ×2.5 | 36–225 px/s |
-  | `pickup_time` | ×0.3 | ×3.0 | 0.3–3 s (× the target's `pickup_time_mult`) |
-  | `pickup_range` | ×0.5 | ×2.0 | 20–80 px |
+  | `max_health` | 1 | **6** hearts | PD |
+  | `move_speed` (+ carry hooks) | 70 | 280 px/s | ×0.5–×2 |
+  | `jump_velocity`, `gravity` | pinned | pinned | no item changes jump height (rails rule) |
+  | `climb_speed` | 36 | 225 px/s | |
+  | `pickup_time` | 0.3 | 3 s | |
+  | `pickup_range` | 20 | 80 px | |
+  | `tap_threshold` | 0.1 | 0.4 s | no item changes it |
+  | `throw_speed` | 260 | 1040 px/s | no item changes it |
+  | `light_range` | 130 | 520 px | |
+  | `light_angle_deg` | 10 | **70**° | PD |
+  | `light_startle_time` | **0.4** | **1.5** s | PD |
+  | `light_detect_mult` | ×0.3 | ×3.0 | |
+  | `noise_mult` (+ `on_noise` hooks) | ×0.3 | ×3.0 | PD |
+  | `invuln_time` | **0.5** | **2.0** s | PD |
+  | `inventory_slots` | 1 | **5** | PD |
   | `gold_find_mult` | ×0.25 | ×3.0 | |
-  | `give_up_speed` (`memory_drain_mult` hooks, no BASE row) | ×0.3 | ×3.0 | searching enemies' memory drain |
-  | `stun_mult` (Heavy Vases, ×2 per copy) | ×0.5 | ×2.5 | PD: ×2.5 total whatever the copies (1 copy ×2, 2+ copies ×2.5) |
-  | `item_noise_mult` (`on_noise` hooks: Greedy Sack vase break, ×1.5 per copy) | ×0.5 | ×2.0 | then `noise_mult` above on stat × hooks |
-  | `item_carry_mult` (`carry_speed_mult` hooks: Heavy Vases, ×0.85 per copy) | ×0.7 | ×1.0 | then `move_speed` above on stat × hooks |
+  | `minimap` | 0 | 1 | flag |
+  | `give_up_speed` (`memory_drain_mult`, hook only) | ×0.3 | ×3.0 | Cracked Mirror ×1.4 per copy |
+  | `stun_mult` (Heavy Vases ×2 per copy, hook only) | ×0.5 | ×2.5 | 1 copy ×2, 2+ copies ×2.5 |
+  | `item_noise_mult` (Greedy Sack ×1.5 per copy) | ×0.5 | ×2.0 | then `noise_mult` on stat × hooks |
+  | `item_carry_mult` (Heavy Vases ×0.85 per copy) | ×0.7 | ×1.0 | then `move_speed` on stat × hooks |
 
   Stacked behaviour effects (PD): every behaviour effect that multiplies across copies has a row above, bounding the product of all copies. `stun_mult` is clamped in `PlayerStats.dispatch_throw` after the hooks write it and again in `Enemy.on_hit_by_throw` where the stun is computed. `item_noise_mult` / `item_carry_mult` are clamped in `noise_hook_mult` / `carry_speed_mult`, and Cracked Mirror's ×1.4 off-screen drain uses `give_up_speed`. Effects that don't multiply: Greedy Sack gold (it only fills empty vases), Cracked Mirror arrow distance (min), and Flash Bulb / Rabbit's Foot / Music Box (one copy per event).
 
@@ -87,7 +99,7 @@ Charges: `Item.charges` / `max_charges` (0/0 for plain items; also in `to_dict()
 | Item | Rarity | Base price | Upside | Cost | Tunables (`params`) |
 |---|---|---|---|---|---|
 | Rabbit's Foot `rabbits_foot` | rare | 14 | first lethal hit each stage leaves 1 heart (1 charge) | -1 max heart | — |
-| Music Box `music_box` | uncommon | 9 | each stage starts with a lure in hand (charge = lure in hand); thrown (at the ringed enemy, or 320 px in the FACING direction, `Vector2(facing, 0)`, with none ringed — never the last mouse aim) it lands (`MusicBoxLure`) and pulses a noise every 0.5 s for 4 s; hearers SEARCH toward the lure, not the boy (`Enemy.hear_lure`) | takes a hand slot until thrown; doesn't kill/stun | lure_time 4, lure_interval 0.5, lure_radius 900, lure_loudness 1.2, world_slot |
+| Music Box `music_box` | uncommon | 9 | each stage refills one lure per copy in the lure pocket (charge = this copy's lure; never a hand slot); a tap throws one (at the ringed enemy, or 320 px in the FACING direction, `Vector2(facing, 0)`, with none ringed — never the last mouse aim) it lands (`MusicBoxLure`) and pulses a noise every 0.5 s for 4 s; hearers SEARCH toward the lure, not the boy (`Enemy.hear_lure`) | one lure per copy per stage (max_copies 3); doesn't kill/stun | lure_time 4, lure_interval 0.5, lure_radius 900, lure_loudness 1.2, world_slot |
 | Heavy Vases `heavy_vases` | common | 6 | vase throw/knock stun ×2 (`stun_mult` in the dict) | move ×0.85 while any vase is held | stun_mult 2, carry_speed_mult 0.85 |
 | Flash Bulb `flash_bulb` | rare | 14 | once per stage a completed startle stuns 2.5 s, then CALM (no chase, no FE chase report) | light_range ×0.9 | stun_time 2.5 |
 | Cracked Mirror `cracked_mirror` | uncommon | 9 | off-screen SEARCH memory drains ×1.4 | arrows hidden beyond 1280 px | offscreen_drain_mult 1.4, arrow_reveal_distance 1280 |

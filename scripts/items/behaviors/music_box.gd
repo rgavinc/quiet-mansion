@@ -1,8 +1,10 @@
 extends Item
-## Music Box: each stage start puts one Music Box lure in the boy's hands (charges = lures
-## in hand, 0 or 1; each copy gives its own lure). Throw it like any held prop (at the ringed enemy, or toward the aim
-## with no enemy ringed); where it lands it plays a loud tune (MusicBoxLure) that pulls
-## enemies in range to it. Its cost is the hand slot it takes until thrown.
+## Music Box: each copy gives one lure per stage into the boy's LURE POCKET (PRODUCT.md:
+## never a hand / inventory slot, never blocks a vase pickup). charges = this copy's lure
+## (0 or 1), refilled by PlayerStats.begin_stage; PlayerStats.lure_charges()/lure_max() sum
+## the copies. A tap with nothing ringed throws one the way the boy faces
+## (PlayerController._tap -> PlayerStats.next_lure()); where it lands it plays a loud tune
+## (MusicBoxLure) that pulls enemies in range to it.
 
 const LURE_ID := "music_box_lure"
 
@@ -11,7 +13,7 @@ func has_behavior() -> bool:
 	return true
 
 
-## The held-prop dict for one lure (what Inventory holds and thrown_object carries).
+## The thrown-prop dict for this copy's lure (what thrown_object carries; never in Inventory).
 func lure_dict() -> Dictionary:
 	return {
 		id = "%s_%d" % [LURE_ID, get_instance_id()],
@@ -28,13 +30,6 @@ func lure_dict() -> Dictionary:
 	}
 
 
-func on_stage_start(player: Node) -> void:
-	var inv: Variant = player.get("inventory") if player != null and "inventory" in player else null
-	charges = 0
-	if inv is Object and inv.has_method(&"add") and inv.add(lure_dict()):
-		charges = 1
-
-
 ## PlayerStats.dispatch_throw calls this on EVERY owned item, so with 2+ Music Boxes each
 ## copy must only spend for its OWN lure (the id in lure_dict() is per instance): one throw
 ## spends exactly one copy, the one whose lure flew.
@@ -43,6 +38,6 @@ func on_throw(item: Dictionary, _target: Variant) -> void:
 		use_charge()
 
 
-## True if `item` is the lure this copy put in the boy's hands.
+## True if `item` is this copy's lure.
 func owns_lure(item: Dictionary) -> bool:
 	return str(item.get("id", "")) == str(lure_dict().id)

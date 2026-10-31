@@ -9,6 +9,8 @@ signal stat_changed(stat: StringName, value: float)
 signal died
 ## Owned (bought / chest) items changed. `items` is PlayerStats.owned_items.
 signal items_changed(items: Array)
+## Music Box lure pocket changed (a throw, a refill, a box bought). FE: pips from these.
+signal lures_changed(charges: int, max: int)
 
 ## Base values. Tune here; every class reads through get_stat().
 const BASE := {
@@ -38,30 +40,32 @@ const LAYER_WORLD := 1
 const LAYER_PLAYER := 2
 const LAYER_ENEMY := 4
 
-## Floors so no item combo can produce nonsense (negative time, 0 max hp, ...).
-## Additive stats keep absolute floors here; multiplier stats are capped by STAT_BOUNDS.
-const MIN := {
-	&"max_health": 1.0,
-	&"pickup_time": 0.1,
-	&"tap_threshold": 0.05,
-	&"light_startle_time": 0.2,
-	&"inventory_slots": 1.0,
-	&"light_angle_deg": 10.0,
-}
-
-## Stat caps (PRODUCT.md "Stat caps"): every MULTIPLIER stat's effective value, all items
-## stacked, stays within [min, max] x its base. The ONE table for them. Keys in BASE clamp
-## in get_stat(); the hook-only multiplier (give_up_speed, no BASE row) clamps in its
-## dispatcher, and noise / move speed clamp the stat x hook product (Greedy Sack, Heavy Vases).
+## Stat bounds (PRODUCT.md "Stat caps"): EVERY stat's effective value, all items stacked,
+## stays within [min, max], in the stat's OWN units (hearts, px/s, s, slots, degrees; the
+## x1-base multipliers read as multipliers). The ONE table: get_stat() clamps every BASE stat
+## here, so each BASE key has a row (a test enforces it). Hook-only keys (no BASE row:
+## give_up_speed, stun_mult, item_noise_mult, item_carry_mult) are multipliers on 1 and
+## clamp in their dispatcher; noise / move speed also clamp the stat x hook product.
+## jump_velocity / gravity are pinned to base: no item may change jump height (rails rule).
 const STAT_BOUNDS := {
-	&"noise_mult": [0.3, 3.0],          # PD: noise x0.3 .. x3 (stat x item noise hooks)
-	&"light_range": [0.5, 2.0],         # 130 .. 520 px
+	&"max_health": [1.0, 6.0],          # hearts (PD: max 6)
+	&"move_speed": [70.0, 280.0],       # px/s = x0.5 .. x2 (stat x carry hooks)
+	&"jump_velocity": [320.0, 320.0],   # pinned: PRODUCT.md rails must stay unclearable
+	&"gravity": [980.0, 980.0],         # pinned (jump height)
+	&"climb_speed": [36.0, 225.0],      # px/s = x0.4 .. x2.5
+	&"pickup_time": [0.3, 3.0],         # s
+	&"pickup_range": [20.0, 80.0],      # px = x0.5 .. x2
+	&"tap_threshold": [0.1, 0.4],       # s (no item changes it)
+	&"throw_speed": [260.0, 1040.0],    # px/s (no item changes it)
+	&"light_range": [130.0, 520.0],     # px = x0.5 .. x2
+	&"light_angle_deg": [10.0, 70.0],   # degrees (PD: max 70)
+	&"light_startle_time": [0.4, 1.5],  # s (PD)
 	&"light_detect_mult": [0.3, 3.0],   # startle takes 3.3x .. 0.33x as long
-	&"move_speed": [0.5, 2.0],          # 70 .. 280 px/s (stat x carry hooks)
-	&"climb_speed": [0.4, 2.5],         # 36 .. 225 px/s
-	&"pickup_time": [0.3, 3.0],         # 0.3 .. 3 s
-	&"pickup_range": [0.5, 2.0],        # 20 .. 80 px
+	&"noise_mult": [0.3, 3.0],          # PD: noise x0.3 .. x3 (stat x item noise hooks)
+	&"invuln_time": [0.5, 2.0],         # s (PD)
+	&"inventory_slots": [1.0, 5.0],     # slots (PD: max 5)
 	&"gold_find_mult": [0.25, 3.0],
+	&"minimap": [0.0, 1.0],             # flag
 	&"give_up_speed": [0.3, 3.0],       # hook only: searching enemy memory drain (Cracked Mirror x1.4 per copy)
 	# Behaviour effects that multiply across stacked copies (PD): bound on the product of all
 	# copies, applied where the product is formed; the stat bounds above still apply on top.
@@ -70,10 +74,19 @@ const STAT_BOUNDS := {
 	&"item_carry_mult": [0.7, 1.0],     # carry_speed_mult hooks: Heavy Vases carry slow (x0.85 per copy)
 }
 
-## `stat`'s effective multiplier `m` (vs base) clamped to STAT_BOUNDS (unchanged if unbounded).
-static func clamp_mult(stat: StringName, m: float) -> float:
+## `stat`'s effective value `v` (its own units) clamped to STAT_BOUNDS.
+static func clamp_stat(stat: StringName, v: float) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
-	return clampf(m, b[0], b[1]) if b.size() == 2 else m
+	return clampf(v, b[0], b[1]) if b.size() == 2 else v
+
+
+## `stat`'s effective multiplier `m` (vs its base; 1 for hook-only keys) clamped to
+## STAT_BOUNDS, returned as a multiplier again (unchanged if unbounded).
+static func clamp_mult(stat: StringName, m: float) -> float:
+	var base := float(BASE.get(stat, 1.0))
+	if base == 0.0:
+		return m
+	return clamp_stat(stat, m * base) / base
 
 
 ## Absolute value of `stat` at its upper / lower cap (in the stat's own units): BASE x bound
@@ -81,12 +94,12 @@ static func clamp_mult(stat: StringName, m: float) -> float:
 ## so a later switch of STAT_BOUNDS to absolute rows only changes these two functions.
 static func stat_max(stat: StringName) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
-	return float(BASE[stat]) * (float(b[1]) if b.size() == 2 else 1.0)
+	return float(b[1]) if b.size() == 2 else float(BASE[stat])
 
 
 static func stat_min(stat: StringName) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
-	return float(BASE[stat]) * (float(b[0]) if b.size() == 2 else 1.0)
+	return float(b[0]) if b.size() == 2 else float(BASE[stat])
 
 
 var health: int = 3
@@ -105,6 +118,12 @@ func _ready() -> void:
 
 
 func get_stat(stat: StringName) -> float:
+	return stat_with(stat, [])
+
+
+## What-if read: `stat` as get_stat() would return it with `extra_mods` (Item.mods rows:
+## {stat, add, mul}) added. ItemDb.describe uses it for "what the next copy adds".
+func stat_with(stat: StringName, extra_mods: Array) -> float:
 	assert(BASE.has(stat), "Unknown stat: %s" % stat)
 	var add := 0.0
 	var mul := 1.0
@@ -112,11 +131,11 @@ func get_stat(stat: StringName) -> float:
 		if m.stat == stat:
 			add += m.add
 			mul *= m.mul
-	var base := float(BASE[stat])
-	var v := (base + add) * mul
-	if STAT_BOUNDS.has(stat) and base != 0.0:
-		v = base * clamp_mult(stat, v / base)
-	return maxf(v, float(MIN.get(stat, 0.0)))
+	for m in extra_mods:
+		if StringName(m.stat) == stat:
+			add += float(m.get("add", 0.0))
+			mul *= float(m.get("mul", 1.0))
+	return clamp_stat(stat, (float(BASE[stat]) + add) * mul)
 
 
 func max_health() -> int:
@@ -164,7 +183,7 @@ func take_hit(amount: int = 1, ignore_invuln: bool = false) -> bool:
 	if health - amount <= 0:
 		for it in _live_items():
 			if it.on_lethal_hit():
-				health = 1
+				health = clampi(int(it.params.get("save_health", 1)), 1, max_health())
 				health_changed.emit(health, max_health())
 				return true
 	health = maxi(health - amount, 0)
@@ -218,6 +237,7 @@ func grant_item(item: Object) -> bool:
 	item.apply(self)
 	owned_items.append(item)
 	items_changed.emit(owned_items)
+	_emit_lures()
 	return true
 
 
@@ -238,43 +258,118 @@ func has_minimap() -> bool:
 const SCREEN_SIZE := Vector2(1280, 720)
 
 
-## Owned items that implement the hook API (live Item instances).
-func _live_items() -> Array:
+## Owned items that implement the hook API (live Item instances), plus `extra` (what-if
+## copies that are NOT owned: ItemDb.describe / would_add measure "one more copy" this way).
+func _live_items(extra: Array = []) -> Array:
 	var out: Array = []
 	for it in owned_items:
 		if is_instance_valid(it) and it is Item:
 			out.append(it)
+	for it in extra:
+		if it is Item:
+			out.append(it)
 	return out
 
 
-## Re-emits items_changed (an item's charges changed).
+## Re-emits items_changed (an item's charges changed), and lures_changed if the pocket moved.
 func notify_items_changed() -> void:
 	items_changed.emit(owned_items)
+	_emit_lures()
 
 
 ## Stage start (PlayerController._ready: every stage builds a fresh player). Refills every
 ## item's charges, runs on_stage_start, then emits items_changed once.
 func begin_stage(player: Node = null) -> void:
+	_player_ref = weakref(player) if player != null else null
 	for it in _live_items():
 		it.charges = it.max_charges
 		it.on_stage_start(player)
 	items_changed.emit(owned_items)
+	_emit_lures(true)
+
+
+# --- Music Box lure pocket (PRODUCT.md: lures never take a hand slot) --------------------
+## Each Music Box copy keeps its own charge (#38): one lure per copy per stage. The pocket is
+## the sum. Hands (Inventory) never hold a lure.
+var _player_ref: WeakRef = null
+var _lures_seen := Vector2i(-1, -1)
+
+
+func _music_boxes() -> Array:
+	var out: Array = []
+	for it in _live_items():
+		if it.has_method(&"lure_dict"):
+			out.append(it)
+	return out
+
+
+## Lures left in the pocket this stage.
+func lure_charges() -> int:
+	var n := 0
+	for it in _music_boxes():
+		n += maxi(int(it.charges), 0)
+	return n
+
+
+## Pocket size: lures per stage (one per Music Box copy).
+func lure_max() -> int:
+	var n := 0
+	for it in _music_boxes():
+		n += maxi(int(it.max_charges), 0)
+	return n
+
+
+## The lure dict of the first copy with a charge left ({} if the pocket is empty). Throwing
+## it (dispatch_throw) spends exactly that copy's charge.
+func next_lure() -> Dictionary:
+	for it in _music_boxes():
+		if it.charges > 0:
+			return it.lure_dict()
+	return {}
+
+
+## FE hint: true when a tap with NOTHING ringed would throw a lure right now (lures left,
+## and the tap isn't a knock: hands full, or no knockable prop in reach). False with no
+## live player (menus, shop).
+func tap_throws_lure() -> bool:
+	if lure_charges() <= 0:
+		return false
+	var p: Object = _player_ref.get_ref() if _player_ref != null else null
+	if p == null or not is_instance_valid(p) or not p.has_method(&"tap_would_throw_lure"):
+		return false
+	return bool(p.tap_would_throw_lure())
+
+
+func _emit_lures(force: bool = false) -> void:
+	var now := Vector2i(lure_charges(), lure_max())
+	if force or now != _lures_seen:
+		_lures_seen = now
+		lures_changed.emit(now.x, now.y)
 
 
 ## NoiseBus.emit_noise: product of every item's on_noise multiplier.
 func noise_hook_mult(at: Vector2, radius: float, loudness: float, source: Variant) -> float:
+	return _noise_total(at, radius, loudness, source, []) / get_stat(&"noise_mult")
+
+
+## Whole noise multiplier for `source` (stat x hooks, both capped), with `extra` copies.
+func _noise_total(at: Vector2, radius: float, loudness: float, source: Variant, extra: Array) -> float:
 	var m := 1.0
-	for it in _live_items():
+	for it in _live_items(extra):
 		m *= float(it.on_noise(at, radius, loudness, source))
 	m = clamp_mult(&"item_noise_mult", m)
 	# The cap is on the whole noise effect: stat (already in `radius`) x hooks.
-	var ns := get_stat(&"noise_mult")
-	return clamp_mult(&"noise_mult", ns * m) / ns
+	return clamp_mult(&"noise_mult", stat_with(&"noise_mult", _mods_of(extra)) * m)
 
 
 ## PlayerController throw / knock: items may write into `item` (the dict the enemy gets).
 func dispatch_throw(item: Dictionary, target: Variant) -> void:
-	for it in _live_items():
+	_dispatch_throw(item, target, [])
+	_emit_lures()
+
+
+func _dispatch_throw(item: Dictionary, target: Variant, extra: Array) -> void:
+	for it in _live_items(extra):
 		it.on_throw(item, target)
 	if item.has("stun_mult"):   # Heavy Vases multiply it once per copy
 		item["stun_mult"] = clamp_mult(&"stun_mult", float(item["stun_mult"]))
@@ -297,18 +392,26 @@ func vase_gold(gold: int, vase: Variant = null) -> int:
 
 ## Move-speed multiplier for what the boy holds (Inventory.items).
 func carry_speed_mult(held: Array) -> float:
+	return _carry_mult(held, [])
+
+
+func _carry_mult(held: Array, extra: Array) -> float:
 	var m := 1.0
-	for it in _live_items():
+	for it in _live_items(extra):
 		m *= float(it.carry_speed_mult(held))
 	m = clamp_mult(&"item_carry_mult", m)
-	var ms := get_stat(&"move_speed") / float(BASE[&"move_speed"])
+	var ms := stat_with(&"move_speed", _mods_of(extra)) / float(BASE[&"move_speed"])
 	return clamp_mult(&"move_speed", ms * m) / ms
 
 
 ## Multiplier on a searching enemy's give-up drain.
 func memory_drain_mult(enemy: Node, off_screen: bool) -> float:
+	return _drain_mult(enemy, off_screen, [])
+
+
+func _drain_mult(enemy: Node, off_screen: bool, extra: Array) -> float:
 	var m := 1.0
-	for it in _live_items():
+	for it in _live_items(extra):
 		m *= float(it.memory_drain_mult(enemy, off_screen))
 	return clamp_mult(&"give_up_speed", m)
 
@@ -320,6 +423,58 @@ func arrow_reveal_distance() -> float:
 	for it in _live_items():
 		d = minf(d, float(it.arrow_reveal_distance()))
 	return d
+
+
+static func _mods_of(items: Array) -> Array:
+	var out: Array = []
+	for it in items:
+		if it is Item:
+			out.append_array(it.mods)
+	return out
+
+
+## Effective, CAPPED value of one effect, with `extra` (not owned) copies counted as owned.
+## The ONE place ItemDb.describe and max-copies read numbers from. Keys:
+##   any BASE stat name           get_stat
+##   "vase_noise"                 whole vase-break noise multiplier (stat x hooks)
+##   "stun"                       thrown/knocked vase stun multiplier (Heavy Vases)
+##   "carry"                      move-speed multiplier while holding a vase
+##   "give_up"                    off-screen give-up drain multiplier (Cracked Mirror)
+##   "uses:<item id>"             charges per stage of all copies of that item
+func effect(key: String, extra: Array = []) -> float:
+	if BASE.has(StringName(key)):
+		return stat_with(StringName(key), _mods_of(extra))
+	var vase := {slot = "vase_idle", script_path = "res://scripts/world/vase.gd", throwable = true}
+	match key:
+		"vase_noise":
+			return _noise_total(Vector2.ZERO, 1.0, 1.0, vase, extra)
+		"stun":
+			var d := vase.duplicate()
+			d["stun_mult"] = 1.0
+			_dispatch_throw(d, Vector2.ZERO, extra)
+			return float(d.get("stun_mult", 1.0))
+		"carry":
+			return _carry_mult([vase], extra)
+		"give_up":
+			return _drain_mult(null, true, extra)
+	if key.begins_with("uses:"):
+		var id := key.substr(5)
+		var n := 0
+		for it in _live_items(extra):
+			if it.id == id:
+				n += maxi(int(it.max_charges), 0)
+		return float(n)
+	push_error("PlayerStats.effect: unknown key %s" % key)
+	return 0.0
+
+
+## Owned copies of `item_id`.
+func copies(item_id: String) -> int:
+	var n := 0
+	for it in _live_items():
+		if it.id == item_id:
+			n += 1
+	return n
 
 
 ## True if world point `p` is outside the view around `center` (the boy).
@@ -336,6 +491,8 @@ func reset() -> void:
 			it.set("_applied_to", null)
 	owned_items.clear()
 	items_changed.emit(owned_items)
+	_player_ref = null
+	_emit_lures()
 	_invuln_left = 0.0
 	health = max_health()
 	gold = 0
