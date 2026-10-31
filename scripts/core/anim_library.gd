@@ -84,6 +84,17 @@ static func animated_slots() -> Array:
 	return out
 
 
+## Sorted slot names starting with `prefix` (data-driven lookups, e.g. furniture_h2_*).
+static func slots_with_prefix(prefix: String) -> Array:
+	if not _loaded: reload()
+	var out: Array = []
+	for k in _entries:
+		if str(k).begins_with(prefix):
+			out.append(str(k))
+	out.sort()
+	return out
+
+
 static func has_slot(slot: String) -> bool:
 	if not _loaded: reload()
 	return _entries.has(slot)

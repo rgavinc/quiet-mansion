@@ -94,9 +94,10 @@ static func clamp_mult(stat: StringName, m: float) -> float:
 	return clamp_stat(stat, m * base) / base
 
 
-## Absolute value of `stat` at its upper / lower cap (in the stat's own units): BASE x bound
-## (unbounded stats: BASE). Lead (#13): LevelValidator reads the jump/run caps only through these,
-## so a later switch of STAT_BOUNDS to absolute rows only changes these two functions.
+## `stat`'s absolute value at its upper / lower cap, in the stat's own units (the STAT_BOUNDS row is
+## already absolute, not a multiplier of BASE); an unbounded stat falls back to its BASE value.
+## Lead (#13): LevelValidator reads the jump/run caps only through these, so a later change to how
+## STAT_BOUNDS is stored only changes these two functions.
 static func stat_max(stat: StringName) -> float:
 	var b: Array = STAT_BOUNDS.get(stat, [])
 	return float(b[1]) if b.size() == 2 else float(BASE[stat])
