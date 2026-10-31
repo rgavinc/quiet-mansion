@@ -422,7 +422,7 @@ static func max_single_climb_px(fu: Dictionary, steps: Dictionary) -> float:
 
 ## px of capped-jump apex left over the tallest single climb (20.2px with 2-tile steps).
 static func climb_margin_px(fu: Dictionary, steps: Dictionary) -> float:
-	return max_jump_apex() - max_single_climb_px(fu, steps)
+	return min_jump_apex() - max_single_climb_px(fu, steps)
 
 
 ## A MOUNT_TILES-tall piece with a step on each side does not split its segment: the boy climbs
@@ -614,6 +614,13 @@ static func max_jump_apex() -> float:
 	return j.x * j.x / (2.0 * j.y)
 
 
+## Apex at the stat caps that MINIMISE height (jump_velocity at stat_min, gravity at stat_max):
+## what a climb must survive. (Today both are pinned to BASE, so it equals max_jump_apex().)
+static func min_jump_apex() -> float:
+	var v := PlayerStats.stat_min(&"jump_velocity")
+	return v * v / (2.0 * PlayerStats.stat_max(&"gravity"))
+
+
 ## Fastest horizontal speed in the air (move_speed at its cap; carry penalties only slow him).
 static func max_run_speed() -> float:
 	return PlayerStats.stat_max(&"move_speed")
@@ -697,7 +704,7 @@ static func in_line_of_sight(L: Dictionary, a: Vector2, b: Vector2) -> bool:
 ## True if a jump at the stat caps lifts the feet at least MOUNT_MARGIN_PX over a top h_px high
 ## (kinematic bound; the real climb is simulated in tests/climb_sim.gd).
 static func can_mount(h_px: float) -> bool:
-	return max_jump_apex() - h_px >= MOUNT_MARGIN_PX
+	return min_jump_apex() - h_px >= MOUNT_MARGIN_PX
 
 
 ## Furniture the boy can climb onto: climb-over pieces (mount_passable) standing in a

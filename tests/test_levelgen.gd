@@ -1038,35 +1038,65 @@ func test_sprite_row0_on_collision_top() -> String:
 
 
 func test_mount_rule() -> String:
-	if not LevelValidator.can_mount(48.0) or LevelValidator.can_mount(64.0):
-		return "can_mount: 48px should be climbable at the caps, 64px not"
+	# kinematic cap: one climb of <= 32px keeps >= 16px of the 52.24px apex; 48 / 64 do not
+	if not LevelValidator.can_mount(32.0) or LevelValidator.can_mount(48.0) or LevelValidator.can_mount(64.0):
+		return "can_mount: 32px should be climbable at the caps, 48px and 64px not"
 	var L := LevelGenerator.fallback_layout(1)
 	var tx := -1
-	for x in range(8, int(L.stairs[0].bottom.x / 16.0) - 10):
+	for x in range(8, int(L.stairs[0].bottom.x / 16.0) - 14):
 		var T := L.duplicate(true)
-		T.furniture.append({floor = 0, x = x, w = 2, h = 3})
-		if LevelValidator.validate(T).is_empty() and LevelValidator.mount_passable(T, T.furniture[0]):
+		_append_cluster(T, x, 2, 2, 1)
+		if LevelValidator.validate(T).is_empty() and LevelValidator.mount_passable(T, T.furniture[1]):
 			tx = x
 			break
 	if tx < 0:
-		return "no clear spot for a 3-tile piece"
+		return "no clear spot for a stepped 3-tile cluster"
 	var T := L.duplicate(true)
-	T.furniture.append({floor = 0, x = tx, w = 2, h = 3})
+	_append_cluster(T, tx, 2, 2, 1)
 	var segs_before: int = LevelValidator.segments(L)[0].size()
 	if LevelValidator.segments(T)[0].size() != segs_before:
-		return "a climbable 3-tile piece split the floor"
+		return "a climbable stepped cluster split the floor"
 	if LevelValidator.mountable_pieces(T).size() != 1:
-		return "reachable 3-tile piece not counted as mountable"
+		return "stepped 3-tile piece not counted as mountable"
+	var st := LevelValidator.step_pieces(T, T.furniture[1])
+	if st.is_empty() or LevelValidator.max_single_climb_px(T.furniture[1], st) > 32.0 or LevelValidator.climb_margin_px(T.furniture[1], st) < 16.0:
+		return "cluster climb is over 32px / margin under 16px"
+	# the steps (h1, h2) themselves are always walk-over
+	if LevelValidator.segments(T)[0].size() != segs_before:
+		return "steps split the floor"
+	# a bare 3-tile piece (no steps) is a 48px jump with ~4px of apex left: blocks like a tall piece
+	var B := L.duplicate(true)
+	B.furniture.append({floor = 0, x = tx + 2, w = 2, h = 3})
+	if LevelValidator.mount_passable(B, B.furniture[0]) or LevelValidator.segments(B)[0].size() != segs_before + 1 \
+			or not LevelValidator.mountable_pieces(B).is_empty():
+		return "a 3-tile piece without steps must block and not count as mountable"
+	# one step only: still a blocker (the far side would be a 48px drop-climb)
+	var O := T.duplicate(true)
+	O.furniture.remove_at(2)
+	if LevelValidator.mount_passable(O, O.furniture[1]):
+		return "a 3-tile piece with one step counted as climbable"
+	# 3-tile steps are not steps
+	var H := T.duplicate(true)
+	H.furniture[0].h = 3
+	if LevelValidator.mount_passable(H, H.furniture[1]):
+		return "a 3-tile 'step' counted"
 	# 4 tiles: never climbable, always a blocker
-	T.furniture[0].h = 4
+	T.furniture[1].h = 4
 	if LevelValidator.segments(T)[0].size() != segs_before + 1 or not LevelValidator.mountable_pieces(T).is_empty():
 		return "a 4-tile piece must block and not count as mountable"
-	# 3 tiles with a wall closer than the 2-tile run: blocks like a tall piece
-	T.furniture[0].h = 3
-	T.walls.append({floor = 0, x = tx + 3, doorway = false})
-	if LevelValidator.mount_passable(T, T.furniture[0]):
-		return "3-tile piece 0 tiles from a wall counted as climbable"
+	# stepped 3 tiles with a wall closer than the 2-tile run: blocks like a tall piece
+	T.furniture[1].h = 3
+	T.walls.append({floor = 0, x = tx + 7, doorway = false})
+	if LevelValidator.mount_passable(T, T.furniture[1]):
+		return "stepped 3-tile piece near a wall counted as climbable"
 	return ""
+
+
+## [left step (wl x hl), 3-tall piece (2 wide), right step (wr x hr)] touching, from tile x.
+func _append_cluster(T: Dictionary, x: int, wl: int, hl: int, hr: int) -> void:
+	T.furniture.append({floor = 0, x = x, w = wl, h = hl})
+	T.furniture.append({floor = 0, x = x + wl, w = 2, h = 3})
+	T.furniture.append({floor = 0, x = x + wl + 2, w = 2, h = hr})
 
 
 func test_floors_have_mountable() -> String:

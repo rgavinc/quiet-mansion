@@ -6,17 +6,19 @@ extends RefCounted
 ## Plus harness calibration in a flat world: a 32px step is climbed under every setup, a 60px box
 ## is not (so a "pass" means something).
 
-const SAMPLE := [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [7, 3], [11, 5]]   # [seed, stage]
+## [seed, stage, setup rows]: the full 50 seeds x 5 stages x 3 setups is tests/climb_sweep.gd
+## (--fixed-fps 60; the suite runs in real time, so only a sample runs here).
+const SAMPLE := [[1, 1, [2]], [3, 3, [2]], [5, 5, [2]], [2, 2, [0, 1]]]
 
 
 func run_async(tree: SceneTree) -> Dictionary:
 	var failures: PackedStringArray = []
 	var total := 0
 	for sd in SAMPLE:
-		var r: Dictionary = await ClimbSim.check_level(tree, int(sd[0]), int(sd[1]), ClimbSim.SETUPS)
+		var r: Dictionary = await ClimbSim.check_level(tree, int(sd[0]), int(sd[1]), (sd[2] as Array).map(func(i): return ClimbSim.SETUPS[i]))
 		total += 1
 		failures.append_array(r.errors)
-		if int(r.climbs) < ClimbSim.SETUPS.size():
+		if int(r.climbs) < (sd[2] as Array).size():
 			failures.append("seed %d stage %d: only %d climbs ran" % [sd[0], sd[1], int(r.climbs)])
 	for setup in ClimbSim.SETUPS:
 		total += 2

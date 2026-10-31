@@ -139,6 +139,7 @@ static func over_cluster(tree: SceneTree, p: CharacterBody2D, L: Dictionary, tal
 ## Builds seed/stage, then climbs every guaranteed piece's cluster (both directions) under each
 ## setup. Returns {errors, climbs, pieces}.
 static func check_level(tree: SceneTree, seed_v: int, stage: int, setups: Array) -> Dictionary:
+	Engine.time_scale = 1.0   # physics delta scales with it: the sim assumes 1/60 s steps
 	var errs: PackedStringArray = []
 	var climbs := 0
 	var L := LevelGenerator.generate(seed_v, stage)
@@ -147,6 +148,9 @@ static func check_level(tree: SceneTree, seed_v: int, stage: int, setups: Array)
 	var built := LevelGenerator.build(L, world)
 	for e in built.enemies:
 		e.queue_free()
+	for ex in tree.root.find_children("*", "Area2D", true, false):
+		if ex.get_script() != null and str(ex.get_script().resource_path).ends_with("exit_zone.gd"):
+			ex.queue_free()   # a climb that ends on the exit would win the stage and freeze the boy
 	await tree.physics_frame
 	var p: CharacterBody2D = built.player
 	var pieces := LevelValidator.mountable_pieces(L)
