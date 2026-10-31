@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## Screen-space FE HUD root: hearts + gold (top-left), alert counter (top-right),
 ## inventory strip (bottom-centre) with the "tap: throw lure" hint above it, owned items
-## (under hearts + gold), minimap (top-right, Minimap item only), off-screen chaser arrows
+## (under hearts + gold), run seed + stage readout (bottom-left), minimap (top-right, Minimap item only), off-screen chaser arrows
 ## (full screen), and the "Stage N" intro banner. Game-over / shop screens are separate layers.
 ## Instance `scenes/ui/hud.tscn` once per level. All data via FESignals.
 
@@ -13,6 +13,7 @@ const StageBanner := preload("res://scripts/ui/stage_banner.gd")
 const OwnedItemsStrip := preload("res://scripts/ui/owned_items_strip.gd")
 const Minimap := preload("res://scripts/ui/minimap.gd")
 const LureHint := preload("res://scripts/ui/lure_hint.gd")
+const SeedReadout := preload("res://scripts/ui/seed_readout.gd")
 
 var skin: HudSkin
 ## PlayerStats for the item widgets (tests); null = each widget uses /root/PlayerStats.
@@ -25,6 +26,7 @@ var banner: Control
 var owned_items: Control
 var minimap: Control
 var lure_hint: Control
+var seed_readout: Label
 var hud_root: Control
 ## End screens (UiScreen: game over, win, shop) seen in the tree; the HUD hides while any is open.
 var _screens: Array = []
@@ -98,6 +100,14 @@ func _ready() -> void:
 	minimap.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	minimap.offset_top = 100.0   # under the alert counter and its pips
 	minimap.offset_right = -8.0
+
+	seed_readout = SeedReadout.new()
+	seed_readout.name = "SeedReadout"
+	root.add_child(seed_readout)
+	seed_readout.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE)
+	seed_readout.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	seed_readout.offset_left = 12.0
+	seed_readout.offset_bottom = -8.0
 
 	banner = StageBanner.new()
 	banner.name = "StageBanner"
