@@ -31,7 +31,11 @@ func run_all() -> Dictionary:
 		["chest_loot_deterministic", test_chest_deterministic],
 		["chest_opens_through_hold_channel", test_chest_channel],
 		["fe_shop_adapter_finds_shop", test_fe_adapter],
-		["desc_percentages_match_measured_effect", test_desc_percent],
+		["desc_no_hand_typed_numbers", test_desc_no_handtyped],
+		["desc_numbers_match_effective_capped_delta_1_to_6_copies", test_desc_scan],
+		["every_item_has_max_copies", test_max_copies],
+		["offers_never_past_max_or_useless", test_offers_never_useless],
+		["exhausted_pool_falls_back_to_gold", test_exhausted_pool_gives_gold],
 	]
 	var passed := 0
 	for item in checks:
@@ -390,45 +394,179 @@ func test_fe_adapter() -> String:
 	return "" if ok else "FE buy didn't spend/own (gold %d)" % PlayerStats.gold
 
 
-## PRODUCT.md "Item text": no hand-written percentages, and every "N%" in a description
-## equals the effect MEASURED through PlayerStats with the item granted (stat ratio, or the
-## behaviour hook's multiplier). Shadow Cloak's light line must read 67% (1 / 0.6).
-func test_desc_percent() -> String:
-	var hand := RegEx.create_from_string("\\d+\\s*%")
-	var tok := RegEx.create_from_string("\\{(mul|inv|add|param):(\\w+)\\}")
-	var pct := RegEx.create_from_string("(\\d+)%")
-	var vase := {script_path = "res://scripts/world/vase.gd"}
+## PRODUCT.md "Item text": no hand-typed numbers. The raw desc holds no digits and no number
+## words (all numbers come from {tokens}), and every filled desc has no "{" left.
+func test_desc_no_handtyped() -> String:
+	var tok := RegEx.create_from_string(ItemDb.TOKEN_RE)
+	var digit := RegEx.create_from_string("\\d")
+	var words := RegEx.create_from_string("(?i)\\b(once|twice|thrice|one|two|three|four|five|half|double|triple|quarter)\\b")
 	for r in ItemDb.ITEMS:
-		var raw := str(r.desc)
-		if hand.search(raw): return "%s: hand-written %% in desc" % r.id
-		var want: Array = []
-		for m in tok.search_all(raw):
-			var kind := m.get_string(1)
-			var key := m.get_string(2)
-			PlayerStats.reset()
-			var v := NAN
-			if kind == "param":
-				var it := ItemDb.make(str(r.id))
-				PlayerStats.grant_item(it)
-				match key:
-					"noise_mult": v = PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, vase) - 1.0
-					"offscreen_drain_mult": v = PlayerStats.memory_drain_mult(null, true) - 1.0
-					"carry_speed_mult": v = PlayerStats.carry_speed_mult([vase]) - 1.0
-					_: return "%s: no measurement for param %s" % [r.id, key]
-			else:
-				var before := PlayerStats.get_stat(StringName(key))
-				PlayerStats.grant_item(ItemDb.make(str(r.id)))
-				var after := PlayerStats.get_stat(StringName(key))
-				match kind:
-					"mul": v = after / before - 1.0
-					"inv": v = before / after - 1.0   # time-based: how much longer / sooner
-					"add": v = after - before
-			want.append(int(round(absf(v) * 100.0)))
-		var got: Array = []
+		var raw := tok.sub(str(r.desc), "", true)
+		if digit.search(raw): return "%s: hand-typed digit in '%s'" % [r.id, r.desc]
+		var w := words.search(raw)
+		if w: return "%s: hand-typed number word '%s'" % [r.id, w.get_string()]
 		var text := ItemDb.make(str(r.id)).description
 		if text.contains("{"): return "%s: unfilled token in '%s'" % [r.id, text]
-		for m in pct.search_all(text):
-			got.append(int(m.get_string(1)))
-		if got != want: return "%s: text %s%% vs measured %s%% ('%s')" % [r.id, got, want, text]
+	return ""
+
+
+const _VASE := {slot = "vase_idle", script_path = "res://scripts/world/vase.gd", throwable = true}
+
+## Independent measurement of a desc token key on the live PlayerStats (public API only).
+func _measure(key: String, id: String) -> float:
+	if PlayerStats.BASE.has(StringName(key)):
+		return PlayerStats.get_stat(StringName(key))
+	match key:
+		"vase_noise":
+			return PlayerStats.get_stat(&"noise_mult") * PlayerStats.noise_hook_mult(Vector2.ZERO, 100.0, 1.0, _VASE)
+		"stun":
+			var d := _VASE.duplicate()
+			d["stun_mult"] = 1.0
+			PlayerStats.dispatch_throw(d, null)
+			return float(d.stun_mult)
+		"carry":
+			return PlayerStats.carry_speed_mult([_VASE])
+		"give_up":
+			return PlayerStats.memory_drain_mult(null, true)
+		"uses":
+			var n := 0
+			for it in PlayerStats.owned_items:
+				if str(it.id) == id: n += int(it.max_charges)
+			return float(n)
+	return NAN
+
+
+## The text a token must show, from measured before/after values (PRODUCT.md formats).
+static func _expect(kind: String, v0: float, v1: float) -> String:
+	match kind:
+		"mul": return "%d%%" % int(round(absf(v1 / v0 - 1.0) * 100.0)) if v0 != 0.0 else "0%"
+		"inv": return "%d%%" % int(round(absf(v0 / v1 - 1.0) * 100.0)) if v1 != 0.0 else "0%"
+		"add": return "%d%%" % int(round(absf(v1 - v0) * 100.0))
+		"sec": return ItemDb.fmt_num(absf(v1 - v0))
+	return str(int(round(absf(v1 - v0))))
+
+
+## For every item and 1..6 copies: the description offered for copy n (n-1 owned) shows, for
+## each token, the delta copy n REALLY makes (measured by granting it, caps included), and
+## carries the "adds nothing" line iff no token improves anything and it isn't a first copy
+## of a non-numeric upside (Minimap / Greedy Sack's gold).
+func test_desc_scan() -> String:
+	var tok := RegEx.create_from_string(ItemDb.TOKEN_RE)
+	var num := RegEx.create_from_string("\\d+(?:\\.\\d+)?%?")
+	for r in ItemDb.ITEMS:
+		var id := str(r.id)
+		var toks := tok.search_all(str(r.desc))
+		PlayerStats.reset()
+		for n in range(1, 7):
+			var text := ItemDb.make(id).description
+			var before: Array = []
+			for m in toks:
+				before.append(_measure(m.get_string(2) if m.get_string(1) != "uses" else "uses", id))
+			PlayerStats.grant_item(ItemDb.make(id))
+			var want: Array = []
+			var upside := false
+			for i in toks.size():
+				var kind := toks[i].get_string(1)
+				var key := toks[i].get_string(2)
+				if kind == "p":
+					want.append(ItemDb.fmt_num(float(r.params[key])))
+					continue
+				var after := _measure(key if kind != "uses" else "uses", id)
+				var shown := _expect(kind, before[i], after)
+				want.append(shown)
+				var good := int(ItemDb.GOOD.get("uses" if kind == "uses" else key, 0))
+				if shown != "0%" and shown != "0" and good != 0 and signf(after - before[i]) == signf(good):
+					upside = true
+			var got: Array = []
+			for m in num.search_all(text):
+				got.append(m.get_string())
+			if got != want: return "%s copy %d: text %s vs measured %s ('%s')" % [id, n, got, want, text]
+			var nothing := not upside and not (n == 1 and not ItemDb._numeric_upside(id))
+			if text.begins_with(ItemDb.NOTHING_TEXT) != nothing:
+				return "%s copy %d: 'adds nothing' %s but upside=%s ('%s')" % [id, n, text.begins_with(ItemDb.NOTHING_TEXT), upside, text]
+	# Spot checks PD named.
+	PlayerStats.reset()
+	PlayerStats.grant_item(ItemDb.make("heavy_vases"))
+	var hv2 := ItemDb.make("heavy_vases").description
+	if not hv2.contains("stun puppets 25% longer"): return "Heavy Vases 2nd copy: " + hv2
+	PlayerStats.grant_item(ItemDb.make("heavy_vases"))
+	if not ItemDb.make("heavy_vases").description.begins_with(ItemDb.NOTHING_TEXT): return "Heavy Vases 3rd copy not 'adds nothing'"
+	PlayerStats.reset()
+	PlayerStats.grant_item(ItemDb.make("greedy_sack"))
+	var gs2 := ItemDb.make("greedy_sack").description
+	if not gs2.contains("33% louder"): return "Greedy Sack 2nd copy (x1.5 -> cap x2): " + gs2
+	PlayerStats.reset()
 	var cloak := ItemDb.make("shadow_cloak").description
 	return "" if cloak.contains("67%") else "shadow cloak text: " + cloak
+
+
+## max_copies on every item: PD's explicit ones, and the cap-derived ones.
+func test_max_copies() -> String:
+	var want := {music_box = 3, minimap = 1, heavy_vases = 2, cracked_mirror = 4, greedy_sack = 1, flash_bulb = 2, rabbits_foot = 2}
+	for id in want:
+		if ItemDb.max_copies(id) != want[id]: return "%s max_copies %d, want %d" % [id, ItemDb.max_copies(id), want[id]]
+		if ItemDb.make(id).max_copies != want[id]: return "%s Item.max_copies not set" % id
+	for id in ItemDb.ids():
+		var mc := ItemDb.max_copies(id)
+		if mc < 1: return "%s max_copies %d" % [id, mc]
+		if ItemDb.make(id).to_dict().get("max_copies", -1) != mc: return "%s to_dict lacks max_copies" % id
+		# The derived cap is real: copy mc still adds, copy mc+1 adds nothing (rows set by PD excepted).
+		if not ItemDb.row(id).has("max_copies"):
+			PlayerStats.reset()
+			for i in mc - 1: PlayerStats.grant_item(ItemDb.make(id))
+			if ItemDb.make(id).description.begins_with(ItemDb.NOTHING_TEXT): return "%s copy %d (its max) adds nothing" % [id, mc]
+			PlayerStats.grant_item(ItemDb.make(id))
+			if not ItemDb.make(id).description.begins_with(ItemDb.NOTHING_TEXT): return "%s copy %d past max still adds" % [id, mc + 1]
+	return ""
+
+
+## Over many seeds and random owned loadouts, shops and chests never offer a copy past
+## max_copies or one whose (honest) text says it adds nothing.
+func test_offers_never_useless() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var ids := ItemDb.ids()
+	for trial in 80:
+		PlayerStats.reset()
+		for k in rng.randi_range(0, 30):
+			PlayerStats.grant_item(ItemDb.make(ids[rng.randi() % ids.size()]))
+		var st := rng.randi_range(1, 4)
+		var offers: Array = Shop.roll_stock(st, trial)
+		var chest := ItemDb.roll_chest(st, trial)
+		if chest != null: offers.append(chest)
+		if offers.is_empty(): return "trial %d: empty stock (no gold fallback)" % trial
+		for it in offers:
+			if it.id == Shop.GOLD_POUCH_ID: continue
+			if PlayerStats.copies(it.id) >= ItemDb.max_copies(it.id): return "trial %d: offered %s copy %d > max %d" % [trial, it.id, PlayerStats.copies(it.id) + 1, ItemDb.max_copies(it.id)]
+			if it.description.begins_with(ItemDb.NOTHING_TEXT): return "trial %d: offered useless %s ('%s')" % [trial, it.id, it.description]
+	return ""
+
+
+## Own every item up to its max: the shop offers a gold pouch (buying it pays gold, owns
+## nothing), the chest gives gold instead of an item, nothing crashes.
+func test_exhausted_pool_gives_gold() -> String:
+	for id in ItemDb.ids():
+		for i in ItemDb.max_copies(id): PlayerStats.grant_item(ItemDb.make(id))
+	var owned := PlayerStats.owned_items.size()
+	var stock := Shop.roll_stock(3, 1)
+	if stock.size() != 1 or stock[0].id != Shop.GOLD_POUCH_ID: return "exhausted stock %s, want one gold pouch" % [_ids(stock)]
+	var pouch: Item = stock[0]
+	if pouch.price != 0 or int(pouch.params.gold) != ItemDb.fallback_gold(3): return "pouch price %d gold %s" % [pouch.price, pouch.params]
+	var find := PlayerStats.get_stat(&"gold_find_mult")
+	var paid := int(round(ItemDb.fallback_gold(3) * find))
+	if pouch.description.contains("{") or not pouch.description.contains(" %d gold" % paid): return "pouch text (want %d): %s" % [paid, pouch.description]
+	var g := PlayerStats.gold
+	if not Shop.buy(pouch): return "couldn't take the pouch"
+	if PlayerStats.gold != g + paid: return "pouch paid %d gold, text said %d" % [PlayerStats.gold - g, paid]
+	if PlayerStats.owned_items.size() != owned: return "pouch became an owned item"
+	if ItemDb.roll_chest(3, 1) != null: return "exhausted chest still rolled an item"
+	var c := _chest()
+	g = PlayerStats.gold
+	var got := c.open()
+	if got != null: return "exhausted chest granted %s" % got.id
+	if not c.is_open: return "exhausted chest didn't open"
+	var cg := int(round(ItemDb.fallback_gold(maxi(c.stage, 1)) * find))
+	if PlayerStats.gold != g + cg: return "chest gave %d gold, want %d" % [PlayerStats.gold - g, cg]
+	# FE path too.
+	var offers: Array = FESignals.get_shop_offer(3, 2, 42)
+	return "" if offers.size() == 1 else "FE got %d offers from an exhausted pool" % offers.size()
