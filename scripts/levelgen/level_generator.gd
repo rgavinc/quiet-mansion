@@ -676,10 +676,11 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	low_furn.collision_layer = PlayerStats.LAYER_WORLD
 	low_furn.collision_mask = 0
 	level.add_child(low_furn)
+	var furn_rects: Array = []
 	for fu in L.furniture:
 		var surf := float(LevelValidator.surface_y(fu.floor))
 		var low := int(fu.h) <= LevelValidator.MAX_JUMP_TILES
-		_box(low_furn if low else geo, Rect2(fu.x * TILE, surf - fu.h * TILE, fu.w * TILE, fu.h * TILE), C_FURN)
+		furn_rects.append(_box(low_furn if low else geo, Rect2(fu.x * TILE, surf - fu.h * TILE, fu.w * TILE, fu.h * TILE), C_FURN))
 
 	var stairs := []
 	var lines: Array = []
@@ -713,6 +714,8 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 			r.visible = false
 		for ln in lines:
 			ln.visible = false
+
+	FurnitureSkin.paint(level, L, furn_rects)   # sprite per piece from the manifest; flat rect if no slot
 
 	var props_root := _child(world, "Obstacles", level)
 	for p in L.props:
@@ -768,6 +771,8 @@ static func build(layout: Variant, world: Node) -> Dictionary:
 	var fl := player.get_node_or_null("Flashlight") as Node2D
 	if fl:
 		fl.position = Vector2(0, -30)
+
+	StageLook.apply(level, int(L.get("stage", 1)), player)   # per-stage ambient, tint, flashlight boost
 
 	var ex := Area2D.new()
 	ex.set_script(load("res://scripts/world/exit_zone.gd"))

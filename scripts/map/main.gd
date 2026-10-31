@@ -104,9 +104,10 @@ func _build_backdrop() -> void:
 		bg.z_index = -20
 		$World.add_child(bg)
 		$World.move_child(bg, 0)
-	var dark := CanvasModulate.new()
-	dark.color = Color(0.28, 0.26, 0.34, 1)
-	$World.add_child(dark)
+	if built.is_empty():   # a built level carries its own per-stage ambient (StageLook)
+		var dark := CanvasModulate.new()
+		dark.color = Color(0.28, 0.26, 0.34, 1)
+		$World.add_child(dark)
 
 
 ## Follows the boy at zoom 1 (NoiseBus radii assume it), clamped to the level; a level

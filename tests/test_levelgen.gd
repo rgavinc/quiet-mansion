@@ -61,6 +61,11 @@ func run_all() -> Dictionary:
 		["rails_cannot_be_cleared_by_capped_running_jumps", test_rail_jump_rule],
 		["rejects_furniture_a_capped_jump_clears_a_rail_from", test_reject_furniture_rail],
 		["gold_floor_and_worst_roll_vs_cheapest_shop_item", test_gold_floor],
+		["layouts_match_pr13_hashes", test_layout_hashes],
+		["furniture_falls_back_to_rects_without_slots", test_furniture_fallback],
+		["furniture_sprites_by_height_class_separate_stream", test_furniture_sprites],
+		["furniture_slot_art_matches_collision_height", test_furniture_art_contract],
+		["stage_look_table_applied_darker_and_colder", test_stage_look],
 		["build_survives_bad_input", test_build_bad_input],
 		["build_creates_level_nodes", test_build_nodes],
 	]
@@ -954,3 +959,192 @@ func test_gold_floor() -> String:
 	L.gold[0].amount = 0
 	L.gold[1].amount = 0
 	return "" if _has(LevelValidator.validate(L), "gold floor") else "a layout under the gold floor passed"
+
+
+# --- furniture sprites + per-stage look (lead/furniture-stage-look) ---
+
+func test_layout_hashes() -> String:
+	var bad := LookHash.check(20)   # tests/look_hash_sweep.gd runs all 200 seeds x 5 stages
+	return "" if bad.is_empty() else "layout differs from PR #13: %s" % ", ".join(bad.slice(0, 5))
+
+
+func _build_at(seed_value: int, stage: int) -> Dictionary:
+	var w := Node2D.new()
+	w.set_meta(&"lg_test", true)
+	root.add_child(w)
+	var b := LevelGenerator.build(LevelGenerator.generate(seed_value, stage), w)
+	b.world = w
+	return b
+
+
+func _seed_with_furniture(stage: int) -> int:
+	for sd in 60:
+		if LevelGenerator.generate(sd, stage).furniture.size() >= 3:
+			return sd
+	return -1
+
+
+func _furn_rects(level: Node) -> Array:
+	var out: Array = []
+	for body in ["LowFurniture", "Geometry"]:
+		for c in level.get_node(body).get_children():
+			if c is ColorRect and (c as ColorRect).color == LevelGenerator.C_FURN:
+				out.append(c)
+	return out
+
+
+func _collision_sig(level: Node) -> String:
+	var out := PackedStringArray()
+	for body in ["LowFurniture", "Geometry", "Rails"]:
+		for c in level.get_node(body).get_children():
+			if c is CollisionShape2D:
+				out.append("%s|%s|%s" % [body, c.position, (c.shape as RectangleShape2D).size])
+	out.sort()
+	return "\n".join(out)
+
+
+func test_furniture_fallback() -> String:
+	var sd := _seed_with_furniture(1)
+	if sd < 0:
+		return "no stage 1 seed with furniture"
+	FurnitureSkin.slots_override = {}
+	var b := _build_at(sd, 1)
+	FurnitureSkin.slots_override = null
+	var n: int = b.layout.furniture.size()
+	var sprites: int = b.level.get_node(FurnitureSkin.ROOT).get_child_count()
+	var rects: Array = _furn_rects(b.level).filter(func(r): return r.visible)
+	b.world.free()
+	if sprites != 0:
+		return "%d sprites with no slots" % sprites
+	if rects.size() != n:
+		return "%d visible placeholder rects for %d pieces" % [rects.size(), n]
+	# the real manifest has no furniture_h* slots yet (or, once Designer lands them, builds fine)
+	var b2 := _build_at(sd, 1)
+	var ok: bool = b2.level.get_node(FurnitureSkin.ROOT).get_child_count() + _furn_rects(b2.level).filter(func(r): return r.visible).size() == n
+	b2.world.free()
+	return "" if ok else "manifest build lost a furniture piece"
+
+
+func test_furniture_sprites() -> String:
+	var sd := _seed_with_furniture(1)
+	if sd < 0:
+		return "no stage 1 seed with furniture"
+	FurnitureSkin.slots_override = {}
+	var plain := _build_at(sd, 1)
+	var plain_sig := _collision_sig(plain.level)
+	plain.world.free()
+	# vase_idle is 32x32: stands in for art that fits any piece (2-3 tiles wide)
+	FurnitureSkin.slots_override = {1: ["vase_idle"], 2: ["vase_idle", "vase_thrown"], 3: ["vase_idle"], 4: ["vase_idle", "missing_slot"]}
+	var b := _build_at(sd, 1)
+	var L: Dictionary = b.layout
+	var picks := FurnitureSkin.choose(L)
+	var picks2 := FurnitureSkin.choose(L)
+	var sig := _collision_sig(b.level)
+	var root_n: Node = b.level.get_node(FurnitureSkin.ROOT)
+	var err := ""
+	if var_to_str(picks) != var_to_str(picks2):
+		err = "picks are not deterministic"
+	elif root_n.get_child_count() != L.furniture.size():
+		err = "%d sprites for %d pieces" % [root_n.get_child_count(), L.furniture.size()]
+	elif sig != plain_sig:
+		err = "collision changed with sprites"
+	else:
+		var rects := _furn_rects(b.level)
+		for r in rects:
+			if r.visible:
+				err = "placeholder rect still visible under a sprite"
+		for i in L.furniture.size():
+			var fu: Dictionary = L.furniture[i]
+			var sp := root_n.get_node("Furniture_%d" % i) as Sprite2D
+			if not (sp.get_meta(&"slot") in FurnitureSkin.slots_for_height(int(fu.h))):
+				err = "piece %d (h%d) got slot %s" % [i, fu.h, sp.get_meta(&"slot")]
+			var want := Vector2((float(fu.x) + float(fu.w) * 0.5) * 16.0, LevelValidator.surface_y(int(fu.floor)))
+			var fs := FurnitureSkin.frame_size(str(sp.get_meta(&"slot")))
+			var tl := sp.position + sp.offset   # top-left of the drawn frame
+			if not sp.position.is_equal_approx(want) or not tl.is_equal_approx(want - Vector2(fs.x * 0.5, fs.y)):
+				err = "piece %d at %s (top-left %s), want bottom-centre %s" % [i, sp.position, tl, want]
+	b.world.free()
+	# the picks come from their own stream: layout hash identical with or without slots
+	var with_slots := LookHash.hash_of(sd, 1)
+	FurnitureSkin.slots_override = {}
+	var without := LookHash.hash_of(sd, 1)
+	FurnitureSkin.slots_override = null
+	if err.is_empty() and with_slots != without:
+		err = "layout depends on furniture slots"
+	# exact width preferred (vase_idle 32 wide, exit door 48 wide); none exact -> any of the class
+	FurnitureSkin.slots_override = {1: ["vase_idle", "exit_door_stage1"]}
+	if FurnitureSkin.candidates(1, 2) != ["vase_idle"] or FurnitureSkin.candidates(1, 3) != ["exit_door_stage1"] \
+			or FurnitureSkin.candidates(1, 5).size() != 2:
+		err = "width preference wrong"
+	FurnitureSkin.slots_override = null
+	return err
+
+
+## Contract for the REAL furniture_h* slots (vacuous until Designer's art is in the manifest):
+## 1-3 tiles wide, frame height == height class x 16 (sprite = collision box height), bottom-centre
+## pivot, top opaque row is row 0 (the walkable top = collision top).
+func test_furniture_art_contract() -> String:
+	for h in range(1, 5):
+		for slot in FurnitureSkin.slots_for_height(h):
+			var fs := FurnitureSkin.frame_size(slot)
+			if fs.x < 16 or fs.x > 48 or int(fs.x) % 16 != 0:
+				return "%s is %dpx wide (want 1-3 whole tiles)" % [slot, fs.x]
+			if int(fs.y) != h * 16:
+				return "%s is %dpx tall, collision height is %d" % [slot, fs.y, h * 16]
+			var pv := AnimLibrary.pivot(slot)
+			if absf(pv.x - fs.x * 0.5) > 1.0 or absf(pv.y - fs.y) > 1.0:
+				return "%s pivot %s is not bottom-centre of %s" % [slot, pv, fs]
+			var img := UiArt.texture(slot).get_image()
+			var top := -1
+			for y in int(fs.y):
+				for x in int(fs.x):
+					if img.get_pixel(x, y).a > 0.0:
+						top = y
+						break
+				if top >= 0:
+					break
+			if top != 0:
+				return "%s top opaque row is %d (want 0 = the collision top)" % [slot, top]
+	return ""
+
+
+func test_stage_look() -> String:
+	var prev_lum := 99.0
+	var prev_cold := -99.0
+	for st in range(1, StageTable.STAGE_COUNT + 1):
+		var look := StageTable.look(st)
+		var b := _build_at(3, st)
+		var amb := b.level.get_node_or_null(StageLook.AMBIENT_NODE) as CanvasModulate
+		var err := ""
+		if amb == null:
+			err = "stage %d has no ambient CanvasModulate" % st
+		elif not amb.color.is_equal_approx(look.ambient):
+			err = "stage %d ambient %s != table %s" % [st, amb.color, look.ambient]
+		else:
+			for n in StageLook.TILE_LAYERS:
+				var l := b.level.get_node_or_null(n) as CanvasItem
+				if l and not l.modulate.is_equal_approx(look.tint):
+					err = "stage %d %s tint %s != table %s" % [st, n, l.modulate, look.tint]
+			var beam := b.player.get_node_or_null("Flashlight/Beam") as PointLight2D
+			if beam == null:
+				err = "no flashlight beam"
+			elif not is_equal_approx(beam.energy, float(beam.get_meta(&"base_energy")) * float(look.flashlight_energy)):
+				err = "stage %d beam energy %f" % [st, beam.energy]
+		b.world.free()
+		if not err.is_empty():
+			return err
+		var a: Color = look.ambient
+		var lum := 0.299 * a.r + 0.587 * a.g + 0.114 * a.b
+		var cold := a.b / a.r   # blue share rises stage over stage
+		if lum >= prev_lum or cold <= prev_cold:
+			return "stage %d is not darker AND colder than the stage before" % st
+		prev_lum = lum
+		prev_cold = cold
+	if StageTable.look(1).ambient.r <= StageTable.look(1).ambient.b:
+		return "stage 1 ambient is not warm"
+	var l5: Color = StageTable.look(5).ambient
+	if l5.r > 0.1 or l5.g > 0.1 or l5.b > 0.15 or float(StageTable.look(5).flashlight_energy) <= 1.0:
+		return "stage 5 is not near-black with a boosted flashlight"
+	if StageTable.look(9).ambient != StageTable.look(5).ambient or StageTable.look(0).ambient != StageTable.look(1).ambient:
+		return "look() does not clamp the stage"
+	return ""

@@ -84,6 +84,26 @@ const STAGES := {
 }
 
 
+## Per-stage look (PRODUCT.md "Stage mood"): one table, applied by StageLook on build.
+##   ambient            CanvasModulate colour: the light every canvas item gets without the flashlight
+##   tint               modulate on the painted tiles and furniture sprites (warm -> cold)
+##   flashlight_energy  multiplier on the flashlight Beam energy (lighter ambient -> 1.0)
+## Stage 1 warm; every later stage darker (lower ambient luminance) and colder (blue share rises);
+## stage 5 is nearly black, so the flashlight is the main light.
+const LOOKS := {
+	1: {ambient = Color(0.50, 0.42, 0.34), tint = Color(1.00, 0.93, 0.80), flashlight_energy = 1.0},
+	2: {ambient = Color(0.38, 0.33, 0.31), tint = Color(1.00, 0.96, 0.90), flashlight_energy = 1.0},
+	3: {ambient = Color(0.27, 0.26, 0.30), tint = Color(0.95, 0.97, 1.00), flashlight_energy = 1.1},
+	4: {ambient = Color(0.15, 0.17, 0.24), tint = Color(0.85, 0.93, 1.00), flashlight_energy = 1.3},
+	5: {ambient = Color(0.06, 0.07, 0.12), tint = Color(0.80, 0.90, 1.00), flashlight_energy = 1.6},
+}
+
+
+## Look for `stage`, clamped to 1..5 (a copy).
+static func look(stage: int) -> Dictionary:
+	return (LOOKS[clampi(stage, 1, LOOKS.size())] as Dictionary).duplicate(true)
+
+
 ## Content budget for a stage: {enemies, props, gold, chests}.
 static func budget(stage: int) -> Dictionary:
 	return budget_of(params(stage))
