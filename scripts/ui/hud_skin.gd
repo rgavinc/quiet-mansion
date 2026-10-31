@@ -67,6 +67,14 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 @export var nudge_max: float = 48.0
 @export var nudge_speed: float = 4.0
 
+@export_group("Camera rig")
+## Critically damped follow, seconds to (mostly) settle per axis. X ≈ the old Camera2D
+## smoothing speed 6; Y is slower so a floor change (stairs) glides instead of lurching.
+@export var camera_smooth_x: float = 0.18
+@export var camera_smooth_y: float = 0.36
+## Vertical follow speed cap (px/s): a big vertical step (teleport-sized) can't whip the view.
+@export var camera_max_speed_y: float = 420.0
+
 
 func ring_color_for(type_id: String) -> Color:
 	if ring_colors.has(type_id):
