@@ -117,8 +117,16 @@ func _snap_then_ease(tree: SceneTree) -> String:
 		err = "no velocity after a snap"
 	if err.is_empty():
 		# Mid-level, the boy jumps 1000px: the view eases (no snap) and arrives later.
+		# Jump toward whichever side the clamp leaves room for (layouts change with levelgen).
 		var before := rig.center
-		p.global_position += Vector2(1000, 0)
+		var shift := Vector2(1000, 0)
+		var room_r := CameraRig.clamp_center(p.global_position + shift, rig.limits, VIEW).distance_to(before)
+		var room_l := CameraRig.clamp_center(p.global_position - shift, rig.limits, VIEW).distance_to(before)
+		if room_l > room_r:
+			shift = -shift
+		if maxf(room_l, room_r) < 100.0:
+			err = "seed 1 stage 1 level too narrow to test easing (%.0f / %.0f px of room)" % [room_l, room_r]
+		p.global_position += shift
 		p.velocity = Vector2.ZERO
 		await tree.process_frame
 		var step := rig.center.distance_to(before)
@@ -130,7 +138,7 @@ func _snap_then_ease(tree: SceneTree) -> String:
 		if err.is_empty() and rig.center.distance_to(goal) > 1.0:
 			err = "view should settle on the boy: %s vs %s" % [rig.center, goal]
 		if err.is_empty():
-			p.global_position += Vector2(400, 0)
+			p.global_position -= shift * 0.4
 			rig.snap()
 			if rig.center.distance_to(CameraRig.clamp_center(p.global_position, rig.limits, VIEW)) > 0.01:
 				err = "snap() must jump to the boy"
