@@ -77,6 +77,22 @@ func run_all() -> Dictionary:
 		["owned_items_strip_30_items_wraps_inside_1020", test_owned_strip_wraps],
 		["minimap_dots_clamped_and_chase_end_immediate", test_minimap_clamp_and_chase_end],
 		["hud_hidden_while_end_screen_open", test_hud_hidden_end_screen],
+		["shop_owned_row_and_hearts_live_after_buy", test_shop_owned_row],
+		["shop_disconnects_on_exit_no_orphans", test_shop_exit_tree],
+		["shop_gold_changed_one_connection_across_stage_changes", test_shop_gold_conns_stages],
+		["owned_strip_stack_badge_is_dark_pill", test_strip_badge_pill],
+		["owned_strip_spent_pip_contrast", test_strip_pip_contrast],
+		["minimap_drops_freed_chaser_without_report", test_minimap_freed_chaser],
+		["shop_owned_row_qa_repro_x5_panel_fits", test_shop_owned_qa_x5],
+		["shop_owned_row_qa_repro_6_flash_bulbs_fits", test_shop_owned_qa_bulbs6],
+		["owned_strip_hud_columns_never_widen", test_strip_hud_no_widen],
+		["owned_strip_spent_tile_badge_full_opacity", test_strip_spent_badge],
+		["owned_strip_order_charged_then_stacked_then_rest", test_strip_order],
+		["shop_owned_row_qa_repro_order_shows_charged_items", test_shop_owned_qa_order],
+		["shop_owned_overflow_tooltip_lists_hidden_items", test_shop_overflow_tooltip],
+		["shop_owned_overflow_click_opens_list", test_shop_overflow_click],
+		["shop_owned_overflow_outside_click_does_not_buy", test_shop_overflow_click_buy],
+		["owned_strip_pip_threshold_shop_3_hud_5", test_strip_pip_threshold],
 	]
 	var passed := 0
 	if _be_enemy_reports():   # BE PR #26 present (trial merge / after it lands)
@@ -1951,13 +1967,23 @@ func test_owned_strip_charges() -> String:
 	ps.begin_stage(null)   # refill
 	if err.is_empty() and (_pips(strip, 0).left != 1 or _pips(strip, 1).left != 1):
 		err = "begin_stage refills -> pips full again"
-	# a multi-charge item shows the count too
-	foot.max_charges = 3
-	foot.set_charges(2)
+	# pips are the count: no "n/max" text up to the pip cap (5), the number only past it
+	for mx in [3, 5]:
+		foot.max_charges = mx
+		foot.set_charges(2)
+		strip.refresh()   # max changed with charges unchanged -> no items_changed
+		if err.is_empty():
+			var p := _pips(strip, 1)
+			if p.total != mx or p.dots() != mx or p.left != 2:
+				err = "max %d -> %d pips, 2 lit" % [mx, mx]
+			elif strip.tiles[1].get_node_or_null(^"Charges/Count") != null:
+				err = "max %d: pips already show the count -> no 'n/max' text" % mx
+	foot.max_charges = 7
+	foot.set_charges(4)
 	if err.is_empty():
 		var n := strip.tiles[1].get_node_or_null(^"Charges/Count") as Label
-		if n == null or n.text != "2/3" or _pips(strip, 1).total != 3:
-			err = "max 3 -> 3 pips + '2/3' count"
+		if n == null or n.text != "4/7" or _pips(strip, 1).dots() != 1:
+			err = "max 7 (> pip cap) -> one pip + '4/7'"
 	_cleanup([strip, ps])
 	return err
 
@@ -2556,19 +2582,18 @@ func test_owned_strip_stacks() -> String:
 	if err.is_empty() and strip.tiles.size() != 3:
 		err = "one tile per id, got %d" % strip.tiles.size()
 	if err.is_empty():
-		var s0 := strip.tiles[0].get_node_or_null(^"Tile/Stack") as Label
-		var s1 := strip.tiles[1].get_node_or_null(^"Tile/Stack") as Label
+		var s0 := strip.tiles[0].find_child("Stack", true, false) as Label
+		var s1 := strip.tiles[1].find_child("Stack", true, false) as Label
 		if s0 == null or s0.text != "×3" or s1 == null or s1.text != "×2":
 			err = "stack badges should read ×3 / ×2"
-		elif strip.tiles[2].get_node_or_null(^"Tile/Stack") != null:
+		elif strip.tiles[2].find_child("Stack", true, false) != null:
 			err = "single item -> no ×N badge"
 	if err.is_empty() and (_pips(strip, 0).total != 3 or _pips(strip, 0).left != 3):
 		err = "stacked charges sum: 3/3"
 	bulbs[1].use_charge()
 	if err.is_empty():
-		var n := strip.tiles[0].get_node_or_null(^"Charges/Count") as Label
-		if _pips(strip, 0).left != 2 or n == null or n.text != "2/3":
-			err = "one bulb spent -> 2/3"
+		if _pips(strip, 0).left != 2 or strip.tiles[0].get_node_or_null(^"Charges/Count") != null:
+			err = "one bulb spent -> 2 of 3 pips lit, no number"
 	if err.is_empty():
 		var pip := _pips(strip, 0)
 		if strip.PIP_R * 2.0 < 11.0 or pip.get_combined_minimum_size().y < 11.0:
@@ -2682,4 +2707,729 @@ func test_hud_hidden_end_screen() -> String:
 		err = "screen freed -> HUD back"
 	_cleanup([sc, hud, hud2])
 	_reset_world()
+	return err
+
+
+## BE-shaped shop that really grants: Shop.buy(item, ps) (try_spend + grant_item).
+class _GrantShop extends RefCounted:
+	var ps: Node
+	var items: Array = []
+	func roll_stock(_stage: int, _run_seed: int) -> Array:
+		return items
+	func buy(item) -> bool:
+		return bool(load("res://scripts/items/shop.gd").buy(item, ps))
+
+
+func _shop_with_stats(ps: Node, b: Node) -> Node:
+	var shop: Node = load("res://scripts/ui/shop.gd").new()
+	shop.bus = b
+	shop.stats = ps
+	_root().add_child(shop)
+	return shop
+
+
+func test_shop_owned_row() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var db := _item_db()
+	var gs := _GrantShop.new()
+	gs.ps = ps
+	gs.items = [db.make("flash_bulb"), db.make("sneakers"), db.make("music_box"), db.make("minimap")]
+	b._shop = gs
+	ps.add_gold(999)
+	ps.grant_item(db.make("flash_bulb"))   # owned before the shop
+	var shop := _shop_with_stats(ps, b)
+	shop.open_shop()
+	_settle(shop)
+	var strip: Control = shop.owned_strip
+	var err := ""
+	if strip == null or not strip.compact or strip.tile_size >= 40.0:
+		err = "shop owned row should be the compact OwnedItemsStrip"
+	elif strip.entries.map(func(e): return e.id) != ["flash_bulb"]:
+		err = "owned row should show what's owned on open, got %s" % [strip.entries.map(func(e): return e.id)]
+	# buy flash bulb (dup -> stacks) + sneakers: live, no reopen
+	if err.is_empty() and not (shop.buy_index(0) and shop.buy_index(1)):
+		err = "buys should succeed with 999 gold"
+	_settle(shop)
+	if err.is_empty() and strip.entries.map(func(e): return [e.id, e.count]) != [["flash_bulb", 2], ["sneakers", 1]]:
+		err = "after buys the row should update live with stacking, got %s" % [strip.entries.map(func(e): return [e.id, e.count])]
+	if err.is_empty():
+		var st := strip.tiles[0].find_child("Stack", true, false) as Label
+		if st == null or st.text != "×2":
+			err = "stacked buy -> ×2 badge in the shop row"
+	if err.is_empty() and (strip.tiles[0].get_node(^"Tile") as Control).size.x > 30.0:
+		err = "shop tiles should be compact (<= 30 px), got %.0f" % (strip.tiles[0].get_node(^"Tile") as Control).size.x
+	if err.is_empty() and shop.owned_label.text != "Owned":
+		err = "owned label '%s'" % shop.owned_label.text
+	# hearts next to gold, live
+	ps.take_hit(1, true)
+	_settle(shop)
+	var mx: int = ps.max_health()
+	if err.is_empty() and (shop.hearts.size() != mx or shop.filled_hearts() != mx - 1):
+		err = "hearts %d filled %d, want %d / %d" % [shop.hearts.size(), shop.filled_hearts(), mx, mx - 1]
+	var row: Control = shop.root.find_child("StatsRow", true, false)
+	if err.is_empty() and (row == null or not row.is_ancestor_of(shop.hearts_box) or not row.is_ancestor_of(shop.gold_label)):
+		err = "hearts should sit in the gold row"
+	# layout: owned row inside OffersPanel below the cards; everything inside its panel
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var info: Control = shop.root.find_child("InfoPanel", true, false)
+	var pr := panel.get_global_rect().grow(0.5)
+	var orow: Control = shop.owned_row
+	if err.is_empty() and not pr.encloses(orow.get_global_rect()):
+		err = "owned row %s outside OffersPanel %s" % [orow.get_global_rect(), pr]
+	if err.is_empty() and orow.get_global_rect().position.y < (shop.cards[-1] as Control).get_global_rect().end.y:
+		err = "owned row should be under the offer cards"
+	if err.is_empty() and not info.get_global_rect().grow(0.5).encloses(row.get_global_rect()):
+		err = "hearts + gold row %s outside InfoPanel" % row.get_global_rect()
+	_cleanup([shop, b, ps])
+	_reset_world()
+	return err
+
+
+func _shop_conns(src: Object, shop: Node) -> int:
+	var n := 0
+	for sig in [&"stage_cleared", &"gold_changed", &"health_changed", &"items_changed"]:
+		n += _conns_into(src, sig, [shop])
+	return n
+
+
+func test_shop_exit_tree() -> String:
+	var pb := _stats_bus()
+	var ps: Node = pb[0]
+	var b: Node = pb[1]
+	var shop := _shop_with_stats(ps, b)
+	var err := ""
+	var on_b := _shop_conns(b, shop)
+	var on_ps := _shop_conns(ps, shop)
+	if on_b != 3 or on_ps != 2:   # bus: stage_cleared/gold/health; stats: shop + its owned row
+		err = "in the tree: want 3 bus + 2 stats connections, got %d + %d" % [on_b, on_ps]
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	_root().remove_child(shop)   # stage change
+	if err.is_empty() and _shop_conns(b, shop) + _shop_conns(ps, shop) != 0:
+		err = "%d orphan connections after the shop left the tree" % (_shop_conns(b, shop) + _shop_conns(ps, shop))
+	var poke := func() -> void:
+		ps.add_gold(5)
+		ps.take_hit(1, true)
+		ps.grant_item(_item_db().make("sneakers"))
+		b.stage_cleared.emit(2)
+	poke.call()
+	if err.is_empty() and shop.is_open():
+		err = "an out-of-tree shop must not open on stage_cleared"
+	_root().add_child(shop)
+	if err.is_empty() and (_shop_conns(b, shop) != 3 or _shop_conns(ps, shop) != 2):
+		err = "re-entering should reconnect exactly once (%d + %d)" % [_shop_conns(b, shop), _shop_conns(ps, shop)]
+	shop.free()
+	poke.call()
+	OS.remove_logger(log)
+	if err.is_empty() and not log.errors.is_empty():
+		err = "errors after the shop left / was freed: %s" % [log.errors.slice(0, 3)]
+	_cleanup([b, ps])
+	_reset_world()
+	return err
+
+
+## QA: across real stage changes (main.tscn swapped by FESignals.next_stage), exactly one
+## shop is ever connected to FESignals.gold_changed, and never one outside the tree.
+func test_shop_gold_conns_stages() -> String:
+	var fs := _root().get_node_or_null(^"FESignals")
+	if fs == null:
+		return "no FESignals autoload"
+	var shop_script: Script = load("res://scripts/ui/shop.gd")
+	var count := func() -> Vector2i:   # (connected shops, of which outside the tree)
+		var v := Vector2i.ZERO
+		for c in fs.get_signal_connection_list(&"gold_changed"):
+			var o: Object = (c.callable as Callable).get_object()
+			if o != null and is_instance_valid(o) and o.get_script() == shop_script:
+				v.x += 1
+				if not (o as Node).is_inside_tree():
+					v.y += 1
+		return v
+	var keep_deferred: bool = fs.swap_deferred
+	fs.swap_deferred = false
+	var base: Vector2i = count.call()
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	_root().add_child(main)
+	_tree().current_scene = main
+	var log := _ErrLog.new()
+	OS.add_logger(log)
+	var err := ""
+	var seen: Array = []
+	for s in 4:   # stages 1..4 -> next_stage swaps the whole main scene
+		var v: Vector2i = count.call() - base
+		seen.append(v.x)
+		if v != Vector2i(1, 0):
+			err = "stage %d: %d shops on gold_changed (%d out of the tree), want exactly 1" % [s + 1, v.x, v.y]
+			break
+		var old: Node = _tree().current_scene
+		fs.next_stage()
+		v = count.call() - base   # old scene removed (queued free), new one in: still exactly 1
+		if v != Vector2i(1, 0):
+			err = "right after swap %d: %d shops on gold_changed (%d orphaned)" % [s + 1, v.x, v.y]
+			break
+		if is_instance_valid(old):
+			old.free()   # queued by the swap; free now so later tests don't see its screens
+		fs.set_gold(int(fs.gold) + 1)
+	OS.remove_logger(log)
+	var errs := log.errors.filter(func(e): return "shop" in e.to_lower() or "data.tree" in e)
+	if err.is_empty() and not errs.is_empty():
+		err = "errors on gold_changed after stage changes: %s" % [errs.slice(0, 3)]
+	var cur := _tree().current_scene
+	_tree().current_scene = null
+	if is_instance_valid(cur):
+		cur.free()
+	fs.swap_deferred = keep_deferred
+	fs.reset()
+	fs.stage = 1
+	fs.run_seed = -1
+	var ps := _root().get_node_or_null(^"PlayerStats")
+	if ps:
+		ps.reset()
+	_reset_world()
+	return err
+
+
+func test_strip_badge_pill() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	for i in 3:
+		ps.grant_item(_item_db().make("sneakers"))
+	_settle(strip)
+	var err := ""
+	var tile := strip.tiles[0].get_node(^"Tile") as Control
+	var pill := tile.find_child("Badge", true, false) as PanelContainer
+	var lab := tile.find_child("Stack", true, false) as Label
+	if pill == null or lab == null or lab.text != "×3":
+		return "×3 badge missing"
+	var sb := pill.get_theme_stylebox(&"panel") as StyleBoxFlat
+	if sb == null or sb.bg_color.a < 0.7 or sb.bg_color.get_luminance() > 0.15 or sb.corner_radius_top_left < 3:
+		err = "badge should be a dark (lum <= 0.15, alpha >= 0.7) rounded pill"
+	if err.is_empty() and lab.get_theme_color(&"font_color") != Color.WHITE:
+		err = "badge text should be white"
+	var tr := tile.get_global_rect()
+	var pr := pill.get_global_rect()
+	if err.is_empty() and not (tr.grow(0.5).encloses(pr) and pr.position.x >= tr.position.x + tr.size.x * 0.3 and pr.position.y >= tr.position.y + tr.size.y * 0.4):
+		err = "badge %s should sit in the tile's bottom-right corner %s" % [pr, tr]
+	if err.is_empty() and pr.get_area() > tr.get_area() * 0.4:
+		err = "badge covers too much of the icon (%.0f%% of the tile)" % (100.0 * pr.get_area() / tr.get_area())
+	_cleanup([strip, ps])
+	return err
+
+
+func _contrast(a: Color, b: Color) -> float:
+	var la := a.get_luminance() + 0.05
+	var lb := b.get_luminance() + 0.05
+	return maxf(la, lb) / minf(la, lb)
+
+
+func test_strip_pip_contrast() -> String:
+	var S: Script = load("res://scripts/ui/owned_items_strip.gd")
+	var c: Dictionary = S.get_script_constant_map()
+	var dark_wall := Color(0.09, 0.07, 0.11)   # mansion wallpaper in shadow
+	var light_bg := Color(0.9, 0.86, 0.78)     # lit wall / parchment panel
+	if _contrast(c.PIP_RING, dark_wall) < 4.5:
+		return "spent pip ring vs dark wall contrast %.1f < 4.5" % _contrast(c.PIP_RING, dark_wall)
+	if _contrast(c.PIP_EMPTY, light_bg) < 4.5:
+		return "spent pip fill vs light background contrast %.1f < 4.5" % _contrast(c.PIP_EMPTY, light_bg)
+	if c.PIP_EDGE.a < 0.8 or c.PIP_EDGE.get_luminance() > 0.1:
+		return "spent pip needs a dark outer edge"
+	if _contrast(c.PIP_FULL, c.PIP_EMPTY) < 4.5:
+		return "lit vs spent pip contrast %.1f < 4.5" % _contrast(c.PIP_FULL, c.PIP_EMPTY)
+	return ""
+
+
+func test_minimap_freed_chaser() -> String:
+	var ps := _fresh_stats()
+	var b := _bus()
+	var mm := _mount_with_stats("res://scripts/ui/minimap.gd", ps, b)
+	ps.grant_item(_item_db().make("minimap"))
+	var a := _Chaser.new(); _root().add_child(a); a.global_position = Vector2(300, 300)
+	var c := _Chaser.new(); _root().add_child(c); c.global_position = Vector2(900, 300)
+	b.report_chase(a, true)
+	b.report_chase(c, true)
+	var err := ""
+	if mm.snapshot.chasers.size() != 2:
+		err = "2 chasers reported -> 2 dots, got %d" % mm.snapshot.chasers.size()
+	a.free()   # killed / despawned without a chase-end report, no _process tick
+	if err.is_empty() and mm.snapshot.chasers.size() != 1:
+		err = "freed chaser should drop its dot at once, got %d dots" % mm.snapshot.chasers.size()
+	_root().remove_child(c)   # tree_exiting without a report
+	if err.is_empty() and not mm.snapshot.chasers.is_empty():
+		err = "chaser leaving the tree should drop its dot at once"
+	_root().add_child(c)
+	b.report_chase(c, true)   # chasing again -> dot + watched again
+	if err.is_empty() and (mm.snapshot.chasers.size() != 1 or mm.watched_count() != 1):
+		err = "re-reported chaser -> dot again (%d dots, %d watched)" % [mm.snapshot.chasers.size(), mm.watched_count()]
+	_root().remove_child(mm)
+	if err.is_empty() and (mm.watched_count() != 0 or _conns_into(c, &"tree_exiting", [mm]) != 0):
+		err = "minimap out of the tree should stop watching chasers"
+	_cleanup([mm, c, b, ps])
+	return err
+
+
+## QA repro (#39): real main.tscn, stage 1 shop via GameState.on_reach_exit(), every ItemDb
+## id once, then `extra` ids topped up to `copies`. Returns [err, shop, main].
+func _qa_shop(extra: PackedStringArray, copies: int) -> Array:
+	var fs := _root().get_node(^"FESignals")
+	var gs := _root().get_node(^"GameState")
+	var ps := _root().get_node(^"PlayerStats")
+	ps.reset()
+	fs.swap_deferred = false
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	_root().add_child(main)
+	_tree().current_scene = main
+	var db := _item_db()
+	for id in db.ids():
+		ps.grant_item(db.make(id))
+	gs.on_reach_exit()
+	var shop: Node = main.get_node_or_null(^"Shop")
+	if shop == null or not shop.is_open():
+		return ["stage 1 exit should open the shop", shop, main]
+	for id in extra:   # live, while the shop is open
+		for i in copies - 1:
+			ps.grant_item(db.make(id))
+	_settle(shop)
+	return ["", shop, main]
+
+
+func _qa_end(main: Node) -> void:
+	var fs := _root().get_node(^"FESignals")
+	_tree().paused = false
+	var cur := _tree().current_scene
+	_tree().current_scene = null
+	if is_instance_valid(cur) and cur != main:
+		cur.free()   # Continue swapped in a new stage
+	if is_instance_valid(main):
+		main.free()
+	fs.reset()
+	fs.stage = 1
+	fs.run_seed = -1
+	fs.swap_deferred = true
+	_root().get_node(^"PlayerStats").reset()
+	_reset_world()
+
+
+## Columns: all exactly one tile wide, evenly spaced, each row inside `bound`.
+func _uniform_columns(strip: Control, bound: Rect2) -> String:
+	var step: float = strip.tile_size + strip.sep
+	for row in strip.get_children():
+		if not row is HBoxContainer:
+			continue   # the "+N" popover (top_level overlay)
+		var xs: Array = []
+		for col in row.get_children():
+			var r := (col as Control).get_global_rect()
+			if absf(r.size.x - strip.tile_size) > 0.5:
+				return "%s column is %.1f px wide, tile is %.0f" % [col.name, r.size.x, strip.tile_size]
+			if not bound.grow(0.5).encloses(r):
+				return "%s %s outside %s" % [col.name, r, bound]
+			xs.append(r.position.x)
+		for i in range(1, xs.size()):
+			if absf(xs[i] - xs[i - 1] - step) > 0.5:
+				return "uneven tile spacing in %s: %.1f vs %.1f" % [row.name, xs[i] - xs[i - 1], step]
+	if strip.size.x > strip.max_width() + 0.5:
+		return "strip %.0f px wider than max_width %.0f" % [strip.size.x, strip.max_width()]
+	return ""
+
+
+func _qa_panel_check(shop: Node) -> String:
+	var panel: Control = shop.root.find_child("OffersPanel", true, false)
+	var pr := panel.get_global_rect()
+	if pr.size.x > 460.5:
+		return "OffersPanel grew to %.0f px (max 460)" % pr.size.x
+	if pr.end.x >= 560.0:
+		return "OffersPanel ends at x=%.0f, into the merchant art (560-816)" % pr.end.x
+	var err := _uniform_columns(shop.owned_strip, pr)
+	if err.is_empty() and not pr.grow(0.5).encloses(shop.owned_row.get_global_rect()):
+		err = "owned row %s outside OffersPanel %s" % [shop.owned_row.get_global_rect(), pr]
+	if err.is_empty() and shop.owned_row.get_global_rect().position.y < (shop.cards[-1] as Control).get_global_rect().end.y:
+		err = "owned row overlaps the offer cards"
+	return err
+
+
+func test_shop_owned_qa_x5() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		err = _qa_panel_check(shop)
+	if err.is_empty():   # also with the "Not enough gold" line showing
+		shop.message.text = "Not enough gold for Thick Sweater."
+		_settle(shop)
+		err = _qa_panel_check(shop)
+		var pr: Rect2 = shop.root.find_child("OffersPanel", true, false).get_global_rect()
+		if err.is_empty() and not pr.encloses(shop.message.get_global_rect()):
+			err = "message outside OffersPanel with 2 owned rows"
+	var strip: Control = shop.owned_strip if err.is_empty() else null
+	if err.is_empty():
+		var by := {}
+		for e in strip.entries:
+			by[e.id] = e.count
+		if by.get("flash_bulb") != 5 or by.get("music_box") != 5 or by.get("rabbits_foot") != 5:
+			err = "want ×5 stacks, got %s" % [by]
+	# spend every Flash Bulb (hidden in "+N" here): the row still fits
+	if err.is_empty():
+		for it in _root().get_node(^"PlayerStats").owned_items:
+			if it.id == "flash_bulb":
+				it.set_charges(0)
+		_settle(shop)
+		err = _qa_panel_check(shop)
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_owned_qa_bulbs6() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb"]), 6)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		err = _qa_panel_check(shop)
+	if err.is_empty() and shop.owned_strip.overflow <= 0:
+		err = "22 ids in an 11-slot shop row -> '+N' overflow"
+	_qa_end(r[2])
+	if not err.is_empty():
+		return err
+	# the 6-bulb tile itself, in the shop's compact layout: one pip + '6/6' inside 28 px
+	var ps := _fresh_stats()
+	var strip: Control = load("res://scripts/ui/owned_items_strip.gd").new()
+	strip.stats = ps
+	strip.make_compact(11, 1)
+	_root().add_child(strip)
+	for i in 6:
+		ps.grant_item(_item_db().make("flash_bulb"))
+	ps.grant_item(_item_db().make("music_box"))
+	_settle(strip)
+	var t: Control = strip.tiles[0]
+	var n := t.get_node_or_null(^"Charges/Count") as Label
+	var cr: Rect2 = (t.get_node(^"Charges") as Control).get_global_rect()
+	if n == null or n.text != "6/6":
+		err = "6 bulbs (> pip cap) -> one pip + '6/6'"
+	elif cr.size.x > strip.tile_size + 0.5:
+		err = "pip row %.0f px wider than the tile" % cr.size.x
+	elif n.get_theme_font_size(&"font_size") < 7:
+		err = "count text too small"
+	elif ThemeDB.fallback_font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, n.get_theme_font_size(&"font_size")).x > n.size.x + 2.5:
+		err = "'6/6' clipped: %.0f px text in a %.0f px label" % [ThemeDB.fallback_font.get_string_size(n.text, HORIZONTAL_ALIGNMENT_LEFT, -1, n.get_theme_font_size(&"font_size")).x, n.size.x]
+	if err.is_empty():
+		err = _uniform_columns(strip, Rect2(0, 0, 1280, 720))
+	_cleanup([strip, ps])
+	return err
+
+
+func test_strip_hud_no_widen() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	for id in db.ids():
+		ps.grant_item(db.make(id))
+	for id in ["flash_bulb", "rabbits_foot", "music_box"]:
+		for i in 5:
+			ps.grant_item(db.make(id))
+	_settle(strip)
+	var err := _uniform_columns(strip, Rect2(0, 0, 1020, 720))
+	if err.is_empty():
+		for t in strip.tiles:
+			var p := t.get_node_or_null(^"Charges/Pips") as Control
+			if p and (p.get_combined_minimum_size().y < 11.0 or p.get_global_rect().size.x > strip.tile_size + 0.5):
+				err = "%s pips should be >= 11 px and inside the tile" % t.name
+				break
+	if err.is_empty() and strip.get_global_rect().end.x > 14.0 + strip.max_width() + 0.5 + strip.get_global_rect().position.x - 14.0:
+		err = "HUD strip wider than its max"
+	_cleanup([strip, ps])
+	return err
+
+
+func test_strip_spent_badge() -> String:
+	for compact in [false, true]:
+		var ps := _fresh_stats()
+		var strip: Control = load("res://scripts/ui/owned_items_strip.gd").new()
+		strip.stats = ps
+		if compact:
+			strip.make_compact(11, 1)
+		_root().add_child(strip)
+		var bulbs: Array = []
+		for i in 5:
+			bulbs.append(_item_db().make("flash_bulb"))
+			ps.grant_item(bulbs[-1])
+		for b in bulbs:
+			b.set_charges(0)
+		_settle(strip)
+		var t: Control = strip.tiles[0]
+		var badge := t.find_child("Badge", true, false) as Control
+		var tile := t.get_node(^"Tile") as CanvasItem
+		var art := tile.get_child(0) as CanvasItem
+		var a := badge.self_modulate.a
+		var n: Node = badge
+		while n != null and n != t:
+			a *= (n as CanvasItem).modulate.a
+			n = n.get_parent()
+		var err := ""
+		if a < 0.999:
+			err = "%s: ×5 badge on a spent tile should be full opacity, got %.2f" % ["shop" if compact else "HUD", a]
+		elif art.modulate.a > 0.6 or tile.self_modulate.a > 0.6:
+			err = "spent tile's icon and frame should fade"
+		_cleanup([strip, ps])
+		if not err.is_empty():
+			return err
+	return ""
+
+
+func test_strip_order() -> String:
+	var ps := _fresh_stats()
+	var strip := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var db := _item_db()
+	for id in ["sneakers", "soft_shoes", "thick_sweater", "soft_shoes", "music_box", "thick_sweater", "flash_bulb"]:
+		ps.grant_item(db.make(id))
+	var got: Array = strip.entries.map(func(e): return e.id)
+	var want := ["music_box", "flash_bulb", "soft_shoes", "thick_sweater", "sneakers"]
+	var err := ""
+	if got != want:
+		err = "order: charged, then stacked, then the rest (each by first owned): want %s, got %s" % [want, got]
+	var tiles_ids: Array = strip.tiles.map(func(t): return String(t.name).trim_prefix("Item_"))
+	if err.is_empty() and tiles_ids != want:
+		err = "tiles drawn in a different order: %s" % [tiles_ids]
+	_cleanup([strip, ps])
+	return err
+
+
+func _visible_ids(strip: Control) -> Array:
+	return strip.tiles.map(func(t): return String(t.name).trim_prefix("Item_"))
+
+
+func test_shop_owned_qa_order() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var vis := _visible_ids(strip)
+		for id in ["flash_bulb", "rabbits_foot", "music_box"]:
+			if not id in vis:
+				err = "%s must be visible in the shop row, not in +N (visible: %s)" % [id, vis]
+				break
+		var last := -1
+		var last_order := -1
+		for e in strip.entries:
+			var g: int = 0 if e.max_charges > 0 else (1 if e.count > 1 else 2)
+			if err.is_empty() and (g < last or (g == last and e.order < last_order)):
+				err = "%s out of order (group %d after %d)" % [e.id, g, last]
+			if g != last:
+				last_order = -1
+			last = g
+			last_order = e.order
+	_qa_end(r[2])
+	return err
+
+
+func _mouse(pos: Vector2, button := MOUSE_BUTTON_NONE, pressed := false) -> void:
+	var ev: InputEvent
+	if button == MOUSE_BUTTON_NONE:
+		ev = InputEventMouseMotion.new()
+	else:
+		ev = InputEventMouseButton.new()
+		ev.button_index = button
+		ev.pressed = pressed
+	ev.position = pos
+	ev.global_position = pos
+	_root().push_input(ev, true)   # viewport coords (headless window is 64x64, stretched)
+
+
+func _click(pos: Vector2) -> void:
+	_mouse(pos)
+	_mouse(pos, MOUSE_BUTTON_LEFT, true)
+	_mouse(pos, MOUSE_BUTTON_LEFT, false)
+
+
+func test_shop_overflow_tooltip() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var ps := _root().get_node(^"PlayerStats")
+		# hidden = every owned id not drawn as a tile (computed from PlayerStats, not the strip)
+		var owned: Array = []
+		for it in ps.owned_items:
+			if not it.id in owned:
+				owned.append(it.id)
+		var vis := _visible_ids(strip)
+		var hidden := owned.filter(func(id): return not id in vis)
+		if over == null:
+			err = "no +N tile"
+		elif over.mouse_filter != Control.MOUSE_FILTER_STOP:
+			err = "+N tile must take the mouse (STOP) so its tooltip shows"
+		elif (over.find_child("More", true, false) as Label).text != "+%d" % hidden.size():
+			err = "+N says %s, %d hidden" % [(over.find_child("More", true, false) as Label).text, hidden.size()]
+		if err.is_empty():
+			var c := over.get_global_rect().get_center()
+			_mouse(c)
+			var hov := _root().gui_get_hovered_control()
+			if hov != over:
+				err = "mouse over +N hovers %s, not the +N tile" % [hov.get_path() if hov else null]
+			else:
+				var tip := hov.get_tooltip(c - hov.get_global_rect().position)
+				var lines := tip.split("\n")
+				if lines.size() != hidden.size():
+					err = "tooltip has %d lines for %d hidden items: %s" % [lines.size(), hidden.size(), tip]
+				for i in lines.size():
+					if not err.is_empty():
+						break
+					var it: Object = null
+					for o in ps.owned_items:
+						if o.id == hidden[i]:
+							it = o
+							break
+					if not lines[i].begins_with(str(it.display_name)):
+							err = "tooltip line %d '%s' should be %s" % [i, lines[i], it.display_name]
+					var n := (ps.owned_items as Array).filter(func(o): return o.id == hidden[i]).size()
+					if err.is_empty() and n > 1 and not ("×%d" % n) in lines[i]:
+						err = "tooltip line '%s' missing ×%d" % [lines[i], n]
+					if err.is_empty() and int(it.max_charges) > 0 and not "charges" in lines[i]:
+						err = "tooltip line '%s' missing charges" % lines[i]
+		# the cards keep the mouse: hovering a Buy button hovers that button
+		if err.is_empty():
+			var buy := (shop.cards[0] as Control).find_child("Buy", true, false) as Control
+			_mouse(buy.get_global_rect().get_center())
+			if _root().gui_get_hovered_control() != buy:
+				err = "Buy button no longer gets the mouse"
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_overflow_click() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var strip: Control = shop.owned_strip
+		var over: Control = strip.overflow_tile
+		var c := over.get_global_rect().get_center()
+		_click(c)
+		_settle(shop)
+		var pop: Control = strip.popover
+		var panel: Control = shop.root.find_child("OffersPanel", true, false)
+		var cont: Control = shop.continue_button
+		var screen := Rect2(Vector2.ZERO, _root().get_visible_rect().size)
+		if not strip.is_overflow_open():
+			err = "clicking +N should open the hidden-items list"
+		if err.is_empty():
+			for e in strip.hidden_entries():
+				var cell := pop.find_child("Hidden_%s" % e.id, true, false)
+				if cell == null:
+					err = "list is missing %s" % e.id
+					break
+				var nm := cell.get_node_or_null(^"Name") as Label
+				if nm == null or not nm.text.begins_with(e.name):
+					err = "%s row should show its name" % e.id
+					break
+			var cells := pop.find_child("Items", true, false).get_child_count()
+			if err.is_empty() and cells != strip.overflow:
+				err = "list has %d rows for %d hidden" % [cells, strip.overflow]
+		var pr: Rect2 = pop.get_global_rect() if pop else Rect2()
+		if err.is_empty() and not screen.encloses(pr):
+			err = "list %s off screen" % pr
+		if err.is_empty() and not panel.get_global_rect().grow(0.5).encloses(pr):
+			err = "list %s should stay inside OffersPanel %s" % [pr, panel.get_global_rect()]
+		if err.is_empty() and pr.intersects(cont.get_global_rect()):
+			err = "list overlaps Continue"
+		if err.is_empty():
+			err = _qa_panel_check(shop)   # still 460 px, < 560 with the list open
+		# click +N again -> closes; open, click outside -> closes
+		if err.is_empty():
+			_click(c)
+			if strip.is_overflow_open():
+				err = "second click on +N should close the list"
+		if err.is_empty():
+			_click(c)
+			_settle(shop)
+			_click(Vector2(700, 650))   # empty floor under the merchant
+			if strip.is_overflow_open():
+				err = "click outside should close the list"
+		if err.is_empty():
+			_click(c)
+			_settle(shop)
+			_click(strip.popover.get_global_rect().get_center())
+			if not strip.is_overflow_open():
+				err = "a click inside the list should keep it open"
+		# Continue under an open list: the first click only closes the list, the second continues
+		if err.is_empty():
+			if not strip.is_overflow_open():   # still open from the click inside the list
+				err = "list should still be open before the Continue click"
+			var main_before := _tree().current_scene
+			_click(cont.get_global_rect().get_center())
+			if strip.is_overflow_open():
+				err = "a click on Continue should close the list"
+			elif not shop.is_open() or _tree().current_scene != main_before:
+				err = "the closing click must not also press Continue"
+		if err.is_empty():
+			_click(cont.get_global_rect().get_center())
+			if shop.is_open():
+				err = "second click on Continue should continue"
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err
+
+
+func test_shop_overflow_click_buy() -> String:
+	var r := _qa_shop(PackedStringArray(["flash_bulb", "rabbits_foot", "music_box"]), 5)
+	var err: String = r[0]
+	var shop: Node = r[1]
+	if err.is_empty():
+		var ps := _root().get_node(^"PlayerStats")
+		ps.add_gold(2000)   # plenty for Offer0 (a gold multiplier may apply, so measure the baseline)
+		_settle(shop)
+		var gold0: int = ps.gold
+		var strip: Control = shop.owned_strip
+		if strip.overflow < 1:
+			err = "repro should hide items behind +N (got %d)" % strip.overflow
+		var buy := shop.root.find_child("Offer0", true, false).find_child("Buy", true, false) as Button
+		var at := buy.get_global_rect().get_center()
+		var owned: int = ps.owned_items.size()
+		if err.is_empty():
+			_click(strip.overflow_tile.get_global_rect().get_center())
+			_settle(shop)
+			if not strip.is_overflow_open():
+				err = "+N click should open the list"
+			elif strip.popover.get_global_rect().has_point(at):
+				err = "list covers Offer0's Buy; test needs a visible Buy"
+		if err.is_empty():
+			_click(at)
+			_settle(shop)
+			if strip.is_overflow_open():
+				err = "click on Buy should close the list"
+			elif int(ps.gold) != gold0 or ps.owned_items.size() != owned or shop.sold[0]:
+				err = "closing click also bought (gold %d, owned %d -> %d, sold %s)" % [ps.gold, owned, ps.owned_items.size(), shop.sold[0]]
+		if err.is_empty():
+			_click(at)
+			_settle(shop)
+			if int(ps.gold) >= gold0 or ps.owned_items.size() != owned + 1 or not shop.sold[0]:
+				err = "second click on Buy should buy (gold %d, owned %d)" % [ps.gold, ps.owned_items.size()]
+		_mouse(Vector2(-10, -10))
+	_qa_end(r[2])
+	return err
+
+
+func test_strip_pip_threshold() -> String:
+	var err := ""
+	var ps := _fresh_stats()
+	var hud := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	var shop_s := _mount_with_stats("res://scripts/ui/owned_items_strip.gd", ps)
+	shop_s.make_compact(11, 1)
+	var db := _item_db()
+	var it: Object = db.make("flash_bulb")
+	ps.grant_item(it)
+	for n in [3, 4, 5, 6]:
+		it.max_charges = n
+		it.charges = n
+		hud.refresh()
+		shop_s.refresh()
+		for pair in [[hud, 5], [shop_s, 3]]:
+			var strip: Control = pair[0]
+			var limit: int = pair[1]
+			var num: bool = strip.tiles[0].find_child("Count", true, false) != null
+			if err.is_empty() and num != (n > limit):
+				err = "%s with %d charges: n/max %s (want pips up to %d)" % ["shop" if strip == shop_s else "HUD", n, num, limit]
+	_cleanup([hud, shop_s, ps])
 	return err

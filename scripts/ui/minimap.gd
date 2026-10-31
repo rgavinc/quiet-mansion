@@ -33,6 +33,9 @@ var stats: Node
 ## player: Vector2|null, exit: Vector2|null, chasers: Array[Vector2], source: String}.
 var snapshot: Dictionary = {}
 var _acc := 0.0
+## instance_id -> [enemy, bound tree_exiting callable] for reported chasers.
+var _watched := {}
+var _exiting: Node = null
 var _map_rect := Rect2()
 
 
@@ -50,6 +53,7 @@ func _enter_tree() -> void:
 ## a stage change (QA B1) is disconnected and never reads a null tree.
 func _exit_tree() -> void:
 	_wire(false)
+	_unwatch_all()
 
 
 func _wire(on: bool) -> void:
@@ -88,8 +92,52 @@ func _on_stat_changed(stat: StringName, _value: float) -> void:
 
 
 ## Chase start/end: redraw now so a red dot appears/vanishes at once, not on the next tick.
-func _on_chase_changed(_enemy: Node2D, _chasing: bool) -> void:
+## While chasing, the enemy's tree_exiting is watched, so a chaser freed (or removed) without
+## a chase-end report loses its dot at once too.
+func _on_chase_changed(enemy: Node2D, chasing: bool) -> void:
+	if enemy != null and is_instance_valid(enemy):
+		if chasing:
+			_watch(enemy)
+		else:
+			_unwatch(enemy)
 	refresh()
+
+
+func _watch(e: Node) -> void:
+	var id := e.get_instance_id()
+	if _watched.has(id):
+		return
+	var cb := _on_chaser_exiting.bind(e)
+	e.tree_exiting.connect(cb)
+	_watched[id] = [e, cb]
+
+
+func _unwatch(e: Node) -> void:
+	var id := e.get_instance_id()
+	var w: Array = _watched.get(id, [])
+	_watched.erase(id)
+	if not w.is_empty() and is_instance_valid(w[0]) and (w[0] as Node).tree_exiting.is_connected(w[1]):
+		(w[0] as Node).tree_exiting.disconnect(w[1])
+
+
+func _unwatch_all() -> void:
+	for id in _watched.keys():
+		var w: Array = _watched[id]
+		if is_instance_valid(w[0]):
+			_unwatch(w[0])
+	_watched.clear()
+
+
+## Enemies whose tree_exiting this minimap listens to (tests).
+func watched_count() -> int:
+	return _watched.size()
+
+
+func _on_chaser_exiting(e: Node) -> void:
+	_unwatch(e)    # re-watched if it is reported chasing again
+	_exiting = e   # still inside the tree during tree_exiting: skip it explicitly
+	refresh()
+	_exiting = null
 
 
 func enabled() -> bool:
@@ -147,7 +195,9 @@ func read_level() -> Dictionary:
 			break
 	if bus and "chasing" in bus:
 		for raw in bus.chasing:
-			if raw != null and is_instance_valid(raw) and raw is Node2D:
+			if raw != null and is_instance_valid(raw) and raw is Node2D and raw != _exiting \
+					and (raw as Node).is_inside_tree() and not (raw as Node).is_queued_for_deletion():
+				_watch(raw)   # reported before this minimap existed
 				snap.chasers.append((raw as Node2D).global_position)
 	# 1. #13 generated level
 	var nav_script := _global_script("LevelNav")
