@@ -49,7 +49,7 @@ Noise alerts puppets within hear radius. Knocking a calm puppet has a 50% kill c
   | Stat | min | max | Note |
   |---|---|---|---|
   | `max_health` | 1 | **6** hearts | PD |
-  | `move_speed` (+ carry hooks) | 70 | 280 px/s | ×0.5–×2 |
+  | `move_speed` (+ carry hooks) | **105** (PD: above the walker's 95 chase speed) | 280 px/s | ×0.5–×2 |
   | `jump_velocity`, `gravity` | pinned | pinned | no item changes jump height (rails rule) |
   | `climb_speed` | 36 | 225 px/s | |
   | `pickup_time` | 0.3 | 3 s | |
@@ -153,7 +153,7 @@ Every enemy type is an `Enemy` subclass (or a plain `Enemy` with an `EnemyDef`) 
 | `CALM` | Idles / patrols `patrol_radius` around `home`. Light on it builds `startle` 0→1 over `PlayerStats` `light_startle_time` (1.0 s); light off resets it to 0. | startle hits 1 → `STARTLED`; a noise in range → `CHASE` |
 | `STARTLED` | Plays `puppet_startle` once and holds the last frame; waits `startle_delay()`: the scream animation's length (manifest `frames / fps`, 7 / 14 = 0.5 s for the puppet), so the chase starts as the scream ends. | → `CHASE` |
 | `CHASE` | Runs at `chase_speed` to the boy. Memory stays 1 while it sees him or while a noise / light lets it track him without sight (`noise_track_time` 3 s, `light_track_time` 1 s). | loses him → `SEARCH`; lands a hit → `RECOVER`; throw → `STUNNED` |
-| `SEARCH` | Goes to `last_known`; `memory` drains, faster the farther the boy is: rate = `(1 / memory_time) * clamp(distance / give_up_distance, 0.25, 4)`. | sees / hears him → `CHASE`; memory 0 → `RETURN` |
+| `SEARCH` | Goes to `last_known`; `memory` drains, faster the farther the boy is: rate = `(1 / memory_time) * clamp(distance / give_up_distance, give_up_far_min 0.5, give_up_far_max 2)`; hard cap: gives up at most `give_up_cap` (6 s) after losing sight, `noise_track_time` (3 s) counting inside it. | sees / hears him → `CHASE`; memory 0 → `RETURN` |
 | `RETURN` | Walks home (counts as calm: light can startle it, a throw kills it). | home → `CALM` |
 | `RECOVER` | After a landed hit: shoves the boy `shove_distance`, backs off at `backoff_speed` for `recover_time` (1.5 s) and can't hit. | → `CHASE` / `SEARCH` |
 | `STUNNED` | A throw hit a non-calm enemy: stands still `stun_time` (1.5 s), holding the startle frame. | → `CHASE` / `SEARCH` |
@@ -164,7 +164,7 @@ Every enemy type is an `Enemy` subclass (or a plain `Enemy` with an `EnemyDef`) 
 - `is_chasing()` = from chase start until give-up or death (CHASE, SEARCH and the RECOVER / STUNNED pauses inside it). `enraged` (legacy, FE polls it) returns the same value.
 
 ### Tunables (exports; an `EnemyDef` can set any of them)
-`type_id, movement, walk_speed 45, chase_speed 95, float_speed 45, climb_speed 80, hear_radius, hearing_mult 1, sight_range 560, memory_time 4, give_up_distance 900, noise_track_time 3, light_track_time 1, startle_reaction_time 0 (= use the startle anim length), recover_time 1.5, backoff_speed 60, stun_time 1.5, patrol_radius 0, shove_distance 48, hit_radius 18, anim_calm / anim_startle / anim_chase`.
+`type_id, movement, walk_speed 45, chase_speed 95, float_speed 45, climb_speed 80, hear_radius, hearing_mult 1, sight_range 560, memory_time 3, give_up_distance 900, noise_track_time 3, light_track_time 1, startle_reaction_time 0 (= use the startle anim length), recover_time 1.5, backoff_speed 60, stun_time 1.5, patrol_radius 0, shove_distance 48, hit_radius 18, anim_calm / anim_startle / anim_chase`.
 
 ### Startle → chase delay
 `startle_delay()` = `startle_reaction_time` when it's > 0 (a per-type override in an `EnemyDef`, in seconds). At 0 or below (the default) it's `Enemy.startle_anim_length(anim_startle)` = the slot's `frames / fps` from `ASSETS_MANIFEST.toml` via `AnimLibrary`, so re-timing the scream art re-times the chase with no code change. A missing slot, or one with no frames or fps, falls back to `STARTLE_FALLBACK_TIME` (0.5 s). Measured on real frames: lit 1.00 s → `STARTLED`, then `CHASE` 30 frames (0.50 s) later.
@@ -241,3 +241,10 @@ Rattle landing sweep (probe, not in the suite): real `LevelGenerator` levels, ev
 
 ### QA follow-up: stair immunity
 `_boy_off_perch` (no contact hit while a hopped-off boy is airborne) is cleared on stair entry (`p.stair != null`) and on landing (recomputed from `boy_perched` once he stands), so walker contact on a stair hurts. Test: `stair_clears_off_perch_immunity_airborne_keeps_it`.
+
+## Chase fairness (PD rulings; `be/chase-fairness`)
+- **Speed floor:** `STAT_BOUNDS[move_speed]` min is now **105** px/s (walker `chase_speed` is 95), max stays 280 (the level validator only reads `stat_max(move_speed)`, unchanged).
+- **Carry floor:** `PlayerStats.CARRY_SPEED_FLOOR = 100`. `_carry_mult` clamps the *product* `move_speed x carry` to `[min(100, move_speed), max(stat_max, move_speed)]` and returns it as a multiplier, so effective run speed with any number of vases never drops below 100 px/s (Heavy Vases x3+ at base 140 is capped at x0.714 instead of x0.7 = 98). `item_carry_mult` itself is still bounded [0.7, 1.0].
+- **Give-up wait:** `memory_time` default 4 -> **3.0 s** (`@export` on `EnemyBase`, per-type via `DEF_FIELDS`/`EnemyDef`; one number to retune). Distance scaling softened to clamp 0.5..2, plus a hard `give_up_cap` of 6 s after lost sight (tracking time inside it). PROVISIONAL: PD/QA retune pending a corrected tactic probe.
+- **Test:** `run_speed_at_least_105_free_100_carrying_every_combo` (`test_item_behaviors.gd`): 8640 combinations of min/base/max move_speed (modifier x0.001 / 1 / x1000) x Soft Shoes 0-3 x Big Pockets 0-3 x Thick Sweater 0-3 x Sneakers 0-2 x Heavy Vases 0-4, holding 0 / 1 / 3 vases through the real `PlayerController.move_speed()`: speed >= 105 empty-handed, >= 100 carrying, > walker chase 95, <= 280; and the floors are hit exactly (min stat 105, min stat + vase 100).
+- **Probe:** `p_chase54.gd` (QA's tactic probe: run away / open floor / break LOS / vase / away stairs / hide-wait on every h>=3 piece, both sides, real LevelGenerator levels, 0.25 s reaction); run with `POLS=... RD=15 -s launch.gd -- p_chase54.gd <stage> <seed0> <seed1>`.

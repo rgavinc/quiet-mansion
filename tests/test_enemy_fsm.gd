@@ -19,6 +19,8 @@ func run_all() -> Dictionary:
 		["lost_sight_memory_drains_then_returns_home", test_memory_return],
 		["sight_regained_refills_memory", test_memory_refill],
 		["memory_drains_faster_when_farther", test_memory_distance],
+		["give_up_within_cap_after_lost_sight_near_mid_far_track_inside", test_give_up_cap],
+		["fresh_noise_restarts_the_give_up_clock", test_give_up_noise_restart],
 		["several_enemies_chase_at_once", test_multi],
 		["landed_hit_backs_off_no_hits_1_5s", test_recover],
 		["throw_stuns_enraged_kills_calm", test_stun],
@@ -522,6 +524,41 @@ func test_memory_distance() -> Variant:
 		far.tick(DT)
 	if not (far.memory < near.memory): return "far %.2f not below near %.2f after 1s" % [far.memory, near.memory]
 	return "" if absf(FESignals.get_chase_memory(far) - far.memory) < 0.001 else "FE memory not reported"
+
+
+## PD: the walker gives up no more than give_up_cap (6 s) after it stops seeing the boy, at any
+## distance; the noise-track window counts inside it. Gaps near / mid / far, boy hidden throughout.
+func test_give_up_cap() -> Variant:
+	var times: Array = []
+	for gap in [60.0, 200.0, 500.0, 900.0, 1500.0, 3000.0]:
+		_clean()
+		_player(Vector2(0, 100))
+		var e := _puppet(Vector2(gap, 100))
+		e.chase_speed = 0.0   # keep the distance fixed (no walking up to the hiding boy)
+		e.hear_noise()        # noise_track_time of tracking, then SEARCH
+		e.sight_override = 0  # lost sight from now on
+		var t := _run(e, e.give_up_cap + 1.0, func(): return e.state == e.State.RETURN)
+		if e.state != e.State.RETURN: return "gap %.0f: still hunting %.1f s after losing sight (cap %.1f)" % [gap, t, e.give_up_cap]
+		if t > e.give_up_cap + 2.0 * DT: return "gap %.0f: gave up after %.2f s, cap %.1f" % [gap, t, e.give_up_cap]
+		if t < e.noise_track_time - 2.0 * DT: return "gap %.0f: gave up after %.2f s, before the %.1f s noise-track window ended" % [gap, t, e.noise_track_time]
+		times.append(t)
+	if not (times[0] >= times[times.size() - 1]): return "near hider got a shorter wait than a far one: %s" % [times]
+	return ""
+
+
+func test_give_up_noise_restart() -> Variant:
+	_player(Vector2(0, 100))
+	var e := _puppet(Vector2(400, 100))
+	e.chase_speed = 0.0
+	e.hear_noise()
+	e.sight_override = 0
+	_run(e, e.give_up_cap - 1.0)
+	if e.state == e.State.RETURN: return "gave up before the cap"
+	e.hear_noise()   # he made noise again: the clock restarts
+	_run(e, e.give_up_cap - 1.0)
+	if e.state == e.State.RETURN: return "fresh noise did not restart the give-up clock"
+	_run(e, 3.0, func(): return e.state == e.State.RETURN)
+	return "" if e.state == e.State.RETURN else "never gave up after the second noise"
 
 
 ## PD: STARTLED -> CHASE waits for the scream animation (manifest frames / fps via AnimLibrary).
