@@ -1,12 +1,17 @@
 class_name CameraRig
 extends Node
-## FE owns the player camera's bounds and follow (Camera2D itself is built by main.gd).
+## FE owns the player camera's bounds, zoom and follow (Camera2D itself is built by main.gd).
 ## Lives in `world_overlay.tscn`, so it needs no hook in main.gd: it adopts the viewport's
 ## current Camera2D the first frame it sees it (a new camera = a new stage or a new run), and then
-##   1. clamps the camera LIMITS to the level: `LevelNav.current.layout` →
+##   1. applies `HudSkin.camera_zoom` (default 3: one floor plus a bit of the floors above/below)
+##      and `HudSkin.camera_floor_y` (default 0.7: the boy's feet / current floor sit 70% of
+##      the way down the view, with more of the room visible above him). Clamps the camera
+##      LIMITS to the level: `LevelNav.current.layout` →
 ##      `LevelValidator.level_bounds` (PR #13), else a TileMap/TileMapLayer used rect, else the
-##      1280x720 dev room. A level smaller than the screen on an axis is centred on that axis
-##      (same rule main.gd used), so the view never leaves `limits`.
+##      1280x720 dev room. A level smaller than the world view (viewport / zoom) on an axis is
+##      centred on that axis (same rule main.gd used). The bottom (or top) of `limits` is padded
+##      just enough that the floor-y framing can hold at the level edge without the clamp pinning
+##      the boy to the bottom of the screen; the view still never leaves `limits`.
 ##   2. follows the boy itself (built-in smoothing is switched off): critically damped per axis,
 ##      X quick, Y slower and speed capped, so a stair climb glides and never lurches. The target
 ##      is clamped to the limits BEFORE smoothing, so the view never winds up against a wall.
@@ -40,6 +45,11 @@ var bounds_source: StringName = &"room"
 var _cam: Camera2D
 var _target: Node2D
 var _nav: Object
+## Hit-feedback shake. Applied to the display position, then re-clamped so it never shows void.
+var _shake_amp: float = 0.0
+var _shake_left: float = 0.0
+var _shake_dur: float = 0.0
+var _shake_time: float = 0.0
 
 
 func _init() -> void:
@@ -68,11 +78,33 @@ static func active_rig(tree: SceneTree) -> CameraRig:
 
 ## Camera limits for a level: the level bounds, widened per axis (centred on the level) up to
 ## one screen. `view` = world px the viewport shows (viewport size / zoom).
-static func limits_for(b: Rect2, view: Vector2) -> Rect2:
+## `floor_y` (0 = top, 1 = bottom) pads the edge the camera looks away from, so a boy standing
+## on that edge of `b` can still sit at `floor_y` of the view. 0.5 (default) pads nothing and
+## matches the old limits.
+static func limits_for(b: Rect2, view: Vector2, floor_y: float = 0.5) -> Rect2:
 	var c := b.get_center()
 	var lo := Vector2(minf(b.position.x, c.x - view.x / 2.0), minf(b.position.y, c.y - view.y / 2.0))
 	var hi := Vector2(maxf(b.end.x, c.x + view.x / 2.0), maxf(b.end.y, c.y + view.y / 2.0))
+	var t := clampf(floor_y, 0.0, 1.0)
+	# Looking up (floor_y > 0.5) needs room below the floor; looking down needs room above.
+	if t > 0.5:
+		hi.y = maxf(hi.y, b.end.y + (1.0 - t) * view.y)
+	elif t < 0.5:
+		lo.y = minf(lo.y, b.position.y - t * view.y)
 	return Rect2(Vector2(floorf(lo.x), floorf(lo.y)), Vector2(ceilf(hi.x), ceilf(hi.y)) - Vector2(floorf(lo.x), floorf(lo.y)))
+
+
+## World-space offset added to the follow target so it sits at `floor_y` of the view
+## (0 = top, 1 = bottom). Positive Y is down, so a value > 0.5 shifts the camera up.
+static func follow_offset(view: Vector2, floor_y: float = 0.7) -> Vector2:
+	return Vector2(0.0, (0.5 - clampf(floor_y, 0.0, 1.0)) * view.y)
+
+
+## Skin floor-y, clamped to 0..1 (default 0.7).
+static func floor_y_of(s: HudSkin = null) -> float:
+	if s == null:
+		s = HudSkin.load_default()
+	return clampf(s.camera_floor_y, 0.0, 1.0)
 
 
 ## Clamp a view centre so a `view`-sized screen stays inside `lim`.
@@ -96,11 +128,18 @@ static func camera_limits(cam: Camera2D) -> Rect2:
 			Vector2(cam.limit_right - cam.limit_left, cam.limit_bottom - cam.limit_top))
 
 
-## World px the camera's viewport shows.
+## World px the camera's viewport shows (viewport size / zoom).
 static func view_size(cam: Camera2D) -> Vector2:
 	var vp := cam.get_viewport()
 	var size := vp.get_visible_rect().size if vp else Vector2(1280, 720)
 	return size / cam.zoom
+
+
+## Zoom from a skin (default 3). Never zero or negative.
+static func zoom_from_skin(s: HudSkin = null) -> float:
+	if s == null:
+		s = HudSkin.load_default()
+	return maxf(s.camera_zoom, 0.01)
 
 
 ## One axis of Unity-style SmoothDamp (critically damped spring, no overshoot): returns
@@ -166,11 +205,12 @@ func adopt(cam: Camera2D, target: Node2D = null) -> void:
 func refresh_limits() -> void:
 	if _cam == null or not is_instance_valid(_cam):
 		return
+	_apply_zoom(_cam)
 	_nav = LevelNav.current
 	var r := level_bounds_for(get_tree())
 	bounds = r[0]
 	bounds_source = r[1]
-	limits = limits_for(bounds, view_size(_cam))
+	limits = limits_for(bounds, view_size(_cam), floor_y_of(skin))
 	_cam.limit_left = int(limits.position.x)
 	_cam.limit_top = int(limits.position.y)
 	_cam.limit_right = int(limits.end.x)
@@ -178,12 +218,15 @@ func refresh_limits() -> void:
 	_cam.limit_smoothed = false
 
 
-## Where the view would centre on the boy with no nudge (the clamped follow target).
+## Where the view would centre on the boy with no nudge (the clamped follow target,
+## already shifted so the boy sits at `camera_floor_y`).
 func follow_goal() -> Vector2:
 	var t := follow_target()
 	if _cam == null or not is_instance_valid(_cam):
 		return t.global_position if t else Vector2.ZERO
-	return clamp_center(t.global_position if t else _cam.global_position, limits, view_size(_cam))
+	var view := view_size(_cam)
+	var src := t.global_position if t else _cam.global_position
+	return clamp_center(src + follow_offset(view, floor_y_of(skin)), limits, view)
 
 
 ## The flashlight nudge to add to the follow target (0 with no CameraNudge).
@@ -194,10 +237,34 @@ func nudge_offset() -> Vector2:
 	return n.get("current") if n != null else Vector2.ZERO
 
 
-## Jump straight to the target: stage start / new run. No other path snaps. The nudge starts
-## again from 0 (the new camera has no lean).
+## Short clamped screen shake (hit feedback). `amplitude` is in **screen pixels**
+## so a 3x camera zoom does not triple the wobble. Duration falls back to the skin.
+func shake(amplitude: float = -1.0, duration: float = -1.0) -> void:
+	if skin == null:
+		skin = HudSkin.load_default()
+	_shake_amp = amplitude if amplitude >= 0.0 else skin.hit_shake_amp
+	_shake_dur = duration if duration >= 0.0 else skin.hit_shake_time
+	_shake_left = _shake_dur
+	_shake_time = 0.0
+
+
+func is_shaking() -> bool:
+	return _shake_left > 0.0
+
+
+## World-space amplitude that produces `_shake_amp` screen pixels at the current zoom.
+func shake_world_amp() -> float:
+	var z := 1.0
+	if _cam != null and is_instance_valid(_cam):
+		z = maxf(_cam.zoom.x, 0.0001)
+	return _shake_amp / z
+
+
+## Jump straight to the target: stage start / new run. No other path snaps.
 func snap() -> void:
 	velocity = Vector2.ZERO
+	_shake_left = 0.0
+	_shake_amp = 0.0
 	var t := follow_target()
 	if is_inside_tree():
 		for n in get_tree().get_nodes_in_group(NUDGE_GROUP):
@@ -229,7 +296,7 @@ func _process(delta: float) -> void:
 	if cam != _cam:
 		adopt(cam, _target)
 		return
-	if LevelNav.current != _nav:
+	if LevelNav.current != _nav or not cam.zoom.is_equal_approx(Vector2(_zoom(), _zoom())):
 		refresh_limits()
 	var t := follow_target()
 	if t == null:
@@ -237,9 +304,14 @@ func _process(delta: float) -> void:
 	if skin == null:
 		skin = HudSkin.load_default()
 	var dt := minf(delta, MAX_DT)
+	if _shake_left > 0.0:
+		_shake_left = maxf(0.0, _shake_left - dt)
+		_shake_time += dt
 	# The nudge goes INTO the target before the clamp: at a wall the goal stops at the wall and the
 	# spring eases the combined view in, with no hard stop.
-	var goal := clamp_center(t.global_position + nudge_offset(), limits, view_size(cam))
+	var view := view_size(cam)
+	var fy := floor_y_of(skin)
+	var goal := clamp_center(t.global_position + follow_offset(view, fy) + nudge_offset(), limits, view)
 	var sx := smooth_damp(center.x, goal.x, velocity.x, skin.camera_smooth_x, INF, dt)
 	var sy := smooth_damp(center.y, goal.y, velocity.y, skin.camera_smooth_y, skin.camera_max_speed_y, dt)
 	center = Vector2(sx[0], sy[0])
@@ -247,8 +319,27 @@ func _process(delta: float) -> void:
 	_apply()
 
 
+func _zoom() -> float:
+	if skin == null:
+		skin = HudSkin.load_default()
+	return zoom_from_skin(skin)
+
+
+func _apply_zoom(cam: Camera2D) -> void:
+	var z := _zoom()
+	cam.zoom = Vector2(z, z)
+
+
 ## Put the camera at `center` (follow + nudge, already inside the limits); no separate offset.
+## Shake is added here and re-clamped so a wall hit never shows void (offset stays 0).
 func _apply() -> void:
-	_cam.global_position = center
+	var pos := center
+	if _shake_left > 0.0 and _shake_dur > 0.0:
+		var fall := _shake_left / _shake_dur
+		# Deterministic wobble (tests / replay): two phase-shifted sines, not rand.
+		var ang := _shake_time * 52.0
+		pos += Vector2(cos(ang), sin(ang * 1.27)) * (shake_world_amp() * fall)
+		pos = clamp_center(pos, limits, view_size(_cam))
+	_cam.global_position = pos
 	_cam.offset = Vector2.ZERO
 	_cam.force_update_scroll()

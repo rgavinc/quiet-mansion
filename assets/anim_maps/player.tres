@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="AnimMap" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/anim_map.gd" id="1_map"]
+
+[resource]
+script = ExtResource("1_map")
+names = {
+"idle": "boy_idle",
+"walk": "boy_walk",
+"run": "boy_run",
+"jump": "boy_jump",
+"fall": "boy_fall",
+"land": "boy_land",
+"climb": "boy_climb_stairs",
+"carry_idle": "boy_carry_idle",
+"carry_walk": "boy_carry",
+"throw": "boy_throw",
+"hide": "boy_hide",
+"hurt": "boy_hurt",
+"caught": "boy_caught",
+"pickup": "boy_pickup"
+}

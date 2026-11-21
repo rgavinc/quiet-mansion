@@ -1,16 +1,13 @@
 extends Node2D
-## Loose gold. Collected by walking over it.
+## Loose gold. Collected by walking over it. Renders `gold_coin` (a stacked pile when
+## the amount is more than 1); a 6×6 ColorRect if that slot is missing.
 
 var amount: int = 1
 
 
 func _ready() -> void:
 	add_to_group("gold")
-	var r := ColorRect.new()
-	r.size = Vector2(6, 6)
-	r.position = Vector2(-3, -3)
-	r.color = Color(1.0, 0.82, 0.2)
-	add_child(r)
+	PropVisual.add_gold_pile(self, amount)
 
 
 func _physics_process(_delta: float) -> void:
