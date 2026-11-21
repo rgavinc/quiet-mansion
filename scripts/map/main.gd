@@ -110,20 +110,27 @@ func _build_backdrop() -> void:
 		$World.add_child(dark)
 
 
-## Follows the boy at zoom 1 (NoiseBus radii assume it), clamped to the level; a level
-## smaller than the screen is centred on that axis.
+## Follows the boy, clamped to the level; a level smaller than the world view
+## (viewport / zoom) is centred on that axis. Zoom is HudSkin.camera_zoom (default 3:
+## one floor plus a bit of the floors above/below). Floor framing is
+## HudSkin.camera_floor_y (default 0.7). CameraRig reapplies the same zoom and
+## framing and recomputes limits from viewport/zoom. (NoiseBus radii and
+## PlayerStats.is_off_screen still assume a 1280x720 view — listed for BE / Lead.)
 func _build_camera() -> void:
 	var cam := Camera2D.new()
 	cam.name = "Camera2D"
 	cam.enabled = true
 	cam.position_smoothing_enabled = true
 	cam.position_smoothing_speed = 6.0
+	var z := CameraRig.zoom_from_skin()
+	cam.zoom = Vector2(z, z)
 	var b := _bounds()
-	var vs := get_viewport_rect().size
-	var c := b.get_center()
-	var lo := Vector2(minf(b.position.x, c.x - vs.x / 2), minf(b.position.y, c.y - vs.y / 2))
-	var hi := Vector2(maxf(b.end.x, c.x + vs.x / 2), maxf(b.end.y, c.y + vs.y / 2))
-	_view = Rect2(lo, hi - lo)
+	var vs := get_viewport_rect().size / cam.zoom
+	# Same limits the rig will apply (zoom + floor-y pad), so the backdrop covers the framed view.
+	var lim := CameraRig.limits_for(b, vs, CameraRig.floor_y_of())
+	var lo := lim.position
+	var hi := lim.end
+	_view = lim
 	cam.limit_left = int(lo.x)
 	cam.limit_top = int(lo.y)
 	cam.limit_right = int(hi.x)
@@ -132,18 +139,23 @@ func _build_camera() -> void:
 	if p:
 		p.add_child(cam)
 	else:
-		cam.position = c
+		cam.position = b.get_center()
 		add_child(cam)
 
 
 func _build_hud() -> void:
-	# One themed hint/status line under the hearts; everything else is hud.tscn.
+	# Control hints live in the HUD's bottom bar (out of the play space), not under the hearts.
 	_status = Label.new()
 	_status.name = "Hint"
-	_status.position = Vector2(16, 64)
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if ResourceLoader.exists("res://assets/ui/hud_theme.tres"):
 		_status.theme = load("res://assets/ui/hud_theme.tres")
 	_status.add_theme_font_size_override("font_size", 14)
 	_status.text = HINT
-	$UI.add_child(_status)
+	var hud := get_node_or_null("HUD")
+	if hud and hud.has_method(&"mount_control_hint"):
+		hud.mount_control_hint(_status)
+	else:
+		# Fallback: still keep it out of the play space (bottom-left of the UI layer).
+		_status.position = Vector2(16, 668)
+		$UI.add_child(_status)

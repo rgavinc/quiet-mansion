@@ -27,11 +27,14 @@ func _ready() -> void:
 	if item.get("lure", false):
 		MusicBoxLure.add_visual(self)   # music_box_world slot, or its placeholder
 		return
-	var r := ColorRect.new()
-	r.size = Vector2(10, 12)
-	r.position = Vector2(-5, -6)
-	r.color = Color(0.7, 0.6, 0.5)
-	add_child(r)
+	PropVisual.add_thrown_visual(self, item)
+	_face_flight()
+
+
+func _face_flight() -> void:
+	for c in get_children():
+		if c is AnimatedSprite2D:
+			c.flip_h = velocity.x < 0.0
 
 
 func _physics_process(delta: float) -> void:
@@ -40,6 +43,7 @@ func _physics_process(delta: float) -> void:
 
 ## Separate from _physics_process so tests can drive it.
 func step(delta: float) -> void:
+	_face_flight()
 	var from := global_position
 	var to := from + velocity * delta
 	# 1) walls / any physics body
@@ -91,4 +95,5 @@ func _shatter(at: Vector2, enemy: Node) -> void:
 	if Item.is_vase(item):
 		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
 	WorldObject._drop_gold(at, g)
+	WorldObject.announce_broke(at)
 	queue_free()
