@@ -3,6 +3,27 @@ extends Node2D
 ## Base class for every interactable prop. Subclasses override the defaults below
 ## in _init() (or via the inspector). Back End owns.
 
+## FE hook (#67): emitted after `broken = true` and immediately before `queue_free`.
+signal broke(at: Vector2)
+
+## Process-lifetime bus so FE can hook every break once, including thrown-item
+## shatter (no WorldObject instance). Connect: `WorldObject.break_announcer().broke`.
+class _BreakBus extends RefCounted:
+	signal broke(at: Vector2)
+
+static var _break_bus: _BreakBus
+
+
+static func break_announcer() -> _BreakBus:
+	if _break_bus == null:
+		_break_bus = _BreakBus.new()
+	return _break_bus
+
+
+static func announce_broke(at: Vector2) -> void:
+	break_announcer().broke.emit(at)
+
+
 @export var art_slot: String = ""            # manifest slot; art looked up by name only
 @export var display_name: String = "Object"
 @export var can_pick_up: bool = false
@@ -78,6 +99,9 @@ func break_apart() -> void:
 	if Item.is_vase(self):
 		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
 	_drop_gold(global_position, g)
+	var at := global_position
+	broke.emit(at)
+	announce_broke(at)
 	queue_free()
 
 
