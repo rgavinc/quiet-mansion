@@ -24,6 +24,8 @@ func run_all() -> Dictionary:
 		["beam_enables_shadows", test_beam_shadows],
 		["flashlight_beam_is_soft_and_keeps_shadows", test_soft_beam],
 		["control_hints_sit_in_the_bottom_hud_bar", test_hint_bar],
+		["hint_bar_height_covers_the_inventory_strip", test_hint_bar_fits_strip],
+		["beam_origin_is_the_hand_and_flips", test_beam_from_hand],
 		["vase_shatter_plays_on_noise_and_frees", test_shatter],
 		["decor_fx_attaches_to_fe_candle_and_fe_curtain_groups", test_decor],
 		["shop_panel_slide_resets_to_rest", test_shop_slide],
@@ -136,6 +138,10 @@ func test_shake_clamp() -> String:
 	cam.global_position = boy.position
 	var rig := CameraRig.new()
 	rig.skin = HudSkin.new()
+	# Pin pre-#68 defaults: development now ships zoom 3 / floor_y 0.7, which
+	# pad the limits and would fail this one-screen clamp setup.
+	rig.skin.camera_zoom = 1.0
+	rig.skin.camera_floor_y = 0.5
 	_root().add_child(rig)
 	# Tight limits: view 1280x720, limits exactly one screen at the origin.
 	rig.limits = Rect2(0, 0, 1280, 720)
@@ -158,6 +164,7 @@ func test_shake_clamp() -> String:
 	# Amplitude is screen pixels: at 3x zoom the world offset is 1/3.
 	if err.is_empty():
 		cam.zoom = Vector2(3, 3)
+		rig.skin.camera_zoom = 3.0
 		rig.shake(30.0, 1.0)
 		rig._process(0.02)
 		var world := rig.shake_world_amp()
@@ -509,6 +516,72 @@ func test_hint_bar() -> String:
 	if err.is_empty() and src.contains("Vector2(16, 64)"):
 		err = "main.gd still places the hint under the hearts at (16, 64)"
 	_free([hud])
+	return err
+
+
+func test_hint_bar_fits_strip() -> String:
+	var hud = load("res://scripts/ui/hud.gd").new()
+	_root().add_child(hud)
+	hud.fit_hint_bar()
+	var err := ""
+	var bar := hud.hint_bar as Control
+	var inv := hud.inventory as Control
+	if bar == null or inv == null:
+		err = "missing HintBar or Inventory"
+	else:
+		var bar_h := bar.offset_bottom - bar.offset_top
+		var inv_h := inv.get_combined_minimum_size().y
+		if inv.size.y > 1.0:
+			inv_h = maxf(inv_h, inv.size.y)
+		if bar_h + 0.5 < inv_h:
+			err = "HintBar height %.1f is shorter than the inventory strip %.1f (Hold LMB would spill into the play area)" % [bar_h, inv_h]
+		elif inv.size.y > 1.0 and bar.size.y > 1.0:
+			var spill := bar.get_global_rect().position.y - inv.get_global_rect().position.y
+			if spill > 0.5:
+				err = "inventory / Hold LMB spills %.1f px above the hint bar" % spill
+	_free([hud])
+	return err
+
+
+func test_beam_from_hand() -> String:
+	# Visual origin sits on the flashlight in the hand and flips with the sprite.
+	# Gameplay lights() must still measure from the body origin (not the hand).
+	var host := Node2D.new()
+	_root().add_child(host)
+	var anim := AnimatedSprite2D.new()
+	anim.name = "Anim"
+	host.add_child(anim)
+	var fl := Node2D.new()
+	fl.name = "Flashlight"
+	fl.set_script(load("res://scripts/player/flashlight.gd"))
+	host.add_child(fl)
+	fl.set_process(false)
+	fl.sync_visual()
+	var err := ""
+	var skin: HudSkin = HudSkin.load_default()
+	var want: Vector2 = skin.beam_hand_offset
+	if fl.position.distance_to(want) > 0.6:
+		err = "visual origin should be the hand offset %s, got %s" % [want, fl.position]
+	if err.is_empty():
+		anim.flip_h = true
+		fl.sync_visual()
+		var flipped := Vector2(-want.x, want.y)
+		if fl.position.distance_to(flipped) > 0.6:
+			err = "visual origin should flip with the sprite, want %s got %s" % [flipped, fl.position]
+	if err.is_empty():
+		var src := FileAccess.get_file_as_string("res://scripts/player/player_controller.gd")
+		if not src.contains("var to := p - global_position"):
+			err = "lights() must keep measuring reach from the player origin, not the hand"
+		elif src.contains("light_range") == false:
+			err = "lights() must still use PlayerStats.light_range"
+	if err.is_empty():
+		var ps := _root().get_node_or_null("PlayerStats")
+		if ps and ps.has_method(&"get_stat"):
+			if not is_equal_approx(float(ps.get_stat(&"light_range")), 260.0):
+				err = "light_range must stay 260, got %s" % ps.get_stat(&"light_range")
+			elif not is_equal_approx(float(ps.get_stat(&"light_angle_deg")), 40.0):
+				err = "light_angle_deg must stay 40, got %s" % ps.get_stat(&"light_angle_deg")
+	_free([fl, anim, host])
 	return err
 
 

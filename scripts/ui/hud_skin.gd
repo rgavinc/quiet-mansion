@@ -142,9 +142,17 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 ## Visible volumetric haze / dust-mote strength inside the beam (visual only).
 @export var beam_haze: float = 0.5
 @export var beam_dust: float = 0.35
+## Visual-only attach of the cone: pixel offset from the boy's foot pivot to the
+## flashlight lamp (facing right). Flipped with the sprite. Used because idle/run
+## have no flashlight anchors; pickup/carry/throw hand_points are for the held item.
+@export var beam_hand_offset: Vector2 = Vector2(14, -22)
+@export var beam_core_color: Color = Color(1.0, 0.90, 0.62, 0.55)
+@export var beam_haze_color: Color = Color(1.0, 0.84, 0.48, 0.22)
 @export_group("HUD chrome")
-## Bottom HUD strip that holds the control hints, item slots and "Hold LMB" prompt.
+## Minimum height of the bottom HUD strip. The live height is derived from the
+## inventory strip plus hud_bar_pad, so "Hold LMB to pick up" stays inside the bar.
 @export var hud_bar_height: float = 80.0
+@export var hud_bar_pad: float = 8.0
 @export var hud_bar_color: Color = Color(0.03, 0.02, 0.05, 0.78)
 
 @export_group("Decor & shatter")

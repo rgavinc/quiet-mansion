@@ -7,17 +7,23 @@ const SHADER_PATH := "res://assets/shaders/flashlight_beam.gdshader"
 ## Cookie art is authored along +X with the emitter at this pixel (manifest notes).
 const COOKIE_PIVOT := Vector2(18, 80)
 const HAZE_SIZE := Vector2(256, 160)
+## Don't let CanvasModulate crush additive haze below this luminance on dark stages.
+const HAZE_MODULATE_FLOOR := 0.4
+
+var _skin: HudSkin
+var _base_light_color: Color = Color(1.0, 0.91, 0.65, 1)
 
 
 func _ready() -> void:
 	# Soft cone ahead of the boy. Shadows are enabled here;
 	# FE LightOccluders attaches occluders to the built furniture/walls.
 	var skin := HudSkin.load_default()
+	_skin = skin
 	var cookie := _cookie_texture(skin)
 	var beam := PointLight2D.new()
 	beam.name = "Beam"
 	beam.energy = 1.5
-	beam.color = Color(1.0, 0.95, 0.75, 1)
+	beam.color = _base_light_color
 	beam.texture = cookie
 	beam.texture_scale = skin.cone_texture_scale
 	beam.position = Vector2.ZERO
@@ -29,9 +35,11 @@ func _ready() -> void:
 	add_child(beam)
 	_add_haze(skin)
 	_add_dust(skin)
+	sync_visual()
 
 
 func _process(_delta: float) -> void:
+	sync_visual()
 	look_at(get_global_mouse_position())
 
 
@@ -47,6 +55,78 @@ static func cookie_offset(tex: Texture2D, scale: float) -> Vector2:
 	if sz.x != 256.0 or sz.y != 160.0:
 		pivot = Vector2(sz.x * (COOKIE_PIVOT.x / 256.0), sz.y * 0.5)
 	return (sz * 0.5 - pivot) * scale
+
+
+## Place the visual cone on the flashlight in the boy's hand (flipped with the sprite).
+## Does not change PlayerController.lights(), which still measures from the body origin.
+func sync_visual() -> void:
+	position = visual_origin_local()
+	_apply_warm_modulate()
+
+
+func visual_origin_local() -> Vector2:
+	var skin: HudSkin = _skin if _skin else HudSkin.load_default()
+	var local: Vector2 = skin.beam_hand_offset
+	var anim := _anim_sprite()
+	# pickup/carry/throw hand_points are the held-item attach, not the lamp, so
+	# the flashlight always uses the HudSkin offset, flipped with the sprite.
+	if anim and anim.flip_h:
+		local.x = -local.x
+	return local
+
+
+func _anim_sprite() -> AnimatedSprite2D:
+	var p := get_parent()
+	return p.get_node_or_null("Anim") as AnimatedSprite2D if p else null
+
+
+func _canvas_modulate() -> Color:
+	var n := get_parent()
+	while n:
+		var amb := n.get_node_or_null("StageAmbient") as CanvasModulate
+		if amb:
+			return amb.color
+		n = n.get_parent()
+	if is_inside_tree():
+		var s := get_tree().current_scene
+		if s:
+			var amb := s.find_child("StageAmbient", true, false) as CanvasModulate
+			if amb:
+				return amb.color
+	return Color.WHITE
+
+
+## Cancel the cool stage CanvasModulate on the beam so haze stays warm/neutral.
+## Stage moods (tile tint, ambient, flashlight_energy) are left alone.
+func _chroma_compensate() -> Color:
+	var m := _canvas_modulate()
+	var mx := maxf(maxf(m.r, m.g), maxf(m.b, 0.001))
+	return Color(mx / maxf(m.r, 0.001), mx / maxf(m.g, 0.001), mx / maxf(m.b, 0.001), 1.0)
+
+
+func _haze_compensate() -> Color:
+	var m := _canvas_modulate()
+	var lift := maxf(maxf(maxf(m.r, m.g), m.b), HAZE_MODULATE_FLOOR)
+	return Color(lift / maxf(m.r, 0.001), lift / maxf(m.g, 0.001), lift / maxf(m.b, 0.001), 1.0)
+
+
+func _apply_warm_modulate() -> void:
+	var haze_c := _haze_compensate()
+	var chroma := _chroma_compensate()
+	var cone := get_node_or_null("Cone") as CanvasItem
+	if cone:
+		cone.modulate = haze_c
+	var dust := get_node_or_null("Dust") as CanvasItem
+	if dust:
+		dust.modulate = haze_c
+	var beam := get_node_or_null("Beam") as PointLight2D
+	if beam:
+		beam.color = Color(
+			_base_light_color.r * chroma.r,
+			_base_light_color.g * chroma.g,
+			_base_light_color.b * chroma.b,
+			_base_light_color.a
+		)
 
 
 func _cookie_texture(skin: HudSkin) -> Texture2D:
@@ -109,6 +189,8 @@ func _add_haze(skin: HudSkin) -> void:
 		mat.set_shader_parameter("noise_tex", _noise_tex())
 		mat.set_shader_parameter("haze_amount", skin.beam_haze)
 		mat.set_shader_parameter("dust_amount", skin.beam_dust)
+		mat.set_shader_parameter("core_color", skin.beam_core_color)
+		mat.set_shader_parameter("haze_color", skin.beam_haze_color)
 	haze.material = mat
 	haze.z_index = 4
 	add_child(haze)
@@ -138,7 +220,7 @@ func _add_dust(skin: HudSkin) -> void:
 	mat.gravity = Vector3(0, -3, 0)
 	mat.scale_min = 0.6
 	mat.scale_max = 1.5
-	mat.color = Color(1.0, 0.95, 0.8, 0.32)
+	mat.color = Color(1.0, 0.88, 0.58, 0.36)
 	dust.process_material = mat
 	add_child(dust)
 
