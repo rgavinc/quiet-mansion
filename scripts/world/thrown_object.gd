@@ -91,4 +91,5 @@ func _shatter(at: Vector2, enemy: Node) -> void:
 	if Item.is_vase(item):
 		g = PlayerStats.vase_gold(g, self)   # item hooks (Greedy Sack)
 	WorldObject._drop_gold(at, g)
+	WorldObject.announce_broke(at)
 	queue_free()

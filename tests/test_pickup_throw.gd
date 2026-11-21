@@ -27,6 +27,9 @@ func run_all() -> Dictionary:
 		["full_pickup_is_pickup_time_from_press", test_pickup_total_time],
 		["hit_mid_chest_hold_needs_new_press", test_chest_hit_no_resume],
 		["leaving_range_mid_chest_hold_needs_new_press", test_chest_range_no_resume],
+		["vase_break_emits_broke_once_before_free", test_vase_broke_signal],
+		["pickup_does_not_emit_broke", test_pickup_no_broke],
+		["thrown_vase_impact_announces_broke", test_thrown_vase_broke],
 	]
 	var passed := 0
 	for item in checks:
@@ -49,6 +52,9 @@ func _clean() -> void:
 	GameState.reset()
 	FESignals.reset()
 	FESignals.selected_enemy = null
+	var bus := WorldObject.break_announcer()
+	for conn in bus.broke.get_connections():
+		bus.broke.disconnect(conn["callable"])
 
 
 func _add(n: Node, at: Vector2) -> Node:
@@ -282,4 +288,66 @@ func test_chest_range_no_resume() -> String:
 	if c.is_open: return "chest opened by 1.5 s after leaving range (hold resumed)"
 	_run(p, 1.5)
 	if c.is_open or p.state == p.State.PICKUP: return "hold restarted while the button stayed down"
+	return ""
+
+
+func test_vase_broke_signal() -> String:
+	var v := _vase(Vector2(120, 100))
+	var got: Array = []
+	var before_free := [false]
+	v.broke.connect(func(at: Vector2) -> void:
+		before_free[0] = is_instance_valid(v) and not v.is_queued_for_deletion()
+		got.append(at)
+	)
+	v.break_apart()
+	if got.size() != 1:
+		return "broke emitted %d times, want 1" % got.size()
+	if got[0] != Vector2(120, 100):
+		return "broke at %s, want (120, 100)" % got[0]
+	if not before_free[0]:
+		return "broke emitted after queue_free"
+	if not v.is_queued_for_deletion():
+		return "vase was not queued free after break"
+	v.break_apart()
+	if got.size() != 1:
+		return "second break_apart emitted again"
+	return ""
+
+
+func test_pickup_no_broke() -> String:
+	var p := _player()
+	var v := _vase(Vector2(120, 100))
+	var got := [0]
+	v.broke.connect(func(_at: Vector2) -> void:
+		got[0] += 1
+	)
+	p.interact_pressed()
+	_run(p, 2.0)
+	if p.inventory.items.size() != 1:
+		return "pickup failed"
+	if got[0] != 0:
+		return "pickup emitted broke %d times" % got[0]
+	return ""
+
+
+func test_thrown_vase_broke() -> String:
+	var got: Array = []
+	WorldObject.break_announcer().broke.connect(func(at: Vector2) -> void:
+		got.append(at)
+	)
+	var p := _player()
+	var ghost: Node2D = _add(Node2D.new(), Vector2(300, 400))
+	p.inventory.add({id = "v", throwable = true, noise_radius = 640.0, gold_inside = 0})
+	var t: Node2D = p.throw_at(ghost)
+	for i in 240:
+		if not is_instance_valid(t) or t.is_queued_for_deletion():
+			break
+		t.step(1.0 / 60.0)
+	if got.size() != 1:
+		return "thrown shatter announced broke %d times, want 1" % got.size()
+	if not is_instance_valid(t) or not t.is_queued_for_deletion():
+		return "thrown vase was not queued free"
+	# Miss lands at the overshoot end; announced `at` is the shatter point.
+	if got[0].distance_to(t.global_position) > 0.01:
+		return "announced %s, thrown object at %s" % [got[0], t.global_position]
 	return ""
