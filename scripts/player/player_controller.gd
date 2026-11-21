@@ -95,10 +95,14 @@ func light_on() -> bool:
 ## Last flashlight aim (mouse direction); tests may set it.
 var aim_dir: Vector2 = Vector2.RIGHT
 
-## True if world point `p` is inside the lit cone. Enemies use this for their startle
-## build-up (they add their own line-of-sight check, so walls block the beam).
+## True if world point `p` is inside the lit cone and on the visible camera view.
+## Enemies use this for their startle build-up (they add their own line-of-sight
+## check, so walls block the beam). At zoom 1, light_range (260, cap 520) is shorter
+## than the 640×360 half-view, so the on-screen check does not change the cone.
 func lights(p: Vector2) -> bool:
 	if not light_on():
+		return false
+	if PlayerStats.is_off_screen(p, global_position):
 		return false
 	var to := p - global_position
 	if to.length() > PlayerStats.get_stat(&"light_range"):
