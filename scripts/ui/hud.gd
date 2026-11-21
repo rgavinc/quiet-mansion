@@ -61,8 +61,6 @@ func _ready() -> void:
 	hint_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hint_bar)
 	hint_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE, Control.PRESET_MODE_MINSIZE)
-	hint_bar.offset_top = -skin.hud_bar_height
-	hint_bar.offset_bottom = 0.0
 	hint_bar.offset_left = 0.0
 	hint_bar.offset_right = 0.0
 
@@ -148,11 +146,36 @@ func _ready() -> void:
 	# Juice layers are children of this CanvasLayer but not of HudRoot, so they
 	# free with the HUD. The ignore-hook skips them (pause buttons must stay clickable).
 	_mount_juice()
+	fit_hint_bar()
+	if inventory and not inventory.resized.is_connected(fit_hint_bar):
+		inventory.resized.connect(fit_hint_bar)
 	# Display-only HUD: never eat clicks meant for the game (LMB pickup/throw).
 	_ignore_mouse(root)
 	child_entered_tree.connect(_on_hud_child)
 	get_tree().node_added.connect(_on_node_added)
 	_find_screens(get_tree().root)
+
+
+## Height of the bottom bar: the inventory strip (name label + slots + margin)
+## plus padding, never shorter than hud_bar_height.
+func hint_bar_height() -> float:
+	var pad: float = skin.hud_bar_pad if skin else 8.0
+	var min_h: float = skin.hud_bar_height if skin else 80.0
+	var h := 0.0
+	if inventory and is_instance_valid(inventory):
+		h = maxf(h, inventory.get_combined_minimum_size().y)
+		if inventory.size.y > 1.0:
+			h = maxf(h, inventory.size.y)
+	return maxf(h + pad, min_h)
+
+
+## Size the chrome to its contents so "Hold LMB to pick up" cannot sit in the play area.
+func fit_hint_bar() -> void:
+	if hint_bar == null or not is_instance_valid(hint_bar):
+		return
+	var h := hint_bar_height()
+	hint_bar.offset_top = -h
+	hint_bar.offset_bottom = 0.0
 
 
 ## Take the level's control-hint / status Label out of the play space and put it

@@ -1,8 +1,8 @@
 shader_type canvas_item;
 render_mode blend_add, unshaded;
 
-uniform vec4 core_color : source_color = vec4(1.0, 0.95, 0.8, 0.5);
-uniform vec4 haze_color : source_color = vec4(1.0, 0.9, 0.65, 0.18);
+uniform vec4 core_color : source_color = vec4(1.0, 0.90, 0.62, 0.55);
+uniform vec4 haze_color : source_color = vec4(1.0, 0.84, 0.48, 0.22);
 uniform sampler2D noise_tex : hint_default_white, filter_linear, repeat_enable;
 uniform float haze_amount : hint_range(0.0, 1.0) = 0.5;
 uniform float dust_amount : hint_range(0.0, 1.0) = 0.35;
