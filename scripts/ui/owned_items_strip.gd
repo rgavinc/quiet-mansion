@@ -67,6 +67,8 @@ var overflow_interactive := false
 ## Popover stays inside this Control's rect (e.g. the shop's OffersPanel), else the screen.
 var popover_bounds: Control
 var overflow_tile: Control
+var _prev_ids: Dictionary = {}       # id -> true, from the last refresh
+var _prev_charges: Dictionary = {}   # id -> charges
 var popover: PanelContainer
 ## Button whose release is still to be eaten (the closing click's); see _input.
 var _eat_release := MOUSE_BUTTON_NONE
@@ -196,6 +198,7 @@ func refresh() -> void:
 			_fill_popover()
 		else:
 			close_overflow()
+	_play_juice(shown)
 
 
 ## Widest the strip can get (px): per_row tiles + gaps (columns never widen).
@@ -310,6 +313,7 @@ func _set_tile_focus(box: PanelContainer, on: bool) -> void:
 func _make_entry(e: Dictionary) -> Control:
 	var col := VBoxContainer.new()
 	col.name = "Item_%s" % e.id
+	col.set_meta(&"item_id", e.id)
 	col.add_theme_constant_override("separation", 3)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.tooltip_text = e.name if e.count == 1 else "%s ×%d" % [e.name, e.count]
@@ -643,3 +647,44 @@ class _Pips extends Control:
 			else:
 				draw_circle(c, r, PIP_RING)
 				draw_circle(c, maxf(r - 1.5, 1.0), PIP_EMPTY)
+
+
+func _play_juice(shown: int) -> void:
+	if skin == null:
+		return
+	var first := _prev_ids.is_empty()
+	var next_ids: Dictionary = {}
+	var next_ch: Dictionary = {}
+	for i in mini(shown, entries.size()):
+		var e: Dictionary = entries[i]
+		var id: String = str(e.id)
+		next_ids[id] = true
+		next_ch[id] = int(e.charges)
+		if i >= tiles.size():
+			continue
+		var tile: Control = tiles[i]
+		if not first and not _prev_ids.has(id):
+			_bounce_tile(tile)
+		elif not first and int(_prev_charges.get(id, e.charges)) > int(e.charges):
+			_flash_pips(tile)
+	_prev_ids = next_ids
+	_prev_charges = next_ch
+
+
+func _bounce_tile(tile: Control) -> void:
+	if tile == null or not is_instance_valid(tile):
+		return
+	tile.pivot_offset = tile.size * 0.5 if tile.size.x > 0.0 else Vector2(tile_size, tile_size) * 0.5
+	tile.scale = Vector2.ONE * 0.01
+	var tw := tile.create_tween()
+	tw.tween_property(tile, "scale", Vector2.ONE * skin.item_bounce_scale, skin.item_bounce_time * 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(tile, "scale", Vector2.ONE, skin.item_bounce_time * 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+
+
+func _flash_pips(tile: Control) -> void:
+	var row := tile.find_child("Charges", true, false) as Control
+	if row == null:
+		row = tile
+	row.modulate = Color(2.0, 1.8, 0.7, 1.0)
+	var tw := row.create_tween()
+	tw.tween_property(row, "modulate", Color.WHITE, skin.pip_flash_time)

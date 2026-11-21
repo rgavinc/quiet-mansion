@@ -22,6 +22,11 @@ var throw_line: Node2D
 var camera_nudge: Node
 var camera_rig: CameraRig
 var layer: CanvasLayer
+var light_occluders: Node
+var ambient_overlay: Node2D
+var vase_shatter: Node2D
+var decor: Node
+var anim_juice: Node2D
 var _meters: Dictionary = {}   # enemy instance_id -> meter
 
 
@@ -50,6 +55,30 @@ func _ready() -> void:
 	camera_rig.name = "CameraRig"
 	camera_rig.skin = skin
 	add_child(camera_rig)
+	light_occluders = load("res://scripts/ui/light_occluders.gd").new()
+	light_occluders.name = "LightOccluders"
+	light_occluders.skin = skin
+	light_occluders.bus = bus
+	add_child(light_occluders)
+	ambient_overlay = load("res://scripts/ui/ambient_overlay.gd").new()
+	ambient_overlay.name = "AmbientOverlay"
+	ambient_overlay.skin = skin
+	ambient_overlay.bus = bus
+	layer.add_child(ambient_overlay)
+	vase_shatter = load("res://scripts/ui/vase_shatter_fx.gd").new()
+	vase_shatter.name = "VaseShatterFx"
+	vase_shatter.skin = skin
+	layer.add_child(vase_shatter)
+	decor = load("res://scripts/ui/decor_fx.gd").new()
+	decor.name = "DecorFx"
+	decor.skin = skin
+	decor.bus = bus
+	add_child(decor)
+	anim_juice = load("res://scripts/ui/anim_juice.gd").new()
+	anim_juice.name = "AnimJuice"
+	anim_juice.skin = skin
+	anim_juice.bus = bus
+	layer.add_child(anim_juice)
 	if bus:
 		bus.startle_progress.connect(_on_startle)
 
