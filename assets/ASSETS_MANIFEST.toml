@@ -946,3 +946,54 @@ fps = 1
 loop = false
 pivot = [16, 31]
 notes = "32x32 treasure chest, open with gold inside. Same footprint as prop_chest_closed (swap on open)"
+
+# --- FE juice pass (stage atmosphere, flashlight cone, decor). All AI; templates in assets/replace_me/.
+
+[[asset]]
+path = "assets/art/ui/flashlight_cone.png"
+slot = "flashlight_cone"
+status = "ai"
+frame_size = [256, 160]
+pivot = [18, 80]
+notes = "Soft warm flashlight cone pointing +X (256x160). Pivot at the emitter (x=18, vertical centre). Template assets/replace_me/flashlight_cone_template.png marks the pivot."
+
+[[asset]]
+path = "assets/art/vfx/vfx_dust_mote.png"
+slot = "vfx_dust_mote"
+status = "ai"
+frame_size = [8, 8]
+pivot = [4, 4]
+notes = "8x8 soft dust mote for the flashlight beam. Template assets/replace_me/vfx_dust_mote_template.png"
+
+[[asset]]
+path = "assets/art/props/decor_candle.png"
+slot = "decor_candle"
+status = "ai"
+frame_size = [16, 24]
+frames = 1
+fps = 1
+loop = false
+pivot = [8, 23]
+notes = "16x24 wax candle body, pivot at the base. Template assets/replace_me/decor_candle_template.png"
+
+[[asset]]
+path = "assets/art/props/decor_candle_flame.png"
+slot = "decor_candle_flame"
+status = "ai"
+frame_size = [16, 16]
+frames = 4
+fps = 8
+loop = true
+pivot = [8, 15]
+notes = "16x16 x4 flame loop, sits on top of decor_candle. Template assets/replace_me/decor_candle_flame_template.png"
+
+[[asset]]
+path = "assets/art/props/decor_curtain.png"
+slot = "decor_curtain"
+status = "ai"
+frame_size = [32, 64]
+frames = 1
+fps = 1
+loop = false
+pivot = [16, 1]
+notes = "32x64 hanging curtain, pivot at the rod (top centre). Sway is a shader, not frames. Template assets/replace_me/decor_curtain_template.png"

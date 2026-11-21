@@ -48,6 +48,9 @@ var hearts: Array[HudIcon] = []
 var offers: Array[Dictionary] = []
 var cards: Array[Control] = []
 var sold: Array[bool] = []
+var offers_panel: PanelContainer
+var info_panel: PanelContainer
+var _slide_tween: Tween
 
 
 func _build() -> void:
@@ -87,6 +90,7 @@ func _build() -> void:
 	# LEFT column: offers.
 	var left := PanelContainer.new()
 	left.name = "OffersPanel"
+	offers_panel = left
 	left.anchor_left = 0.0
 	left.anchor_right = 0.0
 	left.anchor_top = 0.0
@@ -134,6 +138,7 @@ func _build() -> void:
 	# RIGHT column: stage clear title, gold, Continue.
 	var right := PanelContainer.new()
 	right.name = "InfoPanel"
+	info_panel = right
 	right.anchor_left = 1.0
 	right.anchor_right = 1.0
 	right.anchor_top = 0.0
@@ -269,6 +274,7 @@ func open_shop(count: int = -1) -> void:
 	message.text = "The merchant has nothing for you tonight." if offers.is_empty() else ""
 	if not is_open():
 		open()
+		_play_slide()
 	_layout_merchant.call_deferred()
 	if merchant is AnimatedSprite2D:
 		(merchant as AnimatedSprite2D).play(skin.merchant_slot)
@@ -536,3 +542,26 @@ class _MerchantStandIn extends Node2D:
 		draw_rect(Rect2(-9, -68, 18, 12), c)               # top hat
 		draw_rect(Rect2(-13, -57, 26, 3), c)
 		draw_circle(Vector2(18, -26), 4, Color(1.0, 0.75, 0.3))   # lantern
+
+
+func _play_slide() -> void:
+	if skin == null or skin.shop_slide_time <= 0.0 or offers_panel == null:
+		return
+	var d := skin.shop_slide_px
+	var left0 := 32.0
+	var right0 := -32.0
+	offers_panel.offset_left = left0 - d
+	offers_panel.offset_right = left0 + 460.0 - d
+	if info_panel:
+		info_panel.offset_left = -32.0 - 380.0 + d
+		info_panel.offset_right = right0 + d
+	if _slide_tween:
+		_slide_tween.kill()
+	_slide_tween = create_tween()
+	_slide_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_slide_tween.set_parallel(true)
+	_slide_tween.tween_property(offers_panel, "offset_left", left0, skin.shop_slide_time).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_slide_tween.tween_property(offers_panel, "offset_right", left0 + 460.0, skin.shop_slide_time).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if info_panel:
+		_slide_tween.tween_property(info_panel, "offset_left", -32.0 - 380.0, skin.shop_slide_time).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		_slide_tween.tween_property(info_panel, "offset_right", right0, skin.shop_slide_time).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)

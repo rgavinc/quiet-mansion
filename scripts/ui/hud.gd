@@ -31,6 +31,10 @@ var lure_hint: Control
 var lure_pocket: Control
 var seed_readout: Label
 var hud_root: Control
+var hit_feedback: CanvasLayer
+var chase_atmosphere: CanvasLayer
+var screen_transition: CanvasLayer
+var pause_screen: CanvasLayer
 ## End screens (UiScreen: game over, win, shop) seen in the tree; the HUD hides while any is open.
 var _screens: Array = []
 
@@ -126,9 +130,12 @@ func _ready() -> void:
 	banner.name = "StageBanner"
 	banner.skin = skin
 	root.add_child(banner)
+	# Juice layers are children of this CanvasLayer but not of HudRoot, so they
+	# free with the HUD. The ignore-hook skips them (pause buttons must stay clickable).
+	_mount_juice()
 	# Display-only HUD: never eat clicks meant for the game (LMB pickup/throw).
 	_ignore_mouse(root)
-	child_entered_tree.connect(_ignore_mouse)
+	child_entered_tree.connect(_on_hud_child)
 	get_tree().node_added.connect(_on_node_added)
 	_find_screens(get_tree().root)
 
@@ -167,8 +174,36 @@ func _find_screens(n: Node) -> void:
 func _on_node_added(n: Node) -> void:
 	if n is UiScreen:
 		_track_screen(n)
-	if n is Control and is_ancestor_of(n):
+	if n is Control and is_ancestor_of(n) and not _juice_owns(n):
 		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func _mount_juice() -> void:
+	hit_feedback = load("res://scripts/ui/hit_feedback.gd").new()
+	hit_feedback.skin = skin
+	add_child(hit_feedback)
+	chase_atmosphere = load("res://scripts/ui/chase_atmosphere.gd").new()
+	chase_atmosphere.skin = skin
+	add_child(chase_atmosphere)
+	screen_transition = load("res://scripts/ui/screen_transition.gd").new()
+	screen_transition.skin = skin
+	add_child(screen_transition)
+	pause_screen = load("res://scripts/ui/pause_screen.gd").new()
+	pause_screen.skin = skin
+	add_child(pause_screen)
+
+
+func _juice_owns(n: Node) -> bool:
+	for j in [pause_screen, hit_feedback, chase_atmosphere, screen_transition]:
+		if j != null and is_instance_valid(j) and (j == n or j.is_ancestor_of(n)):
+			return true
+	return false
+
+
+func _on_hud_child(n: Node) -> void:
+	if _juice_owns(n):
+		return
+	_ignore_mouse(n)
 
 
 static func _ignore_mouse(n: Node) -> void:
