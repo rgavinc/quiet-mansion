@@ -946,3 +946,47 @@ fps = 1
 loop = false
 pivot = [16, 31]
 notes = "32x32 treasure chest, open with gold inside. Same footprint as prop_chest_closed (swap on open)"
+
+[[asset]]
+path = "assets/art/props/prop_obstacle.png"
+slot = "prop_obstacle"
+status = "ai"
+frame_size = [20, 20]
+frames = 1
+fps = 1
+loop = false
+pivot = [10, 19]
+notes = "20x20 breakable floor junk: toy box with the lid ajar, a ball and a doll arm poking out. Bottom-centre pivot on the floor line; frame is exactly 20x20 so add_fitted_floor_sprite scales it 1:1 (keep 20x20 to stay pixel-crisp). Code (PropVisual.OBSTACLE_SLOTS) uses this slot for generic breakable floor junk."
+
+[[asset]]
+path = "assets/art/props/prop_obstacle_b.png"
+slot = "prop_obstacle_b"
+status = "ai"
+frame_size = [20, 20]
+frames = 1
+fps = 1
+loop = false
+pivot = [10, 19]
+notes = "20x20 breakable floor junk: toppling stack of old books. Bottom-centre pivot on the floor line; frame is exactly 20x20 so add_fitted_floor_sprite scales it 1:1 (keep 20x20 to stay pixel-crisp). Variant of prop_obstacle for variety; same size/pivot. Not wired yet: Back End may pick prop_obstacle / _b / _c / _d per obstacle (e.g. by seed)."
+
+[[asset]]
+path = "assets/art/props/prop_obstacle_c.png"
+slot = "prop_obstacle_c"
+status = "ai"
+frame_size = [20, 20]
+frames = 1
+fps = 1
+loop = false
+pivot = [10, 19]
+notes = "20x20 breakable floor junk: broken chair seat with snapped legs. Bottom-centre pivot on the floor line; frame is exactly 20x20 so add_fitted_floor_sprite scales it 1:1 (keep 20x20 to stay pixel-crisp). Variant of prop_obstacle for variety; same size/pivot. Not wired yet: Back End may pick prop_obstacle / _b / _c / _d per obstacle (e.g. by seed)."
+
+[[asset]]
+path = "assets/art/props/prop_obstacle_d.png"
+slot = "prop_obstacle_d"
+status = "ai"
+frame_size = [20, 20]
+frames = 1
+fps = 1
+loop = false
+pivot = [10, 19]
+notes = "20x20 breakable floor junk: coal scuttle bucket. Bottom-centre pivot on the floor line; frame is exactly 20x20 so add_fitted_floor_sprite scales it 1:1 (keep 20x20 to stay pixel-crisp). Variant of prop_obstacle for variety; same size/pivot. Not wired yet: Back End may pick prop_obstacle / _b / _c / _d per obstacle (e.g. by seed)."
