@@ -20,7 +20,12 @@ extends VBoxContainer
 ## Signals are connected to methods while in the tree only (no lambdas): a HUD that left
 ## the tree on a stage change never reacts.
 
+## The focused "+N" tile was rebuilt away (items changed, nothing hidden any more): the owner
+## (shop) should put focus somewhere sensible.
+signal overflow_focus_lost
+
 const ShopUi := preload("res://scripts/ui/shop.gd")
+const THEME_PATH := "res://assets/ui/hud_theme.tres"
 const TILE := 40.0
 const SEP := 6
 const PER_ROW := 12
@@ -63,6 +68,7 @@ var overflow_interactive := false
 var popover_bounds: Control
 var overflow_tile: Control
 var popover: PanelContainer
+## Button whose release is still to be eaten (the closing click's); see _input.
 var _eat_release := MOUSE_BUTTON_NONE
 
 
@@ -147,6 +153,7 @@ static func _group(e: Dictionary) -> int:
 func refresh() -> void:
 	if not is_inside_tree() or skin == null:
 		return
+	var had_focus := overflow_tile_focused()   # the rebuild frees the tile: keep keyboard focus
 	for c in get_children():
 		if c == popover:
 			continue
@@ -179,6 +186,11 @@ func refresh() -> void:
 		else:
 			overflow_tile = t
 	visible = not entries.is_empty()
+	if had_focus:
+		if overflow_tile != null:
+			overflow_tile.grab_focus()
+		else:
+			overflow_focus_lost.emit()
 	if popover and popover.visible:
 		if overflow > 0:
 			_fill_popover()
@@ -255,6 +267,7 @@ func _make_overflow(n: int, hidden: Array = []) -> Control:
 	if overflow_interactive:
 		col.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		col.gui_input.connect(_on_overflow_input)
+		col.focus_mode = Control.FOCUS_ALL   # keyboard / gamepad: ui_accept opens the list (_input)
 	var lines: PackedStringArray = []
 	for e in hidden:
 		lines.append(entry_line(e))
@@ -267,7 +280,31 @@ func _make_overflow(n: int, hidden: Array = []) -> Control:
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	box.add_child(l)
 	col.add_child(box)
+	if overflow_interactive:
+		col.focus_entered.connect(_set_tile_focus.bind(box, true))
+		col.focus_exited.connect(_set_tile_focus.bind(box, false))
 	return col
+
+
+## Focus look for the "+N" tile: the HUD's selected-slot style (HudSlotSelected: warm dark
+## fill, 3 px border) in the skin's `slot_selected` colour, swapped in while it has focus.
+func _set_tile_focus(box: PanelContainer, on: bool) -> void:
+	if not is_instance_valid(box):
+		return
+	if not on:
+		if box.has_meta(&"plain_style"):
+			box.add_theme_stylebox_override(&"panel", box.get_meta(&"plain_style"))
+		return
+	box.set_meta(&"plain_style", box.get_theme_stylebox(&"panel"))
+	var theme := load(THEME_PATH) as Theme
+	var sel: StyleBox = theme.get_stylebox(&"panel", &"HudSlotSelected") if theme and theme.has_stylebox(&"panel", &"HudSlotSelected") else null
+	var sb := (sel.duplicate() if sel is StyleBoxFlat else StyleBoxFlat.new()) as StyleBoxFlat
+	if not sel is StyleBoxFlat:
+		sb.bg_color = Color(0.16, 0.12, 0.08, 0.92)
+		sb.set_border_width_all(3)
+		sb.set_corner_radius_all(4)
+	sb.border_color = skin.slot_selected
+	box.add_theme_stylebox_override(&"panel", sb)
 
 
 func _make_entry(e: Dictionary) -> Control:
@@ -476,14 +513,56 @@ func _place_popover() -> void:
 	popover.size = sz
 
 
-## A click outside the list (and outside "+N", which toggles itself) only closes it: the click is
-## consumed, so nothing underneath (a card's Buy, Continue) gets it; a second click acts.
+## True while the "+N" tile has keyboard / gamepad focus.
+func overflow_tile_focused() -> bool:
+	return overflow_tile != null and is_instance_valid(overflow_tile) and overflow_tile.is_inside_tree() \
+			and overflow_tile.has_focus()
+
+
+## Gives focus back to "+N" (after ui_cancel closes the list).
+func focus_overflow_tile() -> void:
+	if overflow_tile != null and is_instance_valid(overflow_tile) and overflow_tile.is_visible_in_tree() \
+			and overflow_tile.focus_mode != Control.FOCUS_NONE:
+		overflow_tile.grab_focus()
+
+
+## Forgets a closing click whose release is still pending (shop re-opened / left).
+func reset_input_state() -> void:
+	_eat_release = MOUSE_BUTTON_NONE
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_eat_release = MOUSE_BUTTON_NONE   # the release may land in another window: never wait for it
+
+
+## Mouse: a click outside the list (and outside "+N", which toggles itself) only closes it: the
+## click is consumed, so nothing underneath (a card's Buy, Continue) gets it; a second click acts.
+## The closing click's release is eaten too, but only while it can still arrive: a new press or a
+## motion with that button no longer held means it was lost (released off-window, focus switch),
+## and the eat is dropped, so the next click's release is never swallowed (Buy left half-pressed).
+## Keyboard / gamepad (shop row only): ui_accept on the focused "+N" opens / closes the list;
+## while it is open ui_cancel closes it (consumed: it never reaches the shop) and puts focus back
+## on "+N", and ui_accept never reaches a button underneath: it only closes the list (consumed),
+## the same as an outside click, so the next ui_accept acts.
 func _input(ev: InputEvent) -> void:
-	if ev is InputEventMouseButton and not ev.pressed and ev.button_index == _eat_release:
-		_eat_release = MOUSE_BUTTON_NONE   # the matching release of the closing click
-		get_viewport().set_input_as_handled()
+	if ev is InputEventMouseButton:
+		var mb := ev as InputEventMouseButton
+		if not mb.pressed and mb.button_index == _eat_release:
+			_eat_release = MOUSE_BUTTON_NONE   # the matching release of the closing click
+			get_viewport().set_input_as_handled()
+			return
+		if mb.pressed:
+			_eat_release = MOUSE_BUTTON_NONE   # a new press: the old release was lost
+	elif ev is InputEventMouseMotion and _eat_release != MOUSE_BUTTON_NONE:
+		if (ev as InputEventMouseMotion).button_mask & (1 << (_eat_release - 1)) == 0:
+			_eat_release = MOUSE_BUTTON_NONE   # that button is up and no release came
+	if not overflow_interactive:
 		return
 	if not is_overflow_open():
+		if overflow_tile_focused() and ev.is_action_pressed(&"ui_accept"):
+			open_overflow()
+			get_viewport().set_input_as_handled()
 		return
 	if ev is InputEventMouseButton and ev.pressed:
 		var p: Vector2 = ev.position
@@ -492,6 +571,14 @@ func _input(ev: InputEvent) -> void:
 			close_overflow()
 			_eat_release = ev.button_index
 			get_viewport().set_input_as_handled()
+	elif ev.is_pressed() and ev.is_action(&"ui_cancel"):
+		close_overflow()
+		focus_overflow_tile()
+		get_viewport().set_input_as_handled()
+	elif ev.is_pressed() and ev.is_action(&"ui_accept"):
+		if not ev.is_echo():
+			close_overflow()   # toggle on "+N"; anywhere else it only closes, nothing underneath fires
+		get_viewport().set_input_as_handled()
 
 
 ## One dot per charge (filled = left this stage), wrapped onto up to `lines` (HUD 2, shop 1) lines inside the

@@ -145,6 +145,7 @@ static func run_at(tree: SceneTree, L: Dictionary, boy_at: Vector2, en_feet: Vec
 	# stale hitbox overlap would land a hit + 48px shove on the first chase frame).
 	for i in 3:
 		await tree.physics_frame
+	walker.set("give_up_cap", 1.0e9)   # this sweep tests pathing to a boy it never sees, not the give-up cap
 	walker.call("_enter_chase", 9999.0)
 	var nav: LevelNav = b.nav
 	var frames := 0

@@ -20,6 +20,25 @@ func run_async(tree: SceneTree) -> Dictionary:
 		failures.append_array(r.errors)
 		if int(r.climbs) < (sd[2] as Array).size():
 			failures.append("seed %d stage %d: only %d climbs ran" % [sd[0], sd[1], int(r.climbs)])
+	# real physics: a blocker piece is never climbed from the floor (strongest jump, standstill)
+	for sd in [[3, 4], [44, 4], [36, 5], [57, 5]]:
+		var br: Dictionary = await ClimbSim.check_blockers(tree, int(sd[0]), int(sd[1]))
+		total += 1
+		failures.append_array(br.errors)
+		if int(br.hops) < 2:
+			failures.append("seed %d stage %d: no blocker hops ran" % [sd[0], sd[1]])
+	# QA probe: step 16px, a 32px gap, a bare 64px piece: a running jump off the step top DOES climb it at
+	# every stat setup (the harness sees a real climb), and a gap past the validator's reach does not
+	for setup in ClimbSim.SETUPS:
+		total += 3
+		# QA seed 74 stage 5 floor 3: the 1-tall is a 48px-wide cluster step, 32px from the 4-tall
+		if not await ClimbSim.step_gap_climbs(tree, setup, 48.0, 16.0, 32.0, 64.0):
+			failures.append("flat world: seed 74 case (48px-wide 1-tall, 32px gap, 4-tall) not climbed [%s]" % setup[0])
+		if not await ClimbSim.step_gap_climbs(tree, setup, 32.0, 16.0, 32.0, 64.0):
+			failures.append("flat world: QA step + 32px gap + 4-tall not climbed [%s] (the probe is a real climb)" % setup[0])
+		var far_gap := ceilf(LevelValidator.blocker_reach(48.0) / 16.0) * 16.0 + 16.0
+		if await ClimbSim.step_gap_climbs(tree, setup, 32.0, 16.0, far_gap, 64.0):
+			failures.append("flat world: a 4-tall %dpx past a step (beyond the validator's reach) was climbed [%s]" % [int(far_gap), setup[0]])
 	for setup in ClimbSim.SETUPS:
 		total += 2
 		if not await ClimbSim.flat_hop(tree, 32.0, setup):
