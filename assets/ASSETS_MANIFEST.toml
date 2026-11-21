@@ -64,22 +64,22 @@ path = "assets/art/characters/boy_idle.png"
 slot = "boy_idle"
 status = "ai"
 frame_size = [64, 64]
-frames = 6
+frames = 8
 fps = 8
 loop = true
 pivot = [32, 63]
-notes = "64x64 boy idle, breathing + nervous glance + blink, flashlight in front hand"
+notes = "64x64 boy idle, 8f @8fps loop, pivot [32, 63]: clearer breathing (chest and head rise ~2 px), weight shift, nervous glance on 2-3, blink on 5, flashlight in the front hand sways ~10 deg. Warm rim from the flashlight side, cool hue-shifted shadow on the back edge."
 
 [[asset]]
 path = "assets/art/characters/boy_run.png"
 slot = "boy_run"
 status = "ai"
 frame_size = [64, 64]
-frames = 8
-fps = 12
+frames = 12
+fps = 14
 loop = true
 pivot = [32, 63]
-notes = "64x64 boy run cycle (contact/down/pass/up x2), flashlight in front hand"
+notes = "64x64 boy run cycle, 12f @14fps loop, pivot [32, 63]: two strides (contact / down / pass / up x2, with in-betweens), stronger pose arc on the fast passing frames (no motion smear), stronger bob and lean, hair lag, flashlight swings with the arm. Warm rim from the flashlight side, cool hue-shifted shadow on the back edge."
 
 [[asset]]
 path = "assets/art/characters/boy_jump.png"
@@ -91,6 +91,17 @@ fps = 10
 loop = false
 pivot = [32, 63]
 notes = "64x64 jump: 0 takeoff, 1 rise, 2 apex, 3 fall. Pick frame by vertical velocity or play once; hold 3 while falling"
+
+[[asset]]
+path = "assets/art/characters/boy_land.png"
+slot = "boy_land"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 12
+loop = false
+pivot = [32, 63]
+notes = "64x64 boy land, 8f @12fps, no loop, pivot [32, 63]: 0 contact (still slightly stretched, knees already unlocking), 1 impact squash, 2 deepest knee bend (nearly sitting on the heels, arms out), 3 hold the squash, 4 recoil (still very low), 5 recover rise with knees bent and flashlight swing, 6 settling crouch, 7 settled crouch (not idle). Every frame is a landing pose — none read as standing. Play once on touching the floor after boy_jump; pair with vfx_dust_land at the feet. Hold 7 if the landing recovery needs a beat, then return to idle or run."
 
 [[asset]]
 path = "assets/art/characters/boy_pickup.png"
@@ -151,6 +162,17 @@ pivot = [32, 63]
 notes = "64x64 hit reaction: 0 white hit-flash squash, 1 knock-back, 2 recover. Play once then return to idle/run"
 
 [[asset]]
+path = "assets/art/characters/boy_death.png"
+slot = "boy_death"
+status = "ai"
+frame_size = [64, 64]
+frames = 10
+fps = 10
+loop = false
+pivot = [32, 63]
+notes = "64x64 boy death / caught, 10f @10fps, no loop, pivot [32, 63]: 0 solid hit squash (readable, not a washed-out ghost), 1-2 stumble back, 3 knees buckle, 4-5 falling, 6 floor-impact squash, 7 limp, 8 still (eyes shut, flashlight dropped along the body), 9 faded ghost of that still pose. No motion smear. Play once and hold the last (ghost) frame on the game-over beat."
+
+[[asset]]
 path = "assets/art/characters/puppet_calm.png"
 slot = "puppet_calm"
 status = "ai"
@@ -179,12 +201,36 @@ path = "assets/art/characters/puppet_chase.png"
 slot = "puppet_chase"
 status = "ai"
 frame_size = [64, 64]
-frames = 8
-fps = 14
+frames = 12
+fps = 16
 loop = true
 pivot = [32, 63]
-eye_points = [[[29, 28], [37, 33]], [[30, 27], [37, 31]], [[30, 25], [37, 29]], [[30, 26], [37, 30]], [[30, 29], [39, 34]], [[29, 28], [37, 32]], [[29, 26], [37, 31]], [[29, 27], [37, 32]]]
-notes = "64x64 enraged SCUTTLE chase loop (moving right; flip_h for left): the fingers walk like legs on the floor in alternating pairs (feet planted on y=62-63 during stance), body leans forward and bobs on each contact (frames 0 and 4), sleeve trails behind, red scream mouth opens over 0-3 and snaps shut on 4 (lunge + smear), red eye glint on 3-4, red rim light. eye_points = per-frame eye centres for the unlit eye glint: one entry per frame (same count as frames), each a list of [x, y] frame-pixel points (0,0 = frame top-left, integer pixel the eye is centred on, measured from the art within 0.5 px; [] = eyes closed/hidden on that frame, draw nothing). Coordinates are in UNFLIPPED frame space; when the puppet is flipped use x' = frame_w - 1 - x (y unchanged). Draw vfx_eye_glint (centre pivot) centred on each point (the point is the centre of the dark eye socket that holds the orange-red glint)."
+eye_points = [[[29, 29], [38, 34]], [[30, 28], [37, 33]], [[30, 26], [37, 31]], [[30, 25], [38, 29]], [[30, 26], [38, 29]], [[29, 28], [37, 33]], [[31, 30], [38, 36]], [[29, 28], [37, 33]], [[30, 26], [37, 31]], [[30, 25], [37, 30]], [[30, 26], [37, 30]], [[29, 28], [37, 32]]]
+notes = "64x64 enraged SCUTTLE chase loop (moving right; flip_h for left), 12f @16fps loop, pivot [32, 63]: the fingers walk like legs on the floor in alternating pairs (feet planted on y=62-63 during stance), body leans forward and bobs on each contact, sleeve trails, red scream mouth opens and snaps shut on frame 6 (lunge + smear), red eye glint every frame, red rim light, smear on the passing and snap frames. eye_points = per-frame eye centres for the unlit eye glint: one entry per frame (same count as frames), each a list of [x, y] frame-pixel points (0,0 = frame top-left, integer pixel the eye is centred on, measured from the art within 0.5 px; [] = eyes closed/hidden on that frame, draw nothing). Coordinates are in UNFLIPPED frame space; when the puppet is flipped use x' = frame_w - 1 - x (y unchanged). Flipping is an exact pixel mirror on the 64 px frames. Draw the glint (centre pivot) centred on each point (the point is the centre of the dark eye socket that holds the orange-red glint). FE picks the glint by enemy STATE (CALM/RETURN -> vfx_eye_glint_calm; STARTLED/CHASE/SEARCH/REACH/RATTLE/RECOVER -> vfx_eye_glint; STUNNED -> none)."
+
+[[asset]]
+path = "assets/art/characters/puppet_bite.png"
+slot = "puppet_bite"
+status = "ai"
+frame_size = [64, 64]
+frames = 6
+fps = 12
+loop = false
+pivot = [32, 63]
+eye_points = [[[27, 29], [34, 32]], [[24, 32], [34, 34]], [[37, 24], [43, 27]], [[37, 27], [45, 33]], [[35, 28], [44, 33]], [[32, 29], [40, 32]]]
+notes = "64x64 puppet bite / catch, 6f @12fps, no loop, pivot [32, 63]: 0 coil, 1 anticipation squash, 2 lunge (jaws wide, body punched forward), 3 SNAP bite, 4 clamp, 5 settle. No motion smear. Play once when the puppet catches the boy. eye_points = per-frame eye centres for the unlit eye glint: one entry per frame (same count as frames), each a list of [x, y] frame-pixel points (0,0 = frame top-left, integer pixel the eye is centred on, measured from the art within 0.5 px; [] = eyes closed/hidden on that frame, draw nothing). Coordinates are in UNFLIPPED frame space; when the puppet is flipped use x' = frame_w - 1 - x (y unchanged). Flipping is an exact pixel mirror on the 64 px frames. Draw the glint (centre pivot) centred on each point (the point is the centre of the dark eye socket that holds the orange-red glint). FE picks the glint by enemy STATE (CALM/RETURN -> vfx_eye_glint_calm; STARTLED/CHASE/SEARCH/REACH/RATTLE/RECOVER -> vfx_eye_glint; STUNNED -> none)."
+
+[[asset]]
+path = "assets/art/characters/puppet_return.png"
+slot = "puppet_return"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 8
+loop = true
+pivot = [32, 63]
+eye_points = [[[28, 35], [36, 35]], [[28, 32], [36, 34]], [[29, 34], [36, 34]], [[28, 32], [36, 34]], [[28, 35], [36, 35]], [[28, 33], [36, 34]], [[28, 34], [36, 33]], [[28, 33], [36, 34]]]
+notes = "64x64 puppet give-up / RETURN walk, 8f @8fps loop, pivot [32, 63]: slower and deflated (body sits lower, fingers droop, small tired steps) but the face stays consistent with chase/bite — dark eye sockets and a small closed/grimace mouth, no baked eye glint. Play on a loop while the enemy is in the RETURN state; FE should use vfx_eye_glint_calm on its eye_points. eye_points = per-frame eye centres for the unlit eye glint: one entry per frame (same count as frames), each a list of [x, y] frame-pixel points (0,0 = frame top-left, integer pixel the eye is centred on, measured from the art within 0.5 px; [] = eyes closed/hidden on that frame, draw nothing). Coordinates are in UNFLIPPED frame space; when the puppet is flipped use x' = frame_w - 1 - x (y unchanged). Flipping is an exact pixel mirror on the 64 px frames. Draw the glint (centre pivot) centred on each point (the point is the centre of the dark eye socket that holds the orange-red glint). FE picks the glint by enemy STATE (CALM/RETURN -> vfx_eye_glint_calm; STARTLED/CHASE/SEARCH/REACH/RATTLE/RECOVER -> vfx_eye_glint; STUNNED -> none)."
 
 [[asset]]
 path = "assets/art/characters/puppet_chase_float.png"
@@ -271,6 +317,50 @@ fps = 6
 loop = true
 pivot = [3, 3]
 notes = "7x7 single-eye glow for CALM puppets (CALM and RETURN states) outside the flashlight light: the quiet counterpart of vfx_eye_glint (hunting). Same 7x7 frames, 6f @6fps loop, centre pivot [3, 3] and the same rhythm (0 steady, 1 gentle flicker up, 2 dim, 3 steady, 4 near-closed slit, 5 opening), so FE can swap one for the other by enemy state with no other change; draw one instance per eye_points entry, unlit, on top of the puppet, never flipped. Soft pale amber core (255, 228, 164) with ochre arms and a faint ochre edge (166, 118, 52), NO red anywhere and no halo ring; lower intensity and a smaller footprint (5x5 plus the faint edge) than the hunting glint, a gentler flicker, so a calm puppet reads as a dim warm lamp and a hunting one as a hot red-amber ember. FE picks the glint by enemy STATE: CALM and RETURN -> vfx_eye_glint_calm; STARTLED, CHASE, SEARCH, REACH, RATTLE and RECOVER -> vfx_eye_glint; STUNNED -> no glint (eyes shut). Draw at 60-100% alpha (not 40%). The eye positions (eye_points) always come from the puppet's current animation slot"
+
+[[asset]]
+path = "assets/art/props/vfx_dust_step.png"
+slot = "vfx_dust_step"
+status = "ai"
+frame_size = [16, 8]
+frames = 5
+fps = 16
+loop = false
+pivot = [8, 7]
+notes = "16x8 footstep dust, 5f @16fps, no loop, pivot [8, 7] (bottom-centre on the floor under the stepping foot): a small ground-hugging scuff puff that drifts slightly back and fades. Spawn at the planted foot on boy_run contact frames (and walks)."
+
+[[asset]]
+path = "assets/art/props/vfx_dust_land.png"
+slot = "vfx_dust_land"
+status = "ai"
+frame_size = [32, 16]
+frames = 6
+fps = 14
+loop = false
+pivot = [16, 15]
+notes = "32x16 landing dust burst, 6f @14fps, no loop, pivot [16, 15] (bottom-centre on the floor under the boy): a puff that spreads sideways and rises, then fades. Spawn with boy_land on touching the floor."
+
+[[asset]]
+path = "assets/art/props/vfx_motes.png"
+slot = "vfx_motes"
+status = "ai"
+frame_size = [64, 64]
+frames = 8
+fps = 6
+loop = true
+pivot = [32, 32]
+notes = "64x64 ambient dust motes, 8f @6fps loop, pivot [32, 32] (centre): sparse warm motes drifting up and sparkling, meant to sit in the flashlight cone (and any other volume of light) on a layer above the world, additive or normal at low alpha, unlit. Offset the start frame per instance so they do not twinkle in unison."
+
+[[asset]]
+path = "assets/art/props/vfx_candle_flicker.png"
+slot = "vfx_candle_flicker"
+status = "ai"
+frame_size = [16, 16]
+frames = 6
+fps = 8
+loop = true
+pivot = [8, 15]
+notes = "16x16 candle-flame overlay, 6f @8fps loop, pivot [8, 15] (bottom-centre on the wick): a soft tapering flame with a warm glow halo, height and glow breathing. Draw on top of prop_candelabra (and any wall sconce) at the wick, unlit so it stays visible in the dark. Offset the start frame per candle."
 
 [[asset]]
 path = "assets/art/props/furniture_h1_a.png"
