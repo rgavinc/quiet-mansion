@@ -36,6 +36,8 @@ func run_all() -> Dictionary:
 		["every_item_has_max_copies", test_max_copies],
 		["offers_never_past_max_or_useless", test_offers_never_useless],
 		["exhausted_pool_falls_back_to_gold", test_exhausted_pool_gives_gold],
+		["gold_pickup_uses_gold_coin_sprites", test_gold_pickup_sprites],
+		["stage1_gold_and_obstacles_use_sprites_when_art_exists", test_stage1_pickup_sprites],
 	]
 	var passed := 0
 	for item in checks:
@@ -636,3 +638,93 @@ func test_exhausted_pool_gives_gold() -> String:
 	# FE path too.
 	var offers: Array = FESignals.get_shop_offer(3, 2, 42)
 	return "" if offers.size() == 1 else "FE got %d offers from an exhausted pool" % offers.size()
+
+
+## gold_coin sprite (stacked for amount > 1), never a ColorRect when the slot exists.
+func test_gold_pickup_sprites() -> String:
+	var g := Node2D.new()
+	g.set_script(load("res://scripts/world/gold_pickup.gd"))
+	g.set("amount", 3)
+	_add(g, Vector2(80, 80))
+	if g.amount != 3:
+		return "amount changed"
+	if not PropVisual.has_art(PropVisual.GOLD_SLOT):
+		return "gold_coin missing from the manifest (unexpected on development)"
+	if PropVisual.has_rect_placeholder(g):
+		return "gold pile still has a ColorRect/Polygon2D placeholder"
+	var coins := 0
+	for c in g.get_children():
+		if c is AnimatedSprite2D and (c as AnimatedSprite2D).animation == PropVisual.GOLD_SLOT:
+			coins += 1
+	if coins != 3:
+		return "amount 3 should draw 3 coins, got %d" % coins
+	# Collection radius and node origin are unchanged: a player 14 px away collects, 15 does not.
+	var p := Node2D.new()
+	p.add_to_group("player")
+	_add(p, Vector2(80, 80) + Vector2(14.1, 0))
+	g._physics_process(0.0)
+	if g.is_queued_for_deletion():
+		return "collected from 14.1 px (radius should stay 14)"
+	p.global_position = Vector2(80, 80) + Vector2(14.0, 0)
+	var gold_before: int = PlayerStats.gold
+	g._physics_process(0.0)
+	if not g.is_queued_for_deletion():
+		return "should collect at 14 px"
+	if PlayerStats.gold != gold_before + 3:
+		return "collected amount: want +3, gold %d -> %d" % [gold_before, PlayerStats.gold]
+	return ""
+
+
+## Generated stage-1 gold / generic obstacles: no rect placeholder when the sprite exists.
+func test_stage1_pickup_sprites() -> String:
+	var found_gold := 0
+	var found_obs := 0
+	for seed_value in [3, 7, 42]:
+		var w := Node2D.new()
+		w.set_meta(&"it_test", true)
+		root.add_child(w)
+		LevelGenerator.build(LevelGenerator.generate(seed_value, 1), w)
+		for n in _walk(w):
+			if n.is_in_group("gold"):
+				found_gold += 1
+				if PropVisual.has_art(PropVisual.GOLD_SLOT) and PropVisual.has_rect_placeholder(n):
+					return "seed %d gold still uses a ColorRect placeholder" % seed_value
+				if PropVisual.has_art(PropVisual.GOLD_SLOT) and not _has_anim(n, PropVisual.GOLD_SLOT):
+					return "seed %d gold missing gold_coin sprite" % seed_value
+			elif n.get_script() and str(n.get_script().resource_path).ends_with("obstacle.gd"):
+				found_obs += 1
+				# Hitbox footprint and break-on-touch radius stay 20×20 / 12.
+				if n is WorldObject:
+					if (n as WorldObject).size != Vector2(20, 20):
+						return "obstacle size changed: %s" % (n as WorldObject).size
+					if not is_equal_approx((n as WorldObject).touch_radius, 12.0):
+						return "obstacle touch_radius changed: %s" % (n as WorldObject).touch_radius
+				var slot := PropVisual.first_slot(PropVisual.OBSTACLE_SLOTS)
+				if slot != "" and PropVisual.has_rect_placeholder(n):
+					return "seed %d obstacle still uses a ColorRect placeholder" % seed_value
+				if slot != "" and not _has_anim(n, slot):
+					return "seed %d obstacle missing %s sprite" % [seed_value, slot]
+		w.free()
+		LevelNav.current = null
+	if found_gold == 0:
+		return "no gold piles in stage-1 seeds 3/7/42"
+	if found_obs == 0:
+		return "no generic obstacles in stage-1 seeds 3/7/42"
+	return ""
+
+
+func _has_anim(n: Node, slot: String) -> bool:
+	for c in n.get_children():
+		if c is AnimatedSprite2D and (c as AnimatedSprite2D).animation == slot:
+			return true
+	return false
+
+
+func _walk(n: Node) -> Array[Node]:
+	var out: Array[Node] = []
+	var stack: Array[Node] = [n]
+	while not stack.is_empty():
+		var cur: Node = stack.pop_back()
+		out.append(cur)
+		stack.append_array(cur.get_children())
+	return out
