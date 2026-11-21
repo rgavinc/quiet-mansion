@@ -40,6 +40,11 @@ var bounds_source: StringName = &"room"
 var _cam: Camera2D
 var _target: Node2D
 var _nav: Object
+## Hit-feedback shake. Applied to the display position, then re-clamped so it never shows void.
+var _shake_amp: float = 0.0
+var _shake_left: float = 0.0
+var _shake_dur: float = 0.0
+var _shake_time: float = 0.0
 
 
 func _init() -> void:
@@ -194,10 +199,34 @@ func nudge_offset() -> Vector2:
 	return n.get("current") if n != null else Vector2.ZERO
 
 
-## Jump straight to the target: stage start / new run. No other path snaps. The nudge starts
-## again from 0 (the new camera has no lean).
+## Short clamped screen shake (hit feedback). `amplitude` is in **screen pixels**
+## so a 3x camera zoom does not triple the wobble. Duration falls back to the skin.
+func shake(amplitude: float = -1.0, duration: float = -1.0) -> void:
+	if skin == null:
+		skin = HudSkin.load_default()
+	_shake_amp = amplitude if amplitude >= 0.0 else skin.hit_shake_amp
+	_shake_dur = duration if duration >= 0.0 else skin.hit_shake_time
+	_shake_left = _shake_dur
+	_shake_time = 0.0
+
+
+func is_shaking() -> bool:
+	return _shake_left > 0.0
+
+
+## World-space amplitude that produces `_shake_amp` screen pixels at the current zoom.
+func shake_world_amp() -> float:
+	var z := 1.0
+	if _cam != null and is_instance_valid(_cam):
+		z = maxf(_cam.zoom.x, 0.0001)
+	return _shake_amp / z
+
+
+## Jump straight to the target: stage start / new run. No other path snaps.
 func snap() -> void:
 	velocity = Vector2.ZERO
+	_shake_left = 0.0
+	_shake_amp = 0.0
 	var t := follow_target()
 	if is_inside_tree():
 		for n in get_tree().get_nodes_in_group(NUDGE_GROUP):
@@ -237,6 +266,9 @@ func _process(delta: float) -> void:
 	if skin == null:
 		skin = HudSkin.load_default()
 	var dt := minf(delta, MAX_DT)
+	if _shake_left > 0.0:
+		_shake_left = maxf(0.0, _shake_left - dt)
+		_shake_time += dt
 	# The nudge goes INTO the target before the clamp: at a wall the goal stops at the wall and the
 	# spring eases the combined view in, with no hard stop.
 	var goal := clamp_center(t.global_position + nudge_offset(), limits, view_size(cam))
@@ -248,7 +280,15 @@ func _process(delta: float) -> void:
 
 
 ## Put the camera at `center` (follow + nudge, already inside the limits); no separate offset.
+## Shake is added here and re-clamped so a wall hit never shows void (offset stays 0).
 func _apply() -> void:
-	_cam.global_position = center
+	var pos := center
+	if _shake_left > 0.0 and _shake_dur > 0.0:
+		var fall := _shake_left / _shake_dur
+		# Deterministic wobble (tests / replay): two phase-shifted sines, not rand.
+		var ang := _shake_time * 52.0
+		pos += Vector2(cos(ang), sin(ang * 1.27)) * (shake_world_amp() * fall)
+		pos = clamp_center(pos, limits, view_size(_cam))
+	_cam.global_position = pos
 	_cam.offset = Vector2.ZERO
 	_cam.force_update_scroll()

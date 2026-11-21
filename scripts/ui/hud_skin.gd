@@ -76,6 +76,75 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 @export var camera_max_speed_y: float = 420.0
 
 
+@export_group("Stage intro")
+## Mood subtitle under "Stage N". Index 0 = stage 1. Lead owns per-room theme names;
+## these are stage-wide moods, not room labels.
+@export var stage_moods: PackedStringArray = PackedStringArray([
+	"Dusk", "Nightfall", "Witching Hour", "Blackout", "The Puppeteer"
+])
+## Slide distance (px) the intro card travels while fading in.
+@export var intro_slide: float = 28.0
+## Total on-screen time is fade-in + hold + fade-out (~2 s with the defaults).
+@export var intro_fade_in: float = 0.25
+@export var intro_hold: float = 1.2
+@export var intro_fade_out: float = 0.55
+
+@export_group("Hit feedback")
+## Shake amplitude in **screen pixels** (zoom-agnostic).
+@export var hit_shake_amp: float = 11.0
+@export var hit_shake_time: float = 0.2
+## Land dust cue: smaller than a hit, also screen pixels.
+@export var land_shake_amp: float = 5.0
+@export var hit_flash_time: float = 0.22
+@export var hit_vignette: Color = Color(0.72, 0.04, 0.08, 0.5)
+@export var hit_vignette_inner: float = 0.35
+
+@export_group("HUD motion")
+## Seconds the gold label counts toward the new total (counts up on a gain).
+@export var gold_count_time: float = 0.35
+@export var item_bounce_scale: float = 1.28
+@export var item_bounce_time: float = 0.28
+@export var pip_flash_time: float = 0.16
+@export var last_heart_pulse: float = 0.14
+@export var last_heart_period: float = 0.7
+
+@export_group("Chase atmosphere")
+@export var chase_vignette: Color = Color(0.02, 0.0, 0.05, 0.38)
+@export var chase_vignette_inner: float = 0.42
+@export var chase_tighten_time: float = 0.45
+
+@export_group("Ambient overlay")
+@export var mote_amount: int = 16
+@export var mote_slot: String = "vfx_dust_mote"
+@export var ambient_tint_alpha: float = 0.1
+@export var stage_dust_color: Color = Color(0.85, 0.78, 0.62, 0.22)
+@export var stage_cobweb_color: Color = Color(0.78, 0.82, 0.86, 0.2)
+@export var stage_fog_color: Color = Color(0.62, 0.7, 0.8, 0.18)
+
+@export_group("Screen transitions")
+@export var fade_time: float = 0.22
+@export var shop_slide_time: float = 0.28
+@export var shop_slide_px: float = 56.0
+
+@export_group("Flashlight shadows")
+@export var light_shadows: bool = true
+## Soft PCF; keep modest for the web export.
+@export var light_shadow_smooth: float = 6.0
+@export var flashlight_cone_slot: String = "flashlight_cone"
+@export var cone_texture_scale: float = 1.15
+
+@export_group("Decor & shatter")
+@export var candle_slot: String = "decor_candle"
+@export var candle_flame_slot: String = "decor_candle_flame"
+@export var curtain_slot: String = "decor_curtain"
+@export var candle_light_energy: float = 0.7
+## Lead places props; FE attaches flicker/sway to these groups (see decor_fx.gd).
+@export var candle_group: StringName = &"fe_candle"
+@export var curtain_group: StringName = &"fe_curtain"
+@export var shatter_slot: String = "vase_gold_burst"
+@export var shatter_lifetime: float = 0.55
+
+
 func ring_color_for(type_id: String) -> Color:
 	if ring_colors.has(type_id):
 		return ring_colors[type_id]
