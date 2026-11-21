@@ -72,6 +72,7 @@ static func apply_beam(beam: PointLight2D, skin: HudSkin) -> void:
 		beam.texture_scale = skin.cone_texture_scale
 		beam.position = Vector2.ZERO
 		# Cone art is authored along +X with the pivot at the emitter; the flashlight node aims.
+		beam.offset = load("res://scripts/player/flashlight.gd").cookie_offset(tex, skin.cone_texture_scale)
 
 
 ## Attach rect occluders to CollisionShape2D children of the known physics bodies.

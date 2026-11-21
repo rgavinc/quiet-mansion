@@ -137,13 +137,18 @@ func _build_camera() -> void:
 
 
 func _build_hud() -> void:
-	# One themed hint/status line under the hearts; everything else is hud.tscn.
+	# Control hints live in the HUD's bottom bar (out of the play space), not under the hearts.
 	_status = Label.new()
 	_status.name = "Hint"
-	_status.position = Vector2(16, 64)
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if ResourceLoader.exists("res://assets/ui/hud_theme.tres"):
 		_status.theme = load("res://assets/ui/hud_theme.tres")
 	_status.add_theme_font_size_override("font_size", 14)
 	_status.text = HINT
-	$UI.add_child(_status)
+	var hud := get_node_or_null("HUD")
+	if hud and hud.has_method(&"mount_control_hint"):
+		hud.mount_control_hint(_status)
+	else:
+		# Fallback: still keep it out of the play space (bottom-left of the UI layer).
+		_status.position = Vector2(16, 668)
+		$UI.add_child(_status)

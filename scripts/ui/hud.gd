@@ -1,8 +1,9 @@
 extends CanvasLayer
 ## Screen-space FE HUD root: hearts + gold (top-left), alert counter (top-right),
-## inventory strip (bottom-centre) with the "tap: throw lure" hint above it and the Music Box
+## a bottom HUD bar holding the control hints, inventory strip ("Hold LMB to pick up"
+## / item name) and seed readout, the "tap: throw lure" hint above the strip, Music Box
 ## lure pocket pips beside it, owned items
-## (under hearts + gold), run seed + stage readout (bottom-left), minimap (top-right, Minimap item only), off-screen chaser arrows
+## (under hearts + gold), minimap (top-right, Minimap item only), off-screen chaser arrows
 ## (full screen), and the "Stage N" intro banner. Game-over / shop screens are separate layers.
 ## Instance `scenes/ui/hud.tscn` once per level. All data via FESignals.
 
@@ -31,6 +32,9 @@ var lure_hint: Control
 var lure_pocket: Control
 var seed_readout: Label
 var hud_root: Control
+## Bottom chrome the control hints and item strip sit in, so they stay out of the play space.
+var hint_bar: ColorRect
+var control_hint: Label
 var hit_feedback: CanvasLayer
 var chase_atmosphere: CanvasLayer
 var screen_transition: CanvasLayer
@@ -50,6 +54,17 @@ func _ready() -> void:
 		root.theme = load("res://assets/ui/hud_theme.tres")
 	add_child(root)
 	hud_root = root
+
+	hint_bar = ColorRect.new()
+	hint_bar.name = "HintBar"
+	hint_bar.color = skin.hud_bar_color
+	hint_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(hint_bar)
+	hint_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE, Control.PRESET_MODE_MINSIZE)
+	hint_bar.offset_top = -skin.hud_bar_height
+	hint_bar.offset_bottom = 0.0
+	hint_bar.offset_left = 0.0
+	hint_bar.offset_right = 0.0
 
 	arrows = OffscreenArrows.new()
 	arrows.name = "OffscreenArrows"
@@ -86,7 +101,7 @@ func _ready() -> void:
 		owned_items.stats = stats
 	root.add_child(owned_items)
 	owned_items.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE)
-	owned_items.position = Vector2(14, 112)   # under hearts/gold and the level's 2-line Hint (16, 64)
+	owned_items.position = Vector2(14, 62)   # under hearts/gold; control hints moved to the bottom bar
 
 	lure_hint = LureHint.new()
 	if stats:
@@ -138,6 +153,28 @@ func _ready() -> void:
 	child_entered_tree.connect(_on_hud_child)
 	get_tree().node_added.connect(_on_node_added)
 	_find_screens(get_tree().root)
+
+
+## Take the level's control-hint / status Label out of the play space and put it
+## on the bottom HUD bar (left of the item slots, above the seed readout).
+func mount_control_hint(label: Label) -> void:
+	if label == null:
+		return
+	control_hint = label
+	if hint_bar == null or not is_instance_valid(hint_bar):
+		return
+	var prev := label.get_parent()
+	if prev:
+		prev.remove_child(label)
+	hint_bar.add_child(label)
+	label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE)
+	label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	label.offset_left = 14.0
+	label.offset_bottom = -28.0   # above the seed readout in the same bar
+	label.offset_right = 0.0
+	label.offset_top = -52.0
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_size_override("font_size", 14)
 
 
 ## Hide every HUD widget while an end screen (game over / win / shop) is up.
