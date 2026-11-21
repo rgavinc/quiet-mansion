@@ -20,17 +20,21 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 ### Animated / strip slots (status = "ai", templates in `assets/replace_me/<slot>_template.png`)
 | Slot | Path | Size | Notes |
 |------|------|------|-------|
-| boy_idle | art/characters/boy_idle.png | 64² | 6f @8fps loop, pivot [32, 63]: idle loop |
-| boy_run | art/characters/boy_run.png | 64² | 8f @12fps loop, pivot [32, 63]: run cycle |
+| boy_idle | art/characters/boy_idle.png | 64² | 8f @8fps loop, pivot [32, 63]: breathing (~2 px chest/head), weight shift, glance, blink, flashlight sway |
+| boy_run | art/characters/boy_run.png | 64² | 12f @14fps loop, pivot [32, 63]: two-stride run with smear on the passing frames, hair lag, flashlight swing |
 | boy_jump | art/characters/boy_jump.png | 64² | 4f @10fps, pivot [32, 63]: takeoff/rise/apex/fall |
+| boy_land | art/characters/boy_land.png | 64² | 4f @12fps, no loop, pivot [32, 63]: contact, deep squash, overshoot recover, settle. Pair with `vfx_dust_land`. Needs FE wiring |
 | boy_pickup | art/characters/boy_pickup.png | 64² | 6f @10fps loop, pivot [32, 63]: crouch-reach loop, hand_points |
 | boy_carry | art/characters/boy_carry.png | 64² | 6f @10fps loop, pivot [32, 63]: carry walk, hand_points |
 | boy_throw | art/characters/boy_throw.png | 64² | 4f @12fps, pivot [32, 63]: overhead throw, hand_points |
 | boy_climb_stairs | art/characters/boy_climb_stairs.png | 64² | 8f @10fps loop, pivot [32, 62]: stairs up-right (6 px run / 4 px rise), pivot on the Stair.bottom→top line |
 | boy_hurt | art/characters/boy_hurt.png | 64² | 3f @12fps, pivot [32, 63]: hit flash + knock-back |
+| boy_death | art/characters/boy_death.png | 64² | 10f @10fps, no loop, pivot [32, 63]: hit flash, stumble, fall, smear, impact, limp, still. Needs FE wiring |
 | puppet_calm | art/characters/puppet_calm.png | 64² | 6f @8fps loop, pivot [32, 63]: calm float, finger lag, blink |
 | puppet_startle | art/characters/puppet_startle.png | 64² | 7f @14fps, pivot [32, 63]: hero startle: anticipation, flash+smear impact, scream mouth ~½ face height with red inner mouth + big teeth readable at 1×, red glint; hold frame 6 |
-| puppet_chase | art/characters/puppet_chase.png | 64² | 8f @14fps loop, pivot [32, 63]: enraged **scuttle** — fingers walk like legs on the floor (alternating pairs, feet on y≈62), forward lean + body bob on contacts 0/4, scream mouth snaps on 4 |
+| puppet_chase | art/characters/puppet_chase.png | 64² | 12f @16fps loop, pivot [32, 63]: enraged **scuttle** — fingers walk like legs, stronger bob/lean, smear on passing + snap, jaws snap on frame 6, red glint every frame, `eye_points` updated |
+| puppet_bite | art/characters/puppet_bite.png | 64² | 6f @12fps, no loop, pivot [32, 63]: coil, anticipation, lunge + smear, SNAP bite, clamp, settle. `eye_points`. Needs FE/BE wiring |
+| puppet_return | art/characters/puppet_return.png | 64² | 8f @8fps loop, pivot [32, 63]: deflated give-up walk (lower body, drooping fingers, tired steps). `eye_points`. Needs FE/BE wiring (RETURN state) |
 | puppet_chase_float | art/characters/puppet_chase_float.png | 64² | 8f @14fps loop, pivot [32, 63]: previous floating snap loop, kept for the stage 4–5 float tier |
 | puppet_reach_up | art/characters/puppet_reach_up.png | 64² | 9f @10fps (0.9 s), no loop, pivot [32, 63], **`hit_frame = 6`**, **`reach_height_px = 40`**: walker under a boy perched on 1–2 tile furniture. 0–5 windup telegraph (look up, crouch + red eye glint on 1, coil, stand on thumb + pinky with three fingers stretching straight up, short speed dashes beside the claws on 4–5, max stretch on 5), 6 snap grab = catch frame, 7 clench, 8 settle. Claws carry a 1px light rim on 4–7 for unlit readability over the boy. Claw tips on the catch frame sit 40 px above the pivot (frame y 23; peak 41 px on frame 5): 8 px over a 2-tile (32 px) furniture top, 8 px short of a 3-tile (48 px) top. **No pixel on any frame, FX included, is above 44 px (frame y 19)**: dashes sit beside the claws and the frame 6 impact ticks fan out sideways, so nothing draws over a boy on 3-tile furniture. Code: apply the catch on `hit_frame` (0.60 s in at 10fps, the ~0.6 s reach), so a hop-off during 0–5 escapes. Template: red dotted row = reach line, green dotted row = 2-tile top, catch frame boxed red |
 | vfx_creak | art/props/vfx_creak.png | 32x16 | 5f @12fps, no loop, pivot [16, 15]: dust puff + three squiggly creak lines rising, play at the furniture top when the boy steps on (any furniture); free after the last frame. Every frame keeps ≥1 px transparent margin on all four sides (content in cols 1–30, rows 1–14) |
@@ -38,6 +42,10 @@ Style: Dead Cells / fancy modern SNES — full-color creepy, flashlight as brigh
 | vfx_rattle | art/props/vfx_rattle.png | 48x16 | 4f @12fps, **loops**, pivot [24, 15] (bottom-centre on the furniture top): shake brackets either side that alternate small/large, dust motes rising off the top, a flat dust puff flipping side each beat. The furniture is **not redrawn** for the shake: the wobble is a code offset – read `furniture_wobble_px` from the **puppet_rattle** slot (it is not stored here) and shift the furniture sprite's visuals (and the boy on it) ±1 px horizontally per puppet_rattle frame (negate when the walker is flipped); collision stays fixed |
 | vfx_eye_glint | art/props/vfx_eye_glint.png | 7x7 | 6f @6fps, **loops**, pivot [3, 3] (centre): ONE eye's unlit glow (amber core, red plus, deep-red corners, soft 1-2 px red halo), flicker/blink loop 0 steady, 1 flicker up, 2 dim, 3 steady, 4 near-closed blink, 5 opening. See **Eye glint** below |
 | vfx_eye_glint_calm | art/props/vfx_eye_glint_calm.png | 7x7 | 6f @6fps, **loops**, pivot [3, 3] (centre): the CALM counterpart of `vfx_eye_glint`: soft pale amber core + ochre edge, **no red**, lower intensity, gentler flicker; same frame rhythm (0 steady, 1 gentle flicker up, 2 dim, 3 steady, 4 near-closed slit, 5 opening). Used for calm / idle / patrol puppets. See **Eye glint** below |
+| vfx_dust_step | art/props/vfx_dust_step.png | 16x8 | 5f @16fps, no loop, pivot [8, 7]: foot-scuff puff. Spawn on run contacts. Needs FE wiring |
+| vfx_dust_land | art/props/vfx_dust_land.png | 32x16 | 6f @14fps, no loop, pivot [16, 15]: landing burst. Spawn with `boy_land`. Needs FE wiring |
+| vfx_motes | art/props/vfx_motes.png | 64² | 8f @6fps loop, pivot [32, 32]: sparse dust motes for the flashlight cone. Needs FE wiring |
+| vfx_candle_flicker | art/props/vfx_candle_flicker.png | 16x16 | 6f @8fps loop, pivot [8, 15]: flame + glow overlay for candelabra / sconce wicks. Needs FE wiring |
 | vase_idle | art/props/vase_idle.png | 32² | still, pivot [16, 31]: standing |
 | vase_thrown | art/props/vase_thrown.png | 32² | 4f @16fps loop, pivot [16, 16]: spin, centre pivot |
 | vase_shatter_enemy | art/props/vase_shatter_enemy.png | 32² | 6f @14fps, pivot [16, 31]: breaks on enemy |
@@ -168,8 +176,28 @@ Swap by state only; the eye positions never change with the glint: `eye_points` 
 
 Previews: `docs/previews/eye_glint_states_4x.png` shows a calm puppet with the calm glint next to chase and rattle puppets with the hunting glint, plus both strips side by side; `docs/previews/eye_glint_4x.png` shows every puppet slot, all frames, on a near-black stage-5 background with a dim silhouette and the glints placed from `eye_points`, unflipped and flipped, plus the glint strip enlarged.
 
+
+## New motion and FX slots (Batch 1)
+
+`boy_idle` and `boy_run` were redrawn in place (same slot names, 64×64, bottom-centre pivot `[32, 63]`); frame counts and fps changed (`idle` 8f @8, `run` 12f @14) so FE keeps the existing wiring and just picks up the new strips. `puppet_chase` was redrawn the same way (now 12f @16fps) and its `eye_points` were re-measured.
+
+These slots are in the manifest with templates, but **they will not show in game until FE/BE wire them**:
+
+| Slot | Suggested hook |
+|---|---|
+| `boy_land` | Play once when the boy touches a floor after `boy_jump` (and after a shake-off landing); then return to idle or run. Spawn `vfx_dust_land` at the feet. |
+| `boy_death` | Play once when the boy is caught / reaches 0 HP; hold the last frame under the game-over screen. |
+| `puppet_bite` | Play once when a puppet catches the boy (the catch beat). |
+| `puppet_return` | Loop while the enemy is in the RETURN / give-up state (today RETURN reuses `puppet_calm`). Use `vfx_eye_glint_calm` on its `eye_points`. |
+| `vfx_dust_step` | Spawn at the planted foot on `boy_run` contact frames. |
+| `vfx_dust_land` | Spawn with `boy_land`. |
+| `vfx_motes` | Loop inside the flashlight cone (and other light volumes), unlit, low alpha, per-instance phase offset. |
+| `vfx_candle_flicker` | Loop on top of `prop_candelabra` (and sconces) at the wick, unlit, per-candle phase offset. |
+
+Preview: `docs/previews/batch1_anims_4x.png`. Animated GIFs of `boy_run`, `boy_death` and `puppet_chase` live next to it.
+
 ## How to replace an animation
-Animated slots (`boy_idle`, `boy_run`, `boy_jump`, `boy_pickup`, `boy_carry`, `boy_throw`, `boy_climb_stairs`, `boy_hurt`, `puppet_calm`, `puppet_startle`, `puppet_chase`, `puppet_chase_float`, `puppet_reach_up`, `puppet_rattle`, `vase_*`, `music_box_world`, `vfx_creak`, `vfx_rattle`, `vfx_eye_glint`, `vfx_eye_glint_calm`) are **one horizontal PNG strip** per slot: frames left→right, no padding, transparent background. Frame data lives only in `assets/ASSETS_MANIFEST.toml` (`frame_size`, `frames`, `fps`, `loop`, `pivot`, plus `hand_points` for `boy_pickup`/`boy_carry`/`boy_throw`: one `[x, y]` per frame, frame-local pixels, where held/thrown objects attach; and `hit_frame` + `reach_height_px` for `puppet_reach_up`: the 0-based frame on which the catch lands and how high above the pivot the claws reach on it. If you redraw it, keep the catch on `hit_frame` and the claw tops on the template's red reach line, or update both fields).
+Animated slots (`boy_idle`, `boy_run`, `boy_jump`, `boy_land`, `boy_pickup`, `boy_carry`, `boy_throw`, `boy_climb_stairs`, `boy_hurt`, `boy_death`, `puppet_calm`, `puppet_startle`, `puppet_chase`, `puppet_chase_float`, `puppet_bite`, `puppet_return`, `puppet_reach_up`, `puppet_rattle`, `vase_*`, `music_box_world`, `vfx_creak`, `vfx_rattle`, `vfx_eye_glint`, `vfx_eye_glint_calm`, `vfx_dust_step`, `vfx_dust_land`, `vfx_motes`, `vfx_candle_flicker`) are **one horizontal PNG strip** per slot: frames left→right, no padding, transparent background. Frame data lives only in `assets/ASSETS_MANIFEST.toml` (`frame_size`, `frames`, `fps`, `loop`, `pivot`, plus `hand_points` for `boy_pickup`/`boy_carry`/`boy_throw`: one `[x, y]` per frame, frame-local pixels, where held/thrown objects attach; and `hit_frame` + `reach_height_px` for `puppet_reach_up`: the 0-based frame on which the catch lands and how high above the pivot the claws reach on it. If you redraw it, keep the catch on `hit_frame` and the claw tops on the template's red reach line, or update both fields).
 1. Open `assets/replace_me/<slot>_template.png` in your editor (same pixel size as the strip) and draw on a new layer over it. Guides: magenta box = one frame; cyan row = feet line (pivot y); dotted cyan column + white dot = pivot (bottom-centre); orange/red cross = that frame's `hand_points` entry (pickup/carry/throw); green dots on `boy_climb_stairs` = stair slope through the pivot (the Stair.bottom→top line). The faint figure underneath is the current AI frame.
 2. Keep the same frame size and frame count — or change `frames` (and `fps`/`loop` if needed) in the manifest to match what you drew. Keep feet on the feet line so the pivot still works. For slots with `hand_points`, keep exactly one point per frame: if the hand moves in your drawing, update that frame's `[x, y]`. The same goes for the puppet slots' `eye_points`: one entry per frame, each a list of `[x, y]` eye centres (`[]` when the eyes are closed or hidden); if you redraw the eyes, re-measure them (centre of the eye socket / pupil) and update the entries.
 3. Hide the template layer and export over the `path` listed in the manifest (no frame info in filenames).
