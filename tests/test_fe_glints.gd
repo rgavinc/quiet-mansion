@@ -76,8 +76,16 @@ func _root() -> Window:
 	return (Engine.get_main_loop() as SceneTree).root
 
 
+## Previous StageLook.ambient values pushed by _rig, popped by _free.
+var _ambient_stack: Array[float] = []
+
+
 ## A dark-stage DarkGlints (stage 5 on a fresh bus) plus cleanup list.
+## Sets StageLook.ambient to that stage's table value so earlier suite tests (levelgen,
+## camera) cannot leak a leftover brightness into these fixtures.
 func _rig(stage: int = 5) -> Dictionary:
+	_ambient_stack.append(StageLook.ambient)
+	StageLook.ambient = StageLook.ambient_of(stage)
 	var bus: Node = load(FE).new()
 	bus.set("stage", stage)
 	_root().add_child(bus)
@@ -99,6 +107,8 @@ func _free(nodes: Array) -> void:
 	for n in nodes:
 		if is_instance_valid(n):
 			n.free()
+	if not _ambient_stack.is_empty():
+		StageLook.ambient = _ambient_stack.pop_back()
 
 
 # --- tests -------------------------------------------------------------------------------
@@ -302,16 +312,55 @@ func test_blob_gate() -> String:
 	return err
 
 
+func _set_reported_ambient(amb: CanvasModulate, color: Color) -> void:
+	amb.color = color
+	# StageLook.ambient is the official API and wins over the CanvasModulate node.
+	# Keep it in sync with the colour under test (Lead's 0.299/0.587/0.114 luminance).
+	StageLook.ambient = clampf(0.299 * color.r + 0.587 * color.g + 0.114 * color.b, 0.0, 1.0)
+
+
 func test_activation() -> String:
 	var err := ""
+	# After #60, StageLook.ambient is always present. _rig sets it to that stage's table value;
+	# only stage 5 (0.057) is below the 0.1 threshold. Stages 1-4 stay inactive.
+	var table := [0.435, 0.343, 0.268, 0.213, 0.057]
+	for i in table.size():
+		if absf(StageLook.ambient_of(i + 1) - table[i]) > 0.002:
+			return "fixture: StageLook.ambient_of(%d) = %.3f, want ~%.3f" % [i + 1, StageLook.ambient_of(i + 1), table[i]]
 	for pair in [[1, false], [2, false], [3, false], [4, false], [5, true]]:
 		var r := _rig(pair[0])
 		var dg: Node2D = r.dg
-		if dg.current_ambient() >= 0.0:
-			err = "fixture: no ambient expected without a StageAmbient node"
+		if absf(dg.current_ambient() - StageLook.ambient_of(pair[0])) > 0.002:
+			err = "stage %d ambient %.3f, want StageLook.ambient_of %.3f" % [pair[0], dg.current_ambient(), StageLook.ambient_of(pair[0])]
 		elif dg.darkness_active() != pair[1]:
-			err = "stage %d fallback: active %s, want %s" % [pair[0], dg.darkness_active(), pair[1]]
+			err = "stage %d (ambient %.3f): active %s, want %s" % [pair[0], dg.current_ambient(), dg.darkness_active(), pair[1]]
 		_free(r.free)
+		if not err.is_empty():
+			return err
+	# Fallback when neither StageLook nor a StageAmbient node reports a value: stage number.
+	var fb := _rig(5)
+	fb.dg.set("_stage_look_checked", true)
+	fb.dg.set("_stage_look_script", null)
+	fb.dg.set("_ambient_node", null)
+	fb.dg.set("_ambient_check", 30)
+	# Hide the official ambient so current_ambient falls through; keep the bus at stage 5 / 1.
+	# With the script cache cleared, current_ambient should be -1 (no StageAmbient in this fixture).
+	if fb.dg.current_ambient() >= 0.0:
+		err = "fallback: no ambient expected with StageLook hidden and no StageAmbient, got %.3f" % fb.dg.current_ambient()
+	elif not fb.dg.darkness_active():
+		err = "fallback: stage 5 should be active"
+	_free(fb.free)
+	if not err.is_empty():
+		return err
+	for stg in [1, 4]:
+		var r1 := _rig(stg)
+		r1.dg.set("_stage_look_checked", true)
+		r1.dg.set("_stage_look_script", null)
+		r1.dg.set("_ambient_node", null)
+		r1.dg.set("_ambient_check", 30)
+		if r1.dg.darkness_active():
+			err = "fallback: stage %d should be inactive" % stg
+		_free(r1.free)
 		if not err.is_empty():
 			return err
 	# a level-reported ambient wins over the stage number
@@ -324,28 +373,27 @@ func test_activation() -> String:
 	_root().remove_child(r2.dg)
 	holder.add_child(r2.dg)   # sibling of the ambient node, like WorldOverlay under the level
 	var dg2: Node2D = r2.dg
-	amb.color = Color(0.045, 0.055, 0.10)   # stage-5 look
+	_set_reported_ambient(amb, Color(0.045, 0.055, 0.10))   # stage-5 look
 	if not dg2.darkness_active():
 		err = "dark StageAmbient (%.3f) should activate even on stage 1" % dg2.current_ambient()
-	amb.color = Color(0.50, 0.42, 0.34)      # stage-1 look
 	# PD: with the real StageTable looks, only stage 5 is dark enough for glints.
 	if err.is_empty():
 		for s in range(1, 6):
-			amb.color = StageTable.look(s).ambient
+			_set_reported_ambient(amb, StageTable.look(s).ambient)
 			if dg2.darkness_active() != (s == 5):
 				err = "real stage %d ambient (%.3f): active %s, want %s" % [s, dg2.current_ambient(), dg2.darkness_active(), s == 5]
 				break
-	amb.color = Color(0.50, 0.42, 0.34)
+	_set_reported_ambient(amb, Color(0.50, 0.42, 0.34))
 	if err.is_empty() and dg2.darkness_active():
 		err = "light StageAmbient (%.3f) should deactivate even on stage 5" % dg2.current_ambient()
-	amb.color = Color(0.15, 0.17, 0.24)      # stage 4 look: PD says no glints
+	_set_reported_ambient(amb, Color(0.15, 0.17, 0.24))      # older stage 4 look: PD says no glints
 	if err.is_empty() and dg2.darkness_active():
 		err = "stage 4 ambient %.3f should be inactive" % dg2.current_ambient()
-	amb.color = Color(0.27, 0.26, 0.30)      # stage 3 look
+	_set_reported_ambient(amb, Color(0.27, 0.26, 0.30))      # stage 3 look
 	if err.is_empty() and dg2.darkness_active():
 		err = "stage 3 ambient %.3f should be inactive" % dg2.current_ambient()
 	dg2.skin.glints_enabled = false
-	amb.color = Color(0.0, 0.0, 0.0)
+	_set_reported_ambient(amb, Color(0.0, 0.0, 0.0))
 	if err.is_empty() and dg2.darkness_active():
 		err = "glints_enabled=false must switch it off"
 	dg2.skin.glints_enabled = true
