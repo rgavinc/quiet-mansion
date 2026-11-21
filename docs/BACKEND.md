@@ -248,3 +248,25 @@ Rattle landing sweep (probe, not in the suite): real `LevelGenerator` levels, ev
 - **Give-up wait:** `memory_time` default 4 -> **3.0 s** (`@export` on `EnemyBase`, per-type via `DEF_FIELDS`/`EnemyDef`; one number to retune). Distance scaling softened to clamp 0.5..2, plus a hard `give_up_cap` of 6 s after lost sight (tracking time inside it). PROVISIONAL: PD/QA retune pending a corrected tactic probe.
 - **Test:** `run_speed_at_least_105_free_100_carrying_every_combo` (`test_item_behaviors.gd`): 8640 combinations of min/base/max move_speed (modifier x0.001 / 1 / x1000) x Soft Shoes 0-3 x Big Pockets 0-3 x Thick Sweater 0-3 x Sneakers 0-2 x Heavy Vases 0-4, holding 0 / 1 / 3 vases through the real `PlayerController.move_speed()`: speed >= 105 empty-handed, >= 100 carrying, > walker chase 95, <= 280; and the floors are hit exactly (min stat 105, min stat + vase 100).
 - **Probe:** `p_chase54.gd` (QA's tactic probe: run away / open floor / break LOS / vase / away stairs / hide-wait on every h>=3 piece, both sides, real LevelGenerator levels, 0.25 s reaction); run with `POLS=... RD=15 -s launch.gd -- p_chase54.gd <stage> <seed0> <seed1>`.
+
+## Animation-state hooks (`be/anim-hooks`)
+
+A visual-only layer so Designer/FE can drop in frames and VFX without touching gameplay code. Numbers (speeds, reach timing, startle, etc.) are unchanged.
+
+### States
+- **Boy** (derived each frame from physics / player FSM): `idle`, `walk`, `run`, `jump` (rise), `fall`, `land`, `climb`, `carry_idle`, `carry_walk`, `throw`, `hide`, `hurt`, `caught`. `pickup` is also published so the existing pickup clip keeps playing.
+- **Enemies** (derived from `Enemy.State`): `CALM` still → `idle`, moving/`RETURN` → `patrol`, `STARTLED` → `alert`, `CHASE` → `chase`, `SEARCH` → `search`, `STUNNED` → `stunned`, `REACH` → `reach_windup` then `reach_strike`, `RATTLE` → `rattle`, `RECOVER` → `recover`.
+
+### Signals (on the player and on each enemy)
+- `anim_state_changed(old_state, new_state)` — fires when the derived state changes.
+- `anim_event(name)` — one-shot cues for dust, shake, hit-flash, squash-stretch:
+  - boy: `land`, `throw_release`, `footstep` (every 32 px of walk/run/carry_walk), `hit`, `caught`
+  - enemy: `startle`, `reach_windup`, `reach_strike` (default catch is 36 frames at 60 fps / 0.6 s, the same as `reach_delay()`), `hit` (a landed grab or contact), `footstep` (patrol/chase/search)
+- Facing (existing hysteresis on the enemy via `update_facing`; the boy's input facing) and `anim_hook.velocity` / `anim_hook.normalized_speed` (speed over the current move cap) are updated every sync for blend.
+
+### How FE / Designer hook in
+1. Connect `anim_state_changed` and `anim_event` on the boy or a puppet.
+2. Read `anim_hook.anim_state`, `facing`, `velocity`, `normalized_speed`.
+3. Edit `assets/anim_maps/player.tres` or `enemy.tres` (`AnimMap`) to point a state at a new SpriteFrames animation name (manifest slot). If that clip is missing, the layer falls back to the current placeholder (`boy_run` for walk, `boy_jump` for fall, `anim_calm` / `chase_slot()` / `anim_startle` / `anim_reach` / `anim_rattle` on enemies), so nothing breaks visually until the new strip exists.
+4. The boy's `hiding` flag is visual-only (set it to play `hide`); it does not change movement.
+5. Tests: `tests/test_anim_hooks.gd`. Call `sync_anim(delta)` to publish without a full physics frame.

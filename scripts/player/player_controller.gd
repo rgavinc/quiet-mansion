@@ -25,13 +25,20 @@ var _stair_t: float = 0.0
 var _jump_queued: bool = false
 var _throw_anim_left: float = 0.0
 var _hurt_anim_left: float = 0.0
+var _land_anim_left: float = 0.0
 var _anim: AnimatedSprite2D
+## Visual-only: FE or a future hide mechanic can set this. Does not change movement.
+var hiding: bool = false
+var anim_hook: AnimHook
 ## Test hook: when set, used instead of is_on_floor().
 var floor_override: int = -1  # -1 real, 0 airborne, 1 grounded
 
 ## Landing on furniture creaks (PRODUCT.md "Perching has risk"): a NoiseBus noise at his feet,
 ## radius x the noise_mult stat (items) and the item noise hooks, like the chest creak.
 signal creaked(furniture_px: float)
+## Animation-state layer (visual only). FE/Designer hook frames and VFX here.
+signal anim_state_changed(old_state: StringName, new_state: StringName)
+signal anim_event(event: StringName)
 @export var furniture_creak_radius: float = NoiseBus.DEFAULT_RADIUS * 0.5   # about half a screen
 @export var furniture_creak_loudness: float = 0.6
 ## Furniture = something he lands on with another world surface below it within this many px
@@ -60,6 +67,7 @@ func _ready() -> void:
 	add_to_group("player")
 	collision_layer = PlayerStats.LAYER_PLAYER
 	collision_mask = PlayerStats.LAYER_WORLD | PlayerStats.LAYER_ENEMY
+	_init_anim_hook()
 	_anim = AnimatedSprite2D.new()
 	_anim.name = "Anim"
 	_anim.sprite_frames = AnimLibrary.frames_for(ANIM_SLOTS)
@@ -102,6 +110,7 @@ func lights(p: Vector2) -> bool:
 func _physics_process(delta: float) -> void:
 	if GameState.game_over:
 		velocity = Vector2.ZERO
+		_update_anim(delta)  # still publish caught / last pose
 		return
 	tick(delta, Input.get_vector(&"move_left", &"move_right", &"move_up", &"move_down"))
 	if state != State.CLIMB:
@@ -114,6 +123,9 @@ func _physics_process(delta: float) -> void:
 func _check_landing() -> void:
 	var g := side_scroll and state != State.CLIMB and _grounded()
 	if g and not _was_grounded:
+		_land_anim_left = AnimHook.LAND_TIME
+		if anim_hook:
+			anim_hook.emit_event(&"land")
 		var h := furniture_under()
 		if h > 0.0:
 			creak(h)
@@ -354,6 +366,23 @@ func _tick_climb(delta: float, dir: Vector2) -> void:
 
 
 # --- animation (slot names only; art comes from the manifest) -------------------
+func _init_anim_hook() -> void:
+	if anim_hook != null:
+		return
+	anim_hook = AnimHook.new()
+	anim_hook.map = AnimMap.player_map()
+	anim_hook.anim_state_changed.connect(func(o: StringName, n: StringName) -> void:
+		anim_state_changed.emit(o, n))
+	anim_hook.anim_event.connect(func(e: StringName) -> void:
+		anim_event.emit(e))
+
+
+## Test / FE helper: derive anim_state from the current physics/FSM and publish it.
+func sync_anim(delta: float) -> void:
+	_init_anim_hook()
+	_update_anim(delta)
+
+
 func _play_anim(slot: String) -> void:
 	if _anim and _anim.sprite_frames and _anim.sprite_frames.has_animation(slot):
 		if _anim.animation != slot or not _anim.is_playing():
@@ -361,30 +390,86 @@ func _play_anim(slot: String) -> void:
 		_anim.offset = AnimLibrary.offset_for(slot)
 
 
+func _carrying() -> bool:
+	return inventory != null and not inventory.current().is_empty()
+
+
+func _is_caught() -> bool:
+	return PlayerStats.health <= 0
+
+
+func _moving() -> bool:
+	return absf(velocity.x) > AnimHook.MOVE_EPS or (not side_scroll and velocity.length() > AnimHook.MOVE_EPS)
+
+
+## Existing boy_* slots used when the mapped clip is not on the sprite yet.
+func _anim_fallback(s: StringName) -> String:
+	match s:
+		&"walk", &"run":
+			return "boy_run"
+		&"jump", &"fall":
+			return "boy_jump"
+		&"climb":
+			return "boy_climb_stairs"
+		&"carry_walk":
+			return "boy_carry"
+		&"throw":
+			return "boy_throw"
+		&"hurt", &"caught":
+			return "boy_hurt"
+		&"pickup":
+			return "boy_pickup"
+		_:
+			return "boy_idle"  # idle, carry_idle, hide, land
+
+
+func _derive_anim_state() -> StringName:
+	if _is_caught():
+		return &"caught"
+	if _hurt_anim_left > 0.0:
+		return &"hurt"
+	if _throw_anim_left > 0.0:
+		return &"throw"
+	if hiding:
+		return &"hide"
+	if state == State.CLIMB:
+		return &"climb"
+	if state == State.PICKUP:
+		return &"pickup"
+	if side_scroll and not _grounded():
+		return &"jump" if velocity.y < 0.0 else &"fall"
+	if _land_anim_left > 0.0:
+		return &"land"
+	if _carrying():
+		return &"carry_walk" if _moving() else &"carry_idle"
+	if not _moving():
+		return &"idle"
+	return &"run" if velocity.length() >= move_speed() * AnimHook.RUN_FRAC else &"walk"
+
+
 func _update_anim(delta: float) -> void:
-	if _anim == null:
-		return
+	_init_anim_hook()
 	_throw_anim_left = maxf(_throw_anim_left - delta, 0.0)
 	_hurt_anim_left = maxf(_hurt_anim_left - delta, 0.0)
+	_land_anim_left = maxf(_land_anim_left - delta, 0.0)
+	var next := _derive_anim_state()
+	anim_hook.set_motion(velocity, maxf(move_speed(), 1.0), facing)
+	anim_hook.set_state(next)
+	var loco := next in [&"walk", &"run", &"carry_walk"]
+	anim_hook.track_footsteps(loco, delta)
+	if _anim == null:
+		return
 	_anim.flip_h = facing < 0
-	if _hurt_anim_left > 0.0:
-		_play_anim("boy_hurt")
-	elif _throw_anim_left > 0.0:
-		_play_anim("boy_throw")
-	elif state == State.PICKUP:
-		_play_anim("boy_pickup")
-	elif state == State.CLIMB:
-		_play_anim("boy_climb_stairs")
-		var dx := stair.global_top().x - stair.global_bottom().x if is_instance_valid(stair) else 1.0
+	if state == State.CLIMB and is_instance_valid(stair):
+		var dx := stair.global_top().x - stair.global_bottom().x
 		_anim.flip_h = dx < 0.0
-	elif side_scroll and not _grounded():
-		_play_anim("boy_jump")
+		anim_hook.facing = -1 if dx < 0.0 else 1
+	var slot := anim_hook.resolved_animation(_anim.sprite_frames, _anim_fallback(next))
+	_play_anim(slot)
+	# Placeholder jump strip is one anim with rise / apex / fall frames.
+	if slot == "boy_jump" and side_scroll and not _grounded():
 		_anim.frame = 1 if velocity.y < -60.0 else (2 if velocity.y < 60.0 else 3)
 		_anim.pause()
-	elif absf(velocity.x) > 5.0 or (not side_scroll and velocity.length() > 5.0):
-		_play_anim("boy_carry" if not inventory.current().is_empty() else "boy_run")
-	else:
-		_play_anim("boy_idle")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -485,6 +570,8 @@ func _launch(it: Dictionary, tgt: Node2D, point: Vector2) -> Node2D:
 	get_parent().add_child(t)
 	t.setup(global_position + Vector2(0, -20), it, tgt, self, point)
 	_throw_anim_left = 0.33
+	if anim_hook:
+		anim_hook.emit_event(&"throw_release")
 	return t
 
 
@@ -594,6 +681,10 @@ func _on_health_changed(current: int, _max: int) -> void:
 	if current < _hp_seen:
 		_cancel_pickup()  # getting hit breaks the channel
 		_hurt_anim_left = 0.4
+		if anim_hook:
+			anim_hook.emit_event(&"hit")
+			if current <= 0:
+				anim_hook.emit_event(&"caught")
 	_hp_seen = current
 
 

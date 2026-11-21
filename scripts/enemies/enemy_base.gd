@@ -26,6 +26,9 @@ signal reach_ended(caught: bool)
 signal rattle_started
 signal rattled(at: Vector2)
 signal rattle_ended(shaken: bool)
+## Animation-state layer (visual only). FE/Designer hook frames and VFX here.
+signal anim_state_changed(old_state: StringName, new_state: StringName)
+signal anim_event(event: StringName)
 
 const MOVE_WALK := &"walk"
 const MOVE_FLOAT := &"float"
@@ -225,6 +228,7 @@ var _wobble_nodes: Array = []          # [{node, base_x}] visuals the rattle shi
 var rattle_wobble: float = 0.0
 ## 0..1 progress to the shake-off (0 when not rattling). FE telegraph.
 var rattle_progress: float = 0.0
+var anim_hook: AnimHook
 
 
 func _ready() -> void:
@@ -236,7 +240,9 @@ func _ready() -> void:
 	_spr = AnimatedSprite2D.new()
 	_spr.name = "Anim"
 	add_child(_spr)
+	_init_anim_hook()
 	_play(anim_calm)
+	_refresh_anim(0.0)
 	NoiseBus.noise.connect(_on_bus_noise)   # NoiseBus also re-emits GameState.noise_made: listen once
 	hitbox = Area2D.new()
 	hitbox.name = "Hitbox"
@@ -316,6 +322,104 @@ func _play(slot: String) -> void:
 	_spr_slot = slot
 	_apply_spr_offset()
 	_apply_flip()
+
+
+func _init_anim_hook() -> void:
+	if anim_hook != null:
+		return
+	anim_hook = AnimHook.new()
+	anim_hook.map = AnimMap.enemy_map()
+	anim_hook.anim_state_changed.connect(func(o: StringName, n: StringName) -> void:
+		anim_state_changed.emit(o, n))
+	anim_hook.anim_event.connect(func(e: StringName) -> void:
+		anim_event.emit(e))
+
+
+## Test / FE helper: derive anim_state from the current FSM and publish it.
+func sync_anim(delta: float = 0.0) -> void:
+	_init_anim_hook()
+	_refresh_anim(delta)
+
+
+func _reach_is_strike() -> bool:
+	return state == State.REACH and _reach_total > 0.0 and _state_left <= 1e-4
+
+
+func _anim_fallback(s: StringName) -> String:
+	match s:
+		&"idle", &"patrol":
+			return anim_calm
+		&"alert", &"stunned":
+			return anim_startle
+		&"chase", &"search", &"recover":
+			return chase_slot()
+		&"reach_windup", &"reach_strike":
+			if not anim_reach.is_empty() and AnimLibrary.has_slot(anim_reach):
+				return anim_reach
+			return chase_slot()
+		&"rattle":
+			if not anim_rattle.is_empty() and AnimLibrary.has_slot(anim_rattle):
+				return anim_rattle
+			return chase_slot()
+		_:
+			return anim_calm
+
+
+func _derive_anim_state() -> StringName:
+	match state:
+		State.STARTLED:
+			return &"alert"
+		State.CHASE:
+			return &"chase"
+		State.SEARCH:
+			return &"search"
+		State.RECOVER:
+			return &"recover"
+		State.STUNNED:
+			return &"stunned"
+		State.RATTLE:
+			return &"rattle"
+		State.REACH:
+			return &"reach_strike" if _reach_is_strike() else &"reach_windup"
+		State.RETURN:
+			return &"patrol"
+		State.CALM:
+			if absf(velocity.x) > AnimHook.MOVE_EPS or velocity.length() > AnimHook.MOVE_EPS:
+				return &"patrol"
+			return &"idle"
+		_:
+			return &"idle"
+
+
+func _move_cap() -> float:
+	match state:
+		State.CHASE, State.SEARCH, State.REACH, State.RATTLE:
+			return chase_speed
+		State.RECOVER:
+			return backoff_speed
+		_:
+			return walk_speed
+
+
+func _refresh_anim(delta: float) -> void:
+	_init_anim_hook()
+	var next := _derive_anim_state()
+	var prev := anim_hook.anim_state
+	anim_hook.set_motion(velocity, maxf(_move_cap(), 1.0), face_dir)
+	anim_hook.set_state(next)
+	if next != prev:
+		if next == &"alert":
+			anim_hook.emit_event(&"startle")
+		elif next == &"reach_windup":
+			anim_hook.emit_event(&"reach_windup")
+		elif next == &"reach_strike":
+			anim_hook.emit_event(&"reach_strike")
+	var loco := next in [&"patrol", &"chase", &"search"]
+	anim_hook.track_footsteps(loco, delta)
+	var slot := anim_hook.resolved_animation(_spr.sprite_frames if _spr else null, _anim_fallback(next))
+	# Only switch when the resolved clip changes — _play() restarts non-startle loops.
+	if not slot.is_empty() and (_spr == null or _spr.animation != slot):
+		_play(slot)
 
 
 ## Turn the sprite toward the way it moves (vx past the deadzone) or, standing still while
@@ -493,6 +597,7 @@ func _set_state(s: State) -> void:
 				_play(chase_slot())
 		_:
 			_play(chase_slot())
+	_refresh_anim(0.0)
 
 
 func _enter_chase(track: float) -> void:
@@ -638,6 +743,7 @@ func _tick_reach(delta: float, p: Node2D) -> void:
 	reach_progress = clampf(1.0 - _state_left / maxf(_reach_total, 1e-4), 0.0, 1.0)
 	if _state_left > 1e-4:   # same float slack as STARTLED (36 x 1/60 ends a 0.6 s reach)
 		return
+	_refresh_anim(0.0)  # publish reach_strike (and its event) before RECOVER
 	_reach_landing = true
 	_reach_resume_left = 0.0
 	if PlayerStats.take_hit(1):
@@ -1396,6 +1502,7 @@ func tick(delta: float) -> void:
 						_enter_calm()
 				else:
 					_resume_hunt()
+	_refresh_anim(delta)
 
 
 func _tick_startle(delta: float, p: Node2D) -> void:
@@ -1495,6 +1602,8 @@ func on_landed_hit(p: Node2D) -> void:
 		dir = Vector2(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0)
 	if p is PhysicsBody2D and p.is_inside_tree():
 		(p as PhysicsBody2D).move_and_collide(dir * shove_distance)
+	if anim_hook:
+		anim_hook.emit_event(&"hit")
 	_set_state(State.RECOVER)
 	_state_left = recover_time
 
