@@ -1,7 +1,10 @@
 extends Control
-## Smash-style edge arrows for CHASING enemies that are off-screen.
-## Listens to FESignals.chase_changed (pulls FESignals.chasing each frame) and
-## FESignals.chase_memory_changed. Each arrow carries a ring gauge:
+## Smash-style edge arrows for CHASING / alert (report_chase) enemies that are
+## off the zoomed gameplay view, including chasers on other floors. "Off-screen"
+## is the world view (viewport / camera zoom) via the canvas transform, not the
+## unzoomed 1280x720 rect — at camera_zoom 3 a puppet one floor away is off-screen
+## and gets an arrow. Listens to FESignals.chase_changed (pulls FESignals.chasing
+## each frame) and FESignals.chase_memory_changed. Each arrow carries a ring gauge:
 ##   BE chase memory (report_chase_memory, PR #26: sent on chase start and every
 ##   hunting frame; 1 while tracking, drains in SEARCH). Full until the first report.
 ## Which enemies get arrows = FESignals.chasing (BE report_chase), never `enraged`.
