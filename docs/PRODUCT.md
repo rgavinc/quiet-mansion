@@ -184,3 +184,13 @@ Gavin's rule: the art should look Dead Cells quality, and a human artist must be
 - **Chase speed floor:** `move_speed` floor is 105 and the carry penalty never drops effective speed below 100 (walker chase is 95). Carrying is risky but never certain death. Tested across every stat and carry combination.
 - **Every landing has an exit:** each step cluster has, on at least one side within running reach, stairs or 1500px of open floor with no wall or tall piece. The level exit door does not count toward this rule (target: 0 no-exit landings without the door), though reaching it counts as an escape in QA tactic tables. Checked by the validator on every seed.
 - **Give-up after losing sight:** starts at ~3s (was ~6s). Tuned so breaking line of sight and hiding each escape ~30-50% at base stats, and every chase tactic lands between 30% and 75%: each choice works sometimes, none is guaranteed.
+
+## Visual bar (QA gate, Nov 20)
+- **Look:** Dead Cells / modern high-res SNES: dense hand-pixeled detail, rim light, painterly parallax, strong silhouettes. Home Alone is the premise, not the art style. Nothing flat, static, or ColorRect in a build Gavin sees.
+- **Boy (6+ frames each unless noted):** idle (breathing, 4+), walk, run, jump (rise/apex/fall), land (squash), climb, carry-walk, throw, hurt, caught, shaken-off. Flashlight arm follows aim.
+- **Puppets (6+ frames each):** idle/sway, patrol, alert/startle, chase, reach, rattle, stunned, give-up. Hand-puppet strings or cloth motion visible.
+- **Objects:** vases shatter with shards + coin pop; chests open (4+); furniture wobbles on climb/rattle; doors, candles, curtains, clocks animate; gold pickups spin.
+- **Effects:** soft flashlight cone with beam haze and shadows, dust motes, hit flash + hit stop, screen shake on loud noises, footstep dust, squash and stretch.
+- **Variety per stage:** its own tileset and palette; 3+ parallax layers; 3+ room themes (e.g. foyer, kitchen, library, nursery, attic, cellar); 15+ distinct decor props; no two adjacent rooms identical on 3 sampled seeds.
+- **QA check:** side-by-side screenshots of every stage on 3 seeds against the approved stage 1 mockup, plus a recorded 2-minute stage 1 play.
+- **Process:** Designer's stage 1 mockup gets Gavin's approval before mass production. All AI art stays labeled, templates kept, watermark stays.
