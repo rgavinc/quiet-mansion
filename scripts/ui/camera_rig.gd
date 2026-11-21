@@ -1,12 +1,13 @@
 class_name CameraRig
 extends Node
-## FE owns the player camera's bounds and follow (Camera2D itself is built by main.gd).
+## FE owns the player camera's bounds, zoom and follow (Camera2D itself is built by main.gd).
 ## Lives in `world_overlay.tscn`, so it needs no hook in main.gd: it adopts the viewport's
 ## current Camera2D the first frame it sees it (a new camera = a new stage or a new run), and then
-##   1. clamps the camera LIMITS to the level: `LevelNav.current.layout` →
+##   1. applies `HudSkin.camera_zoom` (default 3: one floor plus a bit of the floors above/below)
+##      and clamps the camera LIMITS to the level: `LevelNav.current.layout` →
 ##      `LevelValidator.level_bounds` (PR #13), else a TileMap/TileMapLayer used rect, else the
-##      1280x720 dev room. A level smaller than the screen on an axis is centred on that axis
-##      (same rule main.gd used), so the view never leaves `limits`.
+##      1280x720 dev room. A level smaller than the world view (viewport / zoom) on an axis is
+##      centred on that axis (same rule main.gd used), so the view never leaves `limits`.
 ##   2. follows the boy itself (built-in smoothing is switched off): critically damped per axis,
 ##      X quick, Y slower and speed capped, so a stair climb glides and never lurches. The target
 ##      is clamped to the limits BEFORE smoothing, so the view never winds up against a wall.
@@ -96,11 +97,18 @@ static func camera_limits(cam: Camera2D) -> Rect2:
 			Vector2(cam.limit_right - cam.limit_left, cam.limit_bottom - cam.limit_top))
 
 
-## World px the camera's viewport shows.
+## World px the camera's viewport shows (viewport size / zoom).
 static func view_size(cam: Camera2D) -> Vector2:
 	var vp := cam.get_viewport()
 	var size := vp.get_visible_rect().size if vp else Vector2(1280, 720)
 	return size / cam.zoom
+
+
+## Zoom from a skin (default 3). Never zero or negative.
+static func zoom_from_skin(s: HudSkin = null) -> float:
+	if s == null:
+		s = HudSkin.load_default()
+	return maxf(s.camera_zoom, 0.01)
 
 
 ## One axis of Unity-style SmoothDamp (critically damped spring, no overshoot): returns
@@ -166,6 +174,7 @@ func adopt(cam: Camera2D, target: Node2D = null) -> void:
 func refresh_limits() -> void:
 	if _cam == null or not is_instance_valid(_cam):
 		return
+	_apply_zoom(_cam)
 	_nav = LevelNav.current
 	var r := level_bounds_for(get_tree())
 	bounds = r[0]
@@ -229,7 +238,7 @@ func _process(delta: float) -> void:
 	if cam != _cam:
 		adopt(cam, _target)
 		return
-	if LevelNav.current != _nav:
+	if LevelNav.current != _nav or not cam.zoom.is_equal_approx(Vector2(_zoom(), _zoom())):
 		refresh_limits()
 	var t := follow_target()
 	if t == null:
@@ -245,6 +254,17 @@ func _process(delta: float) -> void:
 	center = Vector2(sx[0], sy[0])
 	velocity = Vector2(sx[1], sy[1])
 	_apply()
+
+
+func _zoom() -> float:
+	if skin == null:
+		skin = HudSkin.load_default()
+	return zoom_from_skin(skin)
+
+
+func _apply_zoom(cam: Camera2D) -> void:
+	var z := _zoom()
+	cam.zoom = Vector2(z, z)
 
 
 ## Put the camera at `center` (follow + nudge, already inside the limits); no separate offset.

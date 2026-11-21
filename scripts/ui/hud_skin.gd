@@ -68,6 +68,10 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 @export var nudge_speed: float = 4.0
 
 @export_group("Camera rig")
+## Gameplay camera zoom. 3.0 frames one 160px floor plus a bit of the floors above
+## and below in the 720px viewport (world view 1280/3 × 240). Tunable; 1 is the old
+## three-floor framing.
+@export var camera_zoom: float = 3.0
 ## Critically damped follow, seconds to (mostly) settle per axis. X ≈ the old Camera2D
 ## smoothing speed 6; Y is slower so a floor change (stairs) glides instead of lurching.
 @export var camera_smooth_x: float = 0.18

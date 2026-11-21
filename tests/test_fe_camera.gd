@@ -15,6 +15,9 @@ func run_all() -> Dictionary:
 		["bounds_come_from_level_nav_layout", test_bounds_level_nav],
 		["seed_readout_text_format", test_readout_text],
 		["rig_and_readout_disconnect_on_exit_tree", test_disconnect],
+		["default_camera_zoom_is_3", test_default_zoom],
+		["limits_and_clamp_use_viewport_over_zoom", test_zoomed_view_limits],
+		["arrows_fire_for_chasers_outside_the_zoomed_view", test_arrows_zoomed_view],
 	]
 	for c in checks:
 		var err: String = c[1].call()
@@ -187,4 +190,114 @@ func test_disconnect() -> String:
 		err = "readout must disconnect on _exit_tree"
 	r.free()
 	bus.free()
+	return err
+
+func test_default_zoom() -> String:
+	var fresh := HudSkin.new()
+	if not is_equal_approx(fresh.camera_zoom, 3.0):
+		return "HudSkin.camera_zoom default should be 3.0, got %s" % fresh.camera_zoom
+	var loaded := HudSkin.load_default()
+	if not is_equal_approx(loaded.camera_zoom, 3.0):
+		return "load_default camera_zoom should be 3.0, got %s" % loaded.camera_zoom
+	if not is_equal_approx(CameraRig.zoom_from_skin(fresh), 3.0):
+		return "zoom_from_skin should read the knob"
+	var zero := HudSkin.new()
+	zero.camera_zoom = 0.0
+	if CameraRig.zoom_from_skin(zero) <= 0.0:
+		return "zoom_from_skin must never return 0"
+	return ""
+
+
+func test_zoomed_view_limits() -> String:
+	# 1280x720 at zoom 3 → world view ≈ 426.67 × 240. One floor is 160px, so the view
+	# shows one floor plus 40px of the floors above and below.
+	var view := Vector2(1280, 720) / 3.0
+	if absf(view.y - 240.0) > 0.01:
+		return "zoom 3 world view height should be 240, got %s" % view
+	var tall := Rect2(0, -480, 2000, 496)   # typical 3-4 floor stage: taller than 240, wider than 427
+	var l := CameraRig.limits_for(tall, view)
+	if l != tall:
+		return "when the level covers the zoomed view, limits %s should equal bounds %s" % [l, tall]
+	var c := CameraRig.clamp_center(Vector2(-100, 900), l, view)
+	var want := Vector2(l.position.x + view.x / 2.0, l.end.y - view.y / 2.0)
+	if c.distance_to(want) > 0.01:
+		return "bottom-left clamp at zoom 3: %s, want %s" % [c, want]
+	# A level smaller than the zoomed view is still centred and pins the view.
+	var tiny := Rect2(100, 100, 80, 80)
+	var lt := CameraRig.limits_for(tiny, view)
+	if lt.size.x < view.x - 0.01 or lt.size.y < view.y - 0.01:
+		return "tiny level limits %s smaller than the zoomed view %s" % [lt, view]
+	var a := CameraRig.clamp_center(Vector2(-9999, -9999), lt, view)
+	var b := CameraRig.clamp_center(Vector2(9999, 9999), lt, view)
+	if a.distance_to(b) > 2.0:
+		return "tiny level must pin the zoomed view centre (%s vs %s)" % [a, b]
+	return ""
+
+
+## A chaser one floor away is on-screen at zoom 1 (half-height 360) and off the
+## zoomed view at zoom 3 (half-height 120), so it must get an arrow at 3 and lose
+## it when zoom returns to 1. Same for a horizontal chaser just outside the zoomed width.
+func test_arrows_zoomed_view() -> String:
+	var tree := Engine.get_main_loop() as SceneTree
+	var bus: Node = load("res://scripts/ui/fe_signals.gd").new()
+	tree.root.add_child(bus)
+	var skin := HudSkin.new()
+	skin.camera_zoom = 3.0
+	var cam := Camera2D.new()
+	cam.enabled = true
+	cam.zoom = Vector2(3, 3)
+	tree.root.add_child(cam)
+	cam.make_current()
+	cam.global_position = Vector2.ZERO
+	cam.force_update_scroll()
+	var boy := Node2D.new()
+	boy.add_to_group(&"player")
+	tree.root.add_child(boy)
+	boy.global_position = Vector2.ZERO
+	var arrows = load("res://scripts/ui/offscreen_arrows.gd").new()
+	arrows.skin = skin
+	arrows.bus = bus
+	tree.root.add_child(arrows)
+	var floor_e := Node2D.new()
+	tree.root.add_child(floor_e)
+	floor_e.global_position = Vector2(0, -160)   # one floor above
+	var near_e := Node2D.new()
+	tree.root.add_child(near_e)
+	near_e.global_position = Vector2(80, 0)   # on-screen even at zoom 3 (half-width ≈ 213)
+	bus.report_chase(floor_e, true)
+	bus.report_chase(near_e, true)
+	# Let the current camera settle into the canvas transform.
+	# _process of arrows is what we call ourselves.
+	arrows._process(0.0)
+	var ids := func() -> Array:
+		return arrows.arrows.map(func(x): return x["enemy"])
+	var err := ""
+	if not ids.call().has(floor_e):
+		err = "chaser one floor away must get an arrow at zoom 3, got %s" % [ids.call()]
+	if err.is_empty() and ids.call().has(near_e):
+		err = "nearby same-floor chaser must not get an arrow while on the zoomed view"
+	# Zoom 1: the floor-away chaser is now inside the 720px view, arrow should go.
+	if err.is_empty():
+		cam.zoom = Vector2.ONE
+		cam.force_update_scroll()
+		arrows._process(0.0)
+		if ids.call().has(floor_e):
+			err = "at zoom 1 the same one-floor chaser is on-screen and must lose its arrow"
+	# Restore zoom 3: arrow returns. Also a chaser just past the zoomed half-width.
+	if err.is_empty():
+		cam.zoom = Vector2(3, 3)
+		cam.force_update_scroll()
+		var side_e := Node2D.new()
+		tree.root.add_child(side_e)
+		side_e.global_position = Vector2(300, 0)   # 300 > 1280/3/2 ≈ 213, < 640
+		bus.report_chase(side_e, true)
+		arrows._process(0.0)
+		if not ids.call().has(floor_e) or not ids.call().has(side_e):
+			err = "zoom 3 must arrow a one-floor chaser and a just-off-horizontal chaser, got %s" % [ids.call()]
+		if err.is_empty() and ids.call().has(near_e):
+			err = "on-view chaser must stay un-arrowed"
+		side_e.free()
+	for n in [arrows, cam, boy, floor_e, near_e, bus]:
+		if is_instance_valid(n):
+			n.free()
 	return err

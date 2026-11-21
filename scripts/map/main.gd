@@ -110,16 +110,21 @@ func _build_backdrop() -> void:
 		$World.add_child(dark)
 
 
-## Follows the boy at zoom 1 (NoiseBus radii assume it), clamped to the level; a level
-## smaller than the screen is centred on that axis.
+## Follows the boy, clamped to the level; a level smaller than the world view
+## (viewport / zoom) is centred on that axis. Zoom is HudSkin.camera_zoom (default 3:
+## one floor plus a bit of the floors above/below). CameraRig reapplies the same zoom
+## and recomputes limits from viewport/zoom. (NoiseBus radii and PlayerStats.is_off_screen
+## still assume a 1280x720 view — listed for BE / Lead.)
 func _build_camera() -> void:
 	var cam := Camera2D.new()
 	cam.name = "Camera2D"
 	cam.enabled = true
 	cam.position_smoothing_enabled = true
 	cam.position_smoothing_speed = 6.0
+	var z := CameraRig.zoom_from_skin()
+	cam.zoom = Vector2(z, z)
 	var b := _bounds()
-	var vs := get_viewport_rect().size
+	var vs := get_viewport_rect().size / cam.zoom
 	var c := b.get_center()
 	var lo := Vector2(minf(b.position.x, c.x - vs.x / 2), minf(b.position.y, c.y - vs.y / 2))
 	var hi := Vector2(maxf(b.end.x, c.x + vs.x / 2), maxf(b.end.y, c.y + vs.y / 2))
