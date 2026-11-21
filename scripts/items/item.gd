@@ -124,8 +124,8 @@ func carry_speed_mult(_held: Array) -> float:
 	return 1.0
 
 
-## Multiplier on a searching enemy's give-up drain (`off_screen`: the enemy is outside the
-## 1280x720 view around the boy).
+## Multiplier on a searching enemy's give-up drain (`off_screen`: the enemy is outside
+## the visible camera view; 1280x720 around the boy when no camera is present).
 func memory_drain_mult(_enemy: Node, _off_screen: bool) -> float:
 	return 1.0
 

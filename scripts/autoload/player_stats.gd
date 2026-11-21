@@ -260,7 +260,8 @@ func has_minimap() -> bool:
 
 
 # --- item behaviour dispatch (docs/BACKEND.md "Item behaviour hooks") ------------------
-## View size: an enemy farther than half of it from the boy (either axis) is off screen.
+## Fallback view when no Camera2D is current (headless tests): an enemy farther than
+## half of it from the boy (either axis) is off screen. Live play uses visible_world_rect().
 const SCREEN_SIZE := Vector2(1280, 720)
 
 
@@ -485,10 +486,52 @@ func copies(item_id: String) -> int:
 	return n
 
 
-## True if world point `p` is outside the view around `center` (the boy).
+## World-pixel rectangle the player can actually see.
+## With a current Camera2D: centred on `get_screen_center_position()` (already inside
+## the camera limits), size = viewport size / zoom (zoom is a Vector2).
+## With no camera (headless tests): `SCREEN_SIZE` (1280×720) centred on `center` (the boy).
+static func visible_world_rect(center: Vector2 = Vector2.ZERO) -> Rect2:
+	var cam := _active_camera()
+	if cam == null:
+		return Rect2(center - SCREEN_SIZE * 0.5, SCREEN_SIZE)
+	var vp := cam.get_viewport()
+	var px: Vector2 = vp.get_visible_rect().size if vp else SCREEN_SIZE
+	var z: Vector2 = cam.zoom
+	var size := Vector2(px.x / maxf(z.x, 0.01), px.y / maxf(z.y, 0.01))
+	var mid: Vector2 = cam.get_screen_center_position()
+	if cam.limit_enabled:
+		mid = _clamp_view_center(mid, cam, size)
+	return Rect2(mid - size * 0.5, size)
+
+
+## Keep a view-sized rectangle inside the camera's limit box. If a limit axis is
+## smaller than the view, centre on that axis (same rule as the FE rig).
+static func _clamp_view_center(mid: Vector2, cam: Camera2D, size: Vector2) -> Vector2:
+	var lo := Vector2(float(cam.limit_left), float(cam.limit_top))
+	var hi := Vector2(float(cam.limit_right), float(cam.limit_bottom))
+	return Vector2(_clamp_view_axis(mid.x, lo.x, hi.x, size.x), _clamp_view_axis(mid.y, lo.y, hi.y, size.y))
+
+
+static func _clamp_view_axis(v: float, lo: float, hi: float, length: float) -> float:
+	var a := lo + length * 0.5
+	var b := hi - length * 0.5
+	return (a + b) * 0.5 if a > b else clampf(v, a, b)
+
+
+static func _active_camera() -> Camera2D:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return null
+	var vp := tree.root.get_viewport()
+	return vp.get_camera_2d() if vp else null
+
+
+## True if world point `p` is outside the visible view. `center` is the boy, used
+## only when there is no current camera (the 1280×720 fallback). Edges are inclusive,
+## matching the old `|dx| > 640 or |dy| > 360` test.
 static func is_off_screen(p: Vector2, center: Vector2) -> bool:
-	var d := (p - center).abs()
-	return d.x > SCREEN_SIZE.x * 0.5 or d.y > SCREEN_SIZE.y * 0.5
+	var r := visible_world_rect(center)
+	return p.x < r.position.x or p.y < r.position.y or p.x > r.end.x or p.y > r.end.y
 
 
 ## New run. Keeps nothing: modifiers (all item effects) and owned items go.

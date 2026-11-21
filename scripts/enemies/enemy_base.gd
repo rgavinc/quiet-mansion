@@ -555,7 +555,7 @@ func stun_from_startle(t: float) -> void:
 	_stun_calm = true
 
 
-## Off screen relative to the boy (1280x720 view centred on him).
+## Off screen relative to the live camera view (fallback: 1280x720 centred on the boy).
 func is_off_screen() -> bool:
 	var p := _player()
 	return p != null and PlayerStats.is_off_screen(global_position, p.global_position)
