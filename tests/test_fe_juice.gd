@@ -22,6 +22,8 @@ func run_all() -> Dictionary:
 		["pause_and_hit_disconnect_on_exit", test_disconnect],
 		["occluders_attach_to_furniture_and_walls", test_occluders],
 		["beam_enables_shadows", test_beam_shadows],
+		["flashlight_beam_is_soft_and_keeps_shadows", test_soft_beam],
+		["control_hints_sit_in_the_bottom_hud_bar", test_hint_bar],
 		["vase_shatter_plays_on_noise_and_frees", test_shatter],
 		["decor_fx_attaches_to_fe_candle_and_fe_curtain_groups", test_decor],
 		["shop_panel_slide_resets_to_rest", test_shop_slide],
@@ -437,6 +439,76 @@ func test_beam_shadows() -> String:
 	elif beam.shadow_filter != Light2D.SHADOW_FILTER_PCF5:
 		err = "web-sane PCF5 filter expected"
 	_free([beam])
+	return err
+
+
+func test_soft_beam() -> String:
+	var fl := Node2D.new()
+	fl.set_script(load("res://scripts/player/flashlight.gd"))
+	_root().add_child(fl)
+	var err := ""
+	var beam := fl.get_node_or_null("Beam") as PointLight2D
+	if beam == null:
+		err = "missing Beam"
+	elif not beam.shadow_enabled or beam.shadow_filter != Light2D.SHADOW_FILTER_PCF5:
+		err = "shadows should stay on"
+	elif beam.texture == null:
+		err = "beam needs a cookie texture"
+	var cone := fl.get_node_or_null("Cone")
+	if err.is_empty():
+		if cone is Polygon2D:
+			err = "Cone must not be a hard-edged Polygon2D"
+		elif cone == null:
+			err = "missing Cone haze"
+		elif (cone as CanvasItem).material == null:
+			err = "Cone should use a shader material for the soft falloff"
+	if err.is_empty() and fl.get_node_or_null("Dust") == null:
+		err = "missing Dust motes"
+	if err.is_empty():
+		var ps := _root().get_node_or_null("PlayerStats")
+		if ps and ps.has_method(&"get_stat"):
+			if not is_equal_approx(float(ps.get_stat(&"light_range")), 260.0):
+				err = "light_range must stay 260, got %s" % ps.get_stat(&"light_range")
+			elif not is_equal_approx(float(ps.get_stat(&"light_angle_deg")), 40.0):
+				err = "light_angle_deg must stay 40, got %s" % ps.get_stat(&"light_angle_deg")
+	# Hard triangle vertices from the old fallback must not be in the script.
+	if err.is_empty():
+		var src := FileAccess.get_file_as_string("res://scripts/player/flashlight.gd")
+		if src.contains("Vector2(160, -42)") or src.contains("Vector2(160, 42)"):
+			err = "flashlight.gd still builds the hard-edged triangle"
+	# GLES3 rejects `return` inside fragment(); a failed compile leaves the cone quad visible.
+	if err.is_empty():
+		var sh := FileAccess.get_file_as_string("res://assets/shaders/flashlight_beam.gdshader")
+		if sh.contains("return;"):
+			err = "flashlight_beam.gdshader must not use return in fragment()"
+	_free([fl])
+	return err
+
+
+func test_hint_bar() -> String:
+	var hud = load("res://scripts/ui/hud.gd").new()
+	_root().add_child(hud)
+	var err := ""
+	var bar := hud.get_node_or_null("HudRoot/HintBar") as Control
+	if bar == null:
+		err = "missing HintBar"
+	elif bar.anchor_top < 0.99 or bar.anchor_bottom < 0.99:
+		err = "HintBar should be anchored to the bottom (anchors %s, %s)" % [bar.anchor_top, bar.anchor_bottom]
+	var hint := Label.new()
+	hint.name = "Hint"
+	hint.text = "Space jump · RMB flashlight on/off · hold LMB pick up · tap LMB throw/knock · scroll items"
+	if err.is_empty():
+		hud.mount_control_hint(hint)
+		if hint.get_parent() != bar:
+			err = "control hint should be parented to HintBar, got %s" % hint.get_parent()
+	if err.is_empty():
+		var owned = hud.get_node_or_null("HudRoot/OwnedItems")
+		if owned and owned.position.y > 80.0:
+			err = "owned items should sit under the hearts, not a top hint; y=%s" % owned.position.y
+	var src := FileAccess.get_file_as_string("res://scripts/map/main.gd")
+	if err.is_empty() and src.contains("Vector2(16, 64)"):
+		err = "main.gd still places the hint under the hearts at (16, 64)"
+	_free([hud])
 	return err
 
 
