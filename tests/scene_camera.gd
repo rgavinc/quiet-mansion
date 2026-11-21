@@ -82,6 +82,15 @@ func _inside(cam: Camera2D) -> String:
 	return ""
 
 
+func _fy(rig: CameraRig) -> float:
+	return CameraRig.floor_y_of(rig.skin if rig else null)
+
+
+## Clamped follow target: boy + floor-y framing (+ optional nudge).
+func _goal(pos: Vector2, rig: CameraRig, view: Vector2, extra := Vector2.ZERO) -> Vector2:
+	return CameraRig.clamp_center(pos + CameraRig.follow_offset(view, _fy(rig)) + extra, rig.limits, view)
+
+
 func _limits_on_levels(tree: SceneTree) -> String:
 	for lv in LEVELS:
 		var m: Node = await _boot(tree, lv[0], lv[1])
@@ -92,21 +101,23 @@ func _limits_on_levels(tree: SceneTree) -> String:
 		if cam == null:
 			err = "no current camera"
 		else:
-			var want := CameraRig.limits_for(b, CameraRig.view_size(cam))
+			var view := CameraRig.view_size(cam)
+			var want := CameraRig.limits_for(b, view, _fy(_rig(m)))
 			if not cam.zoom.is_equal_approx(Vector2(3, 3)):
 				err = "default zoom should be 3, got %s" % cam.zoom
 			elif CameraRig.camera_limits(cam) != want:
-				err = "limits %s, want %s (bounds %s, view %s)" % [CameraRig.camera_limits(cam), want, b, CameraRig.view_size(cam)]
+				err = "limits %s, want %s (bounds %s, view %s)" % [CameraRig.camera_limits(cam), want, b, view]
 			elif _rig(m).bounds != b or _rig(m).bounds_source != &"level_nav":
 				err = "rig bounds %s (%s) differ from the built level's %s" % [_rig(m).bounds, _rig(m).bounds_source, b]
 			elif cam.position_smoothing_enabled:
 				err = "built-in smoothing must be off (the rig follows)"
 			if err.is_empty():
 				var lim := CameraRig.camera_limits(cam)
-				var view := CameraRig.view_size(cam)
-				for axis in [0, 1]:
-					if b.size[axis] >= view[axis] and (lim.position[axis] != b.position[axis] or lim.end[axis] != b.end[axis]):
-						err = "axis %d: level covers the zoomed view, limits %s must equal bounds %s" % [axis, lim, b]
+				# X still matches bounds when the level covers the view. Y may pad below for floor_y.
+				if b.size.x >= view.x and (lim.position.x != b.position.x or lim.end.x != b.end.x):
+					err = "x: level covers the zoomed view, limits %s must equal bounds %s" % [lim, b]
+				elif b.size.y >= view.y and (lim.position.y != b.position.y or lim.end.y < b.end.y - 0.01):
+					err = "y: limits %s must cover bounds %s (bottom may be padded for framing)" % [lim, b]
 		if err.is_empty():
 			err = _inside(cam)
 		await _unload(tree, m)
@@ -121,7 +132,7 @@ func _snap_then_ease(tree: SceneTree) -> String:
 	var rig := _rig(m)
 	var p: Node2D = m.get("built").player
 	var cam := tree.root.get_viewport().get_camera_2d()
-	var want := CameraRig.clamp_center(p.global_position, rig.limits, CameraRig.view_size(cam))
+	var want := _goal(p.global_position, rig, CameraRig.view_size(cam))
 	if rig.center.distance_to(want) > 6.0 or cam.get_screen_center_position().distance_to(rig.center) > EPS:
 		err = "stage start must snap: centre %s, screen %s, boy %s -> %s" % [rig.center, cam.get_screen_center_position(), p.global_position, want]
 	if err.is_empty() and rig.velocity != Vector2.ZERO:
@@ -139,14 +150,14 @@ func _snap_then_ease(tree: SceneTree) -> String:
 			err = "mid-level the view must ease, moved %.1fpx in a frame" % step
 		for i in 120:
 			await tree.process_frame
-		var goal := CameraRig.clamp_center(p.global_position, rig.limits, CameraRig.view_size(cam))
+		var goal := _goal(p.global_position, rig, CameraRig.view_size(cam))
 		if err.is_empty() and rig.center.distance_to(goal) > 1.0:
 			err = "view should settle on the boy: %s vs %s" % [rig.center, goal]
 		if err.is_empty():
 			p.global_position += Vector2(400, 0)
 			rig.snap()
-			if rig.center.distance_to(CameraRig.clamp_center(p.global_position, rig.limits, CameraRig.view_size(cam))) > 0.01:
-				err = "snap() must jump to the boy"
+			if rig.center.distance_to(_goal(p.global_position, rig, CameraRig.view_size(cam))) > 0.01:
+				err = "snap() must jump to the framed follow target"
 	await _unload(tree, m)
 	if not err.is_empty():
 		return err
@@ -154,7 +165,7 @@ func _snap_then_ease(tree: SceneTree) -> String:
 	var m2: Node = await _boot(tree, 99, 2, 1)
 	var p2: Node2D = m2.get("built").player
 	var r2 := _rig(m2)
-	if r2.center.distance_to(CameraRig.clamp_center(p2.global_position, r2.limits, CameraRig.view_size(tree.root.get_viewport().get_camera_2d()))) > 6.0:
+	if r2.center.distance_to(_goal(p2.global_position, r2, CameraRig.view_size(tree.root.get_viewport().get_camera_2d()))) > 6.0:
 		err = "new run / stage 2 camera did not snap: %s" % r2.center
 	await _unload(tree, m2)
 	return err
@@ -399,15 +410,21 @@ func _tall_stair(tree: SceneTree) -> String:
 	boy.global_position = Vector2(800, 0)   # floor 0 surface
 	await tree.process_frame
 	await tree.process_frame
-	if CameraRig.camera_limits(cam) != b:
-		err = "tall level limits %s should equal bounds %s" % [CameraRig.camera_limits(cam), b]
+	var want_lim := CameraRig.limits_for(b, CameraRig.view_size(cam), _fy(rig))
+	if CameraRig.camera_limits(cam) != want_lim:
+		err = "tall level limits %s should equal limits_for %s (bounds %s)" % [CameraRig.camera_limits(cam), want_lim, b]
 	if err.is_empty():
 		var view0 := CameraRig.view_size(cam)
-		if rig.center.y < b.end.y - view0.y / 2.0 - 1.0 and rig.center.distance_to(CameraRig.clamp_center(boy.global_position, rig.limits, view0)) > 1.0:
-			err = "tall level: start must snap to the boy (%s)" % rig.center
+		if rig.center.distance_to(_goal(boy.global_position, rig, view0)) > 1.0:
+			err = "tall level: start must snap to the framed follow target (%s)" % rig.center
 	# Climb: 90px/s along a stair that rises 160px over 144px, 3 stairs with a short walk between.
 	var enemy := _fake_enemy(tree, Vector2(800, -3000))   # pulls the nudge up the whole time
 	bus.select_enemy(enemy)
+	# Floor-y framing plus the nudge must settle first. At the bottom floor the
+	# padded limits now let the nudge pull the view up; measuring that ease-in
+	# as "faster than the boy" would be a false fail.
+	for i in 180:
+		await tree.process_frame
 	var vy_max_boy := 90.0 * 160.0 / sqrt(160.0 * 160.0 + 144.0 * 144.0)
 	var dt := 1.0 / 60.0
 	var prev := rig.center
@@ -480,7 +497,7 @@ func _tall_stair(tree: SceneTree) -> String:
 	if err.is_empty():
 		for i in 240:
 			await tree.process_frame
-		var goal := CameraRig.clamp_center(boy.global_position + rig.nudge_offset(), rig.limits, CameraRig.view_size(cam))   # nudge still held
+		var goal := _goal(boy.global_position, rig, CameraRig.view_size(cam), rig.nudge_offset())   # nudge still held
 		if rig.center.distance_to(goal) > 1.0:
 			err = "view should settle on the boy (+ nudge) at the top: %s vs %s" % [rig.center, goal]
 		if err.is_empty():
@@ -523,7 +540,7 @@ func _readout(tree: SceneTree) -> String:
 			return "seed %d stage %d: %s" % [lv[0], lv[1], err]
 	return ""
 
-## Default zoom 3 on a real stage 1: camera centred on the boy, world view is one
+## Default zoom 3 on a real stage 1: camera framed on the boy (floor at camera_floor_y), world view is one
 ## floor (160px) plus a bit of the floors above/below (240px tall).
 func _zoom_center(tree: SceneTree) -> String:
 	var m: Node = await _boot(tree, 7, 1, 4)
@@ -539,9 +556,14 @@ func _zoom_center(tree: SceneTree) -> String:
 		var view := CameraRig.view_size(cam)
 		if absf(view.y - 240.0) > 1.0 or absf(view.x - 1280.0 / 3.0) > 1.0:
 			err = "world view should be 1280/3 × 240, got %s" % view
-		var want := CameraRig.clamp_center(p.global_position, rig.limits, view)
+		var want := _goal(p.global_position, rig, view)
 		if err.is_empty() and rig.center.distance_to(want) > 6.0:
-			err = "camera should be centred on the boy: centre %s, want %s (boy %s)" % [rig.center, want, p.global_position]
+			err = "camera should be framed on the boy: centre %s, want %s (boy %s, floor_y %s)" % [rig.center, want, p.global_position, _fy(rig)]
+		if err.is_empty():
+			# On a typical start (bottom floor) the padded limits let the floor sit at ~0.7.
+			var ratio := (p.global_position.y - (rig.center.y - view.y / 2.0)) / view.y
+			if absf(ratio - _fy(rig)) > 0.08:
+				err = "boy should sit near camera_floor_y=%s of the view, got %s" % [_fy(rig), ratio]
 		if err.is_empty():
 			err = _inside(cam)
 	await _unload(tree, m)
@@ -557,9 +579,9 @@ func _zoom_clamp(tree: SceneTree) -> String:
 	var b: Rect2 = m.get("built").bounds
 	var view := CameraRig.view_size(cam)
 	var err := ""
-	var want_lim := CameraRig.limits_for(b, view)
+	var want_lim := CameraRig.limits_for(b, view, _fy(rig))
 	if CameraRig.camera_limits(cam) != want_lim:
-		err = "limits %s should be limits_for(bounds, viewport/zoom %s) = %s" % [CameraRig.camera_limits(cam), view, want_lim]
+		err = "limits %s should be limits_for(bounds, viewport/zoom %s, floor_y) = %s" % [CameraRig.camera_limits(cam), view, want_lim]
 	var corners := [
 		["left", Vector2(b.position.x + 8, p.global_position.y)],
 		["right", Vector2(b.end.x - 8, p.global_position.y)],
@@ -571,9 +593,14 @@ func _zoom_clamp(tree: SceneTree) -> String:
 			break
 		p.global_position = c[1]
 		p.velocity = Vector2.ZERO
+		# Let the body land / get pushed out of geometry before we snap; otherwise
+		# one physics tick moves the boy and (with floor_y framing unclamped at the
+		# bottom) the follow target moves with him while rig.center is still stale.
+		for i in 8:
+			await tree.process_frame
+		p.velocity = Vector2.ZERO
 		rig.snap()
-		await tree.process_frame
-		var want := CameraRig.clamp_center(p.global_position, rig.limits, view)
+		var want := rig.follow_goal()
 		if rig.center.distance_to(want) > 1.0:
 			err = "%s edge: centre %s, want clamped %s" % [c[0], rig.center, want]
 		if err.is_empty():
@@ -596,26 +623,31 @@ func _zoom_arrows(tree: SceneTree) -> String:
 	var bus := UiArt.bus()
 	var err := ""
 	var view := CameraRig.view_size(cam)
-	# Park the boy where the zoomed view can actually centre on him. A start on
-	# the bottom floor clamps the camera upward, and one floor above would still
-	# be visible. Mid-level, 160px is past the 120px half-height.
+	# Park the boy mid-level so the framed view can actually sit at camera_floor_y
+	# (a start on the bottom floor used to clamp the camera). Place the chaser
+	# just past the *true* top of that view — at floor_y 0.7 a one-floor chaser
+	# is now on-screen (168 px visible above the boy).
 	p.velocity = Vector2.ZERO
-	p.global_position = CameraRig.clamp_center(m.get("built").bounds.get_center(), rig.limits, view)
+	# Mid-level so framing has room above and below (a start on the bottom floor
+	# is a different case, covered by the floor_y unit test).
+	p.global_position = m.get("built").bounds.get_center()
 	rig.snap()
 	await tree.process_frame
-	var e := _fake_enemy(tree, p.global_position + Vector2(0, -160))
+	var half := CameraRig.view_size(cam) / 2.0
+	var cam_c := cam.get_screen_center_position()
+	var e := _fake_enemy(tree, Vector2(p.global_position.x, cam_c.y - half.y - 40.0))
 	bus.report_chase(e, true)
 	await tree.process_frame
 	arrows._process(0.0)
 	var has := func(en) -> bool:
 		return arrows.arrows.any(func(a): return a["enemy"] == en)
-	# Precondition: the chaser is outside the zoomed screen.
+	# Precondition: the chaser is outside the zoomed, framed screen.
 	var xf := cam.get_viewport().get_canvas_transform()
 	var vp := arrows.get_viewport_rect()
 	if vp.grow(-4.0).has_point(xf * e.global_position):
-		err = "setup: one-floor chaser should be off the zoomed view (screen %s, view %s, cam %s, boy %s)" % [xf * e.global_position, vp, cam.get_screen_center_position(), p.global_position]
+		err = "setup: chaser should be off the framed zoomed view (screen %s, view %s, cam %s, boy %s)" % [xf * e.global_position, vp, cam.get_screen_center_position(), p.global_position]
 	elif not has.call(e):
-		err = "chaser one floor away must get an arrow at zoom 3 (arrows %d)" % arrows.arrows.size()
+		err = "chaser past the framed view must get an arrow at zoom 3 (arrows %d)" % arrows.arrows.size()
 	# Zoom 1: that puppet sits inside the 720px view, so the arrow must go.
 	if err.is_empty():
 		rig.skin.camera_zoom = 1.0
@@ -624,7 +656,7 @@ func _zoom_arrows(tree: SceneTree) -> String:
 		await tree.process_frame
 		arrows._process(0.0)
 		if has.call(e):
-			err = "at zoom 1 the one-floor chaser is on-screen and must lose its arrow"
+			err = "at zoom 1 the same chaser is on-screen and must lose its arrow"
 	# Back to 3: arrow returns. Also a chaser on this floor, just past the zoomed half-width.
 	if err.is_empty():
 		rig.skin.camera_zoom = 3.0
@@ -635,7 +667,7 @@ func _zoom_arrows(tree: SceneTree) -> String:
 		await tree.process_frame
 		arrows._process(0.0)
 		if not has.call(e) or not has.call(side):
-			err = "zoom 3 must arrow a one-floor chaser and a just-off-horizontal chaser (n=%d)" % arrows.arrows.size()
+			err = "zoom 3 must arrow a past-the-view chaser and a just-off-horizontal chaser (n=%d)" % arrows.arrows.size()
 		bus.report_chase(side, false)
 		side.queue_free()
 	bus.report_chase(e, false)

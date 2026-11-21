@@ -112,9 +112,10 @@ func _build_backdrop() -> void:
 
 ## Follows the boy, clamped to the level; a level smaller than the world view
 ## (viewport / zoom) is centred on that axis. Zoom is HudSkin.camera_zoom (default 3:
-## one floor plus a bit of the floors above/below). CameraRig reapplies the same zoom
-## and recomputes limits from viewport/zoom. (NoiseBus radii and PlayerStats.is_off_screen
-## still assume a 1280x720 view — listed for BE / Lead.)
+## one floor plus a bit of the floors above/below). Floor framing is
+## HudSkin.camera_floor_y (default 0.7). CameraRig reapplies the same zoom and
+## framing and recomputes limits from viewport/zoom. (NoiseBus radii and
+## PlayerStats.is_off_screen still assume a 1280x720 view — listed for BE / Lead.)
 func _build_camera() -> void:
 	var cam := Camera2D.new()
 	cam.name = "Camera2D"
@@ -125,10 +126,11 @@ func _build_camera() -> void:
 	cam.zoom = Vector2(z, z)
 	var b := _bounds()
 	var vs := get_viewport_rect().size / cam.zoom
-	var c := b.get_center()
-	var lo := Vector2(minf(b.position.x, c.x - vs.x / 2), minf(b.position.y, c.y - vs.y / 2))
-	var hi := Vector2(maxf(b.end.x, c.x + vs.x / 2), maxf(b.end.y, c.y + vs.y / 2))
-	_view = Rect2(lo, hi - lo)
+	# Same limits the rig will apply (zoom + floor-y pad), so the backdrop covers the framed view.
+	var lim := CameraRig.limits_for(b, vs, CameraRig.floor_y_of())
+	var lo := lim.position
+	var hi := lim.end
+	_view = lim
 	cam.limit_left = int(lo.x)
 	cam.limit_top = int(lo.y)
 	cam.limit_right = int(hi.x)
@@ -137,7 +139,7 @@ func _build_camera() -> void:
 	if p:
 		p.add_child(cam)
 	else:
-		cam.position = c
+		cam.position = b.get_center()
 		add_child(cam)
 
 

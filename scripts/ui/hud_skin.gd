@@ -72,6 +72,9 @@ const DEFAULT_PATH := "res://assets/ui/hud_skin.tres"
 ## and below in the 720px viewport (world view 1280/3 × 240). Tunable; 1 is the old
 ## three-floor framing.
 @export var camera_zoom: float = 3.0
+## 0 = top of the view, 1 = bottom. The boy's feet / current floor sit this far
+## down the screen. 0.7 leaves more of the room visible above him (Dead Cells).
+@export var camera_floor_y: float = 0.7
 ## Critically damped follow, seconds to (mostly) settle per axis. X ≈ the old Camera2D
 ## smoothing speed 6; Y is slower so a floor change (stairs) glides instead of lurching.
 @export var camera_smooth_x: float = 0.18
